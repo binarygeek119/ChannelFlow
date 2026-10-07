@@ -31,7 +31,7 @@ public sealed class QuickPinService
         _logger = logger;
     }
 
-    public async Task<QuickPinDeliverResult> RedeemAsync(string? pin, string m3u, string xmltv, CancellationToken cancellationToken)
+    public async Task<QuickPinDeliverResult> RedeemAsync(string? pin, QuickPinUrls urls, CancellationToken cancellationToken)
     {
         if (!TryRateLimit())
         {
@@ -47,7 +47,7 @@ public sealed class QuickPinService
         string ciphertext;
         try
         {
-            ciphertext = Encrypt(normalized, m3u, xmltv);
+            ciphertext = Encrypt(normalized, urls);
         }
         catch (Exception)
         {
@@ -101,12 +101,16 @@ public sealed class QuickPinService
         return new string(chars);
     }
 
-    internal static string Encrypt(string pin, string m3u, string xmltv)
+    internal static string Encrypt(string pin, QuickPinUrls urls)
     {
         var plaintext = JsonSerializer.Serialize(new Dictionary<string, string>
         {
-            ["m3u"] = m3u,
-            ["xmltv"] = xmltv,
+            ["m3u"] = urls.M3u,
+            ["xmltv"] = urls.Xmltv,
+            ["m3uPublic"] = urls.M3uPublic,
+            ["xmltvPublic"] = urls.XmltvPublic,
+            ["m3uLocal"] = urls.M3uLocal,
+            ["xmltvLocal"] = urls.XmltvLocal,
         });
         var key = SHA256.HashData(Encoding.ASCII.GetBytes(KeySeedPrefix + pin));
         var nonce = RandomNumberGenerator.GetBytes(12);
@@ -143,6 +147,17 @@ public sealed class QuickPinService
         }
     }
 }
+
+/// <summary>
+/// URL set delivered to a paired app: primary links plus both public and local variants.
+/// </summary>
+public sealed record QuickPinUrls(
+    string M3u,
+    string Xmltv,
+    string M3uPublic,
+    string XmltvPublic,
+    string M3uLocal,
+    string XmltvLocal);
 
 public readonly record struct QuickPinDeliverResult(bool Ok, int StatusCode, string Message)
 {

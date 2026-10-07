@@ -18,7 +18,6 @@ public class AiChannelAutoApplyService
     private static CancellationTokenSource? _generateAllCts;
     private static int _generateAllWorkerActive;
 
-    private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
     private readonly LineupGeneratorService _playoutGenerator;
     private readonly PlayoutBuilderService _playoutBuilder;
@@ -27,7 +26,6 @@ public class AiChannelAutoApplyService
     private readonly ILogger<AiChannelAutoApplyService> _logger;
 
     public AiChannelAutoApplyService(
-        FinTvDbContext db,
         AiLineupGeneratorService generator,
         LineupGeneratorService playoutGenerator,
         PlayoutBuilderService playoutBuilder,
@@ -35,13 +33,18 @@ public class AiChannelAutoApplyService
         ChannelCatalogPoolService pool,
         ILogger<AiChannelAutoApplyService> logger)
     {
-        _db = db;
         _generator = generator;
         _playoutGenerator = playoutGenerator;
         _playoutBuilder = playoutBuilder;
         _scopeFactory = scopeFactory;
         _pool = pool;
         _logger = logger;
+    }
+
+    private FinTvDbContext CreateDbContext()
+    {
+        var scope = _scopeFactory.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
     }
 
     public static bool IsEligible(Channel channel)
@@ -57,7 +60,8 @@ public class AiChannelAutoApplyService
 
     public async Task ApplyDefaultSettingsAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
-        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
+        using var db = CreateDbContext();
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
         var tag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
@@ -81,7 +85,7 @@ public class AiChannelAutoApplyService
             channel.AiPlayoutTemplateId = AiPlayoutTemplates.NoneId;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<AiAutoApplyChannelResult> TryAutoApplyForChannelAsync(
@@ -114,8 +118,9 @@ public class AiChannelAutoApplyService
     {
         Channel? channel;
         using (await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken))
+        using (var db = CreateDbContext())
         {
-            channel = await _db.Channels.AsNoTracking()
+            channel = await db.Channels.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
             if (channel is null)
             {
@@ -138,10 +143,10 @@ public class AiChannelAutoApplyService
             try
             {
                 await ApplyDefaultSettingsAsync(channelId, cancellationToken);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
 
                 var preview = await _generator.GenerateAsync(channelId, null, cancellationToken);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
                 FinTvDebugLog.Ai(
                     _logger,
                     "Generated preview for {ChannelName}: {SlotCount} slots",
@@ -203,8 +208,9 @@ public class AiChannelAutoApplyService
         AiLineupPreviewResult? preview = null;
 
         using (await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken))
+        using (var db = CreateDbContext())
         {
-            channel = await _db.Channels.AsNoTracking()
+            channel = await db.Channels.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
             if (channel is null)
             {
@@ -242,9 +248,9 @@ public class AiChannelAutoApplyService
             try
             {
                 await ApplyDefaultSettingsAsync(channelId, cancellationToken);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
 
-                var liveChannel = await _db.Channels.FirstAsync(c => c.Id == channelId, cancellationToken);
+                var liveChannel = await db.Channels.FirstAsync(c => c.Id == channelId, cancellationToken);
                 ReportProgress(onProgress, new AiChannelBuildProgress
                 {
                     CurrentDay = 1,
@@ -266,10 +272,10 @@ public class AiChannelAutoApplyService
                         });
                     },
                     cancellationToken);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
 
                 preview = await _generator.GenerateAsync(channelId, providerOverride, cancellationToken);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
                 await _generator.ApplyAsync(
                     channelId,
                     preview.LineupSlots,
@@ -277,7 +283,7 @@ public class AiChannelAutoApplyService
                     _playoutGenerator,
                     cancellationToken,
                     preview.WeeklyLineups);
-                _db.ChangeTracker.Clear();
+                db.ChangeTracker.Clear();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -341,7 +347,7 @@ public class AiChannelAutoApplyService
 
                 try
                 {
-                    _db.ChangeTracker.Clear();
+                    db.ChangeTracker.Clear();
                     await BuildChannelPlayoutDayAsync(
                         channelId,
                         day,
@@ -553,7 +559,8 @@ public class AiChannelAutoApplyService
         try
         {
             var daysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
-            var channelRows = await _db.Channels
+            using var db = CreateDbContext();
+            var channelRows = await db.Channels
                 .AsNoTracking()
                 .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather && c.ContentType != ChannelContentType.News)
                 .OrderBy(c => c.Number)
@@ -692,8 +699,9 @@ public class AiChannelAutoApplyService
         Guid channelId,
         CancellationToken cancellationToken = default)
     {
+        using var db = CreateDbContext();
         var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
-        var existing = await _db.PlayoutItems
+        var existing = await db.PlayoutItems
             .Where(p => p.ChannelId == channelId && p.Finish > start)
             .ToListAsync(cancellationToken);
         if (existing.Count == 0)
@@ -703,9 +711,9 @@ public class AiChannelAutoApplyService
         }
 
         FinTvDebugLog.Ai(_logger, "Clearing {Count} future playout items for channel {ChannelId}", existing.Count, channelId);
-        _db.PlayoutItems.RemoveRange(existing);
-        await _db.SaveChangesAsync(cancellationToken);
-        _db.ChangeTracker.Clear();
+        db.PlayoutItems.RemoveRange(existing);
+        await db.SaveChangesAsync(cancellationToken);
+        db.ChangeTracker.Clear();
     }
 
     public async Task BuildChannelPlayoutDayAsync(
@@ -714,7 +722,8 @@ public class AiChannelAutoApplyService
         CancellationToken cancellationToken = default,
         bool interruptStream = true)
     {
-        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
+        using var db = CreateDbContext();
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
         var dayStart = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow, dayOffset);
@@ -735,7 +744,7 @@ public class AiChannelAutoApplyService
             cancellationToken,
             interruptStream);
 
-        var itemCount = await _db.PlayoutItems.CountAsync(
+        var itemCount = await db.PlayoutItems.CountAsync(
             p => p.ChannelId == channelId && p.Start >= dayStart && p.Start < dayEnd,
             cancellationToken);
         FinTvDebugLog.Ai(
@@ -754,7 +763,8 @@ public class AiChannelAutoApplyService
         CancellationToken cancellationToken = default)
     {
         using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
-        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        using var db = CreateDbContext();
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null || channel.ContentType is ChannelContentType.Weather or ChannelContentType.News || !IsEligible(channel))
         {
             return PlayoutHorizonMaintainResult.NeedsFullBuild;
@@ -788,7 +798,7 @@ public class AiChannelAutoApplyService
         }
 
         var nextDayOffset = daysToBuild - 1;
-        _db.ChangeTracker.Clear();
+        db.ChangeTracker.Clear();
         await BuildChannelPlayoutDayAsync(
             channelId,
             nextDayOffset,
@@ -816,7 +826,8 @@ public class AiChannelAutoApplyService
             return 0;
         }
 
-        var channels = await _db.Channels
+        using var db = CreateDbContext();
+        var channels = await db.Channels
             .AsNoTracking()
             .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather && c.ContentType != ChannelContentType.News)
             .OrderBy(c => c.Number)
@@ -854,13 +865,14 @@ public class AiChannelAutoApplyService
         int daysToBuild,
         CancellationToken cancellationToken)
     {
+        using var db = CreateDbContext();
         var now = DateTime.UtcNow;
         var coverage = new bool[daysToBuild];
         for (var day = 0; day < daysToBuild; day++)
         {
             var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day);
             var end = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day + 1);
-            coverage[day] = await _db.PlayoutItems
+            coverage[day] = await db.PlayoutItems
                 .AsNoTracking()
                 .AnyAsync(
                     p => p.ChannelId == channelId && p.Finish > start && p.Start < end,
@@ -899,7 +911,8 @@ public class AiChannelAutoApplyService
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
-        return await _db.PlayoutItems
+        using var db = CreateDbContext();
+        return await db.PlayoutItems
             .AsNoTracking()
             .Where(p => p.ChannelId == channelId && p.Finish > nowUtc)
             .Select(p => (DateTime?)p.Finish)
@@ -908,7 +921,8 @@ public class AiChannelAutoApplyService
 
     private async Task<bool> HasDefaultLineupAsync(Guid channelId, CancellationToken cancellationToken)
     {
-        return await _db.Lineups
+        using var db = CreateDbContext();
+        return await db.Lineups
             .AsNoTracking()
             .Where(l => l.ChannelId == channelId && l.IsDefault)
             .AnyAsync(l => l.Slots.Any(s => s.Candidates.Count > 0), cancellationToken);
@@ -1143,7 +1157,8 @@ public class AiChannelAutoApplyService
         await BulkApplyLock.WaitAsync(cancellationToken);
         try
         {
-            var channels = await _db.Channels
+            using var db = CreateDbContext();
+            var channels = await db.Channels
                 .AsNoTracking()
                 .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather && c.ContentType != ChannelContentType.News)
                 .OrderBy(c => c.Number)

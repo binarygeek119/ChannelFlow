@@ -437,6 +437,7 @@ public class NextIptvController : ControllerBase
                 HorizontalMarginPercent = 2,
                 VerticalMarginPercent = 2,
                 OpacityPercent = 100,
+                WithinSourceContent = true
             },
         ];
     }

@@ -271,4 +271,7 @@ public class NextGraphicsLayer
 
     [JsonPropertyName("opacity_percent")]
     public int? OpacityPercent { get; set; }
+
+    [JsonPropertyName("within_source_content")]
+    public bool? WithinSourceContent { get; set; }
 }

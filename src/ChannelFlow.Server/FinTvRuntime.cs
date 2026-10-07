@@ -92,7 +92,7 @@ public sealed class FinTvRuntime
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
-        var row = await db.AppSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await db.AppSettings.AsNoTracking().OrderBy(r => r.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null || string.IsNullOrWhiteSpace(row.Json))
         {
             _configuration = new PluginConfiguration();

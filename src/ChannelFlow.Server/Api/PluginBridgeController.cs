@@ -393,7 +393,7 @@ public class NewsController : ControllerBase
     [HttpGet("settings")]
     public async Task<ActionResult<object>> GetSettings(CancellationToken cancellationToken)
     {
-        var settings = await _db.NewsSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+        var settings = await _db.NewsSettings.AsNoTracking().OrderBy(s => s.Id).FirstOrDefaultAsync(cancellationToken)
             ?? new NewsSettings();
         return Ok(new
         {
@@ -420,7 +420,7 @@ public class NewsController : ControllerBase
     [HttpPut("settings")]
     public async Task<IActionResult> PutSettings([FromBody] NewsSettings settings, CancellationToken cancellationToken)
     {
-        var row = await _db.NewsSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await _db.NewsSettings.OrderBy(s => s.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new NewsSettings();

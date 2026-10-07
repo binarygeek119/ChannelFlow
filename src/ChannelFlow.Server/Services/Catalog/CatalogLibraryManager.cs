@@ -385,7 +385,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         return _db.MediaItems.AsNoTracking()
             .Where(item => item.Kind == BaseItemKind.Folder && item.LibraryId == null)
             .Select(item => new { item.Id, item.Name, item.CollectionType })
-            .AsEnumerable()
+            .ToList()
             .Select(item => (item.Id, item.Name, item.CollectionType));
     }
 

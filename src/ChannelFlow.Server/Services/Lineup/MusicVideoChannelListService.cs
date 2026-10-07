@@ -195,7 +195,7 @@ public sealed class MusicVideoChannelListService
         var excluded = _db.MusicVideoChannelArtists.AsNoTracking()
             .Where(row => otherChannelIds.Contains(row.ChannelId))
             .Select(row => row.ArtistName)
-            .AsEnumerable()
+            .ToList()
             .Select(NormalizeArtist)
             .Where(name => name.Length > 0)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -295,7 +295,7 @@ public sealed class MusicVideoChannelListService
         => _db.MusicVideoChannelArtists.AsNoTracking()
             .Where(row => row.ChannelId == channelId)
             .Select(row => row.ArtistName)
-            .AsEnumerable()
+            .ToList()
             .Select(NormalizeArtist)
             .Where(name => name.Length > 0)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -303,7 +303,11 @@ public sealed class MusicVideoChannelListService
     private HashSet<string> LoadCatalogArtistNames()
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var json in _db.MusicVideos.AsNoTracking().Where(row => !row.IsMissing).Select(row => row.ArtistsJson))
+        var jsonRows = _db.MusicVideos.AsNoTracking()
+            .Where(row => !row.IsMissing)
+            .Select(row => row.ArtistsJson)
+            .ToList();
+        foreach (var json in jsonRows)
         {
             foreach (var name in ReadArtistNames(json))
             {

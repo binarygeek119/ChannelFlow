@@ -118,19 +118,18 @@ public class StreamService : IDisposable
 
     private async Task EncodeChannelAsync(Guid channelId, Stream output, CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
-        var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
-        var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
-        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
-        var youtubeCommercials = scope.ServiceProvider.GetRequiredService<YouTubeCommercialStreamService>();
-        var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
-
-        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
-        if (channel is null)
+        Channel channel;
+        using (var lookup = _scopeFactory.CreateScope())
         {
-            _logger.LogWarning("IPTV stream requested for missing channel {ChannelId}", channelId);
-            throw new InvalidOperationException("Channel not found.");
+            var db = lookup.ServiceProvider.GetRequiredService<FinTvDbContext>();
+            var found = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+            if (found is null)
+            {
+                _logger.LogWarning("IPTV stream requested for missing channel {ChannelId}", channelId);
+                throw new InvalidOperationException("Channel not found.");
+            }
+
+            channel = found;
         }
 
         if (channel.ContentType == ChannelContentType.Weather)
@@ -138,21 +137,37 @@ public class StreamService : IDisposable
             await StreamUntilCanceledAsync(
                 "Weather",
                 channel.Name,
-                () => weather.StreamAsync(channel, output, cancellationToken),
+                async () =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
+                    await weather.StreamAsync(channel, output, cancellationToken);
+                },
                 cancellationToken);
             return;
         }
 
         if (channel.ContentType == ChannelContentType.News)
         {
-            var news = scope.ServiceProvider.GetRequiredService<NewsChannelService>();
             await StreamUntilCanceledAsync(
                 "News",
                 channel.Name,
-                () => news.StreamAsync(channel, output, cancellationToken),
+                async () =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var news = scope.ServiceProvider.GetRequiredService<NewsChannelService>();
+                    await news.StreamAsync(channel, output, cancellationToken);
+                },
                 cancellationToken);
             return;
         }
+
+        using var scope = _scopeFactory.CreateScope();
+        var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
+        var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
+        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
+        var youtubeCommercials = scope.ServiceProvider.GetRequiredService<YouTubeCommercialStreamService>();
+        var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
 
         var ffmpegPath = _mediaEncoder.EncoderPath;
         var alertSession = new WeatherAlertCutInSession();
@@ -684,7 +699,7 @@ public class StreamService : IDisposable
         else if (item.JellyfinItemId.HasValue)
         {
             var mediaItem = libraryManager.GetItemById(item.JellyfinItemId.Value);
-            inputPath = mediaItem is null ? null : catalog.GetMediaPath(mediaItem);
+            inputPath = mediaItem is null ? null : mediaItem.Path;
         }
         else if (item.CommercialId.HasValue)
         {
@@ -887,13 +902,14 @@ public class StreamService : IDisposable
         if (commercial.Source == CommercialSource.Jellyfin)
         {
             var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
+            var scopedCatalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
             var mediaItem = libraryManager.GetItemById(commercial.JellyfinItemId);
             if (mediaItem is null)
             {
                 throw new InvalidOperationException($"Media item {commercial.JellyfinItemId} not found.");
             }
 
-            var inputPath = catalog.GetMediaPath(mediaItem);
+            var inputPath = scopedCatalog.GetMediaPath(mediaItem);
             if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
             {
                 throw new FileNotFoundException($"Media path missing for {commercial.Title}.");
@@ -941,19 +957,20 @@ public class StreamService : IDisposable
     {
         using var scope = _scopeFactory.CreateScope();
         var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
+        var scopedCatalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
         var mediaItem = libraryManager.GetItemById(item.JellyfinItemId!.Value);
         if (mediaItem is null)
         {
             throw new InvalidOperationException($"Music item {item.JellyfinItemId} not found.");
         }
 
-        var inputPath = catalog.GetMediaPath(mediaItem);
+        var inputPath = scopedCatalog.GetMediaPath(mediaItem);
         if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
         {
             throw new FileNotFoundException($"Music path missing for {item.Title}.");
         }
 
-        var albumArt = catalog.GetPrimaryImagePath(mediaItem);
+        var albumArt = scopedCatalog.GetPrimaryImagePath(mediaItem);
         var args = _ffmpeg.BuildMusicCommand(
             channel,
             inputPath,

@@ -156,6 +156,11 @@ public class AiChannelAutoApplyService
                     cancellationToken,
                     preview.WeeklyLineups);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("AI lineup apply cancelled for channel {ChannelId}", channelId);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AI lineup apply failed for channel {ChannelId}", channelId);
@@ -274,6 +279,11 @@ public class AiChannelAutoApplyService
                     preview.WeeklyLineups);
                 _db.ChangeTracker.Clear();
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("AI lineup generate cancelled for channel {ChannelId}", channelId);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AI lineup generate failed for channel {ChannelId}", channelId);
@@ -337,6 +347,11 @@ public class AiChannelAutoApplyService
                         day,
                         cancellationToken,
                         interruptStream: day == 0).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogInformation("AI playout build cancelled for channel {ChannelId}", channelId);
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -631,6 +646,10 @@ public class AiChannelAutoApplyService
                             channelName,
                             lineupResult.Error ?? "(none)");
                     }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {

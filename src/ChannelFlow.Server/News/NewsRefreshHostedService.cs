@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using FinTv.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -43,8 +44,9 @@ public sealed class NewsRefreshHostedService : BackgroundService
             {
                 using var scope = _scopes.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<FinTv.Data.FinTvDbContext>();
-                var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
-                    .FirstOrDefaultAsync(db.NewsSettings, stoppingToken);
+                var settings = await db.NewsSettings.AsNoTracking()
+                    .OrderBy(s => s.Id)
+                    .FirstOrDefaultAsync(stoppingToken);
                 if (settings is not null)
                 {
                     minutes = Math.Clamp(settings.RefreshMinutes, 2, 120);

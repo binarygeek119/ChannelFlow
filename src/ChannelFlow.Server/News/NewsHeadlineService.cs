@@ -59,7 +59,7 @@ public sealed class NewsHeadlineService
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
-        var settings = await db.NewsSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken) ?? new NewsSettings();
+        var settings = await db.NewsSettings.AsNoTracking().OrderBy(s => s.Id).FirstOrDefaultAsync(cancellationToken) ?? new NewsSettings();
         var feeds = await db.NewsFeeds.AsNoTracking()
             .Where(f => f.Enabled)
             .OrderBy(f => f.SortOrder)

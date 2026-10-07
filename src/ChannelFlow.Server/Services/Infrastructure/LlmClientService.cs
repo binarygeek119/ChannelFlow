@@ -303,40 +303,80 @@ public class LlmClientService
     {
         var client = _httpClientFactory.CreateClient(nameof(LlmClientService));
 
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            using var response = await client.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                _logger.LogWarning("LLM request failed ({Status}): {Body}", (int)response.StatusCode, body);
-                var providerMessage = TryExtractProviderError(body);
-                throw new InvalidOperationException(
-                    string.IsNullOrWhiteSpace(providerMessage)
-                        ? $"LLM request failed ({(int)response.StatusCode})."
-                        : providerMessage);
-            }
+                using var response = await client.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("LLM request failed ({Status}): {Body}", (int)response.StatusCode, body);
+                    var providerMessage = TryExtractProviderError(body);
+                    throw new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(providerMessage)
+                            ? $"LLM request failed ({(int)response.StatusCode})."
+                            : providerMessage);
+                }
 
-            return body;
+                return body;
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (attempt == 0)
+                {
+                    _logger.LogWarning(
+                        "LLM request timed out after {Seconds} seconds; retrying once.",
+                        (int)client.Timeout.TotalSeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    request = await CloneRequestAsync(request, cancellationToken);
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    $"LLM request timed out after {(int)client.Timeout.TotalSeconds} seconds. Try again or use a faster model.",
+                    ex);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    "LLM request could not be sent. Check that the API key contains only plain text characters and does not include a 'Bearer ' prefix.",
+                    ex);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not reach the LLM API from the Jellyfin server. Check internet access, DNS, and firewall rules.",
+                    ex);
+            }
         }
-        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+    }
+
+    private static async Task<HttpRequestMessage> CloneRequestAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri)
         {
-            throw new InvalidOperationException(
-                $"LLM request timed out after {(int)client.Timeout.TotalSeconds} seconds. Try again or use a faster model.",
-                ex);
-        }
-        catch (FormatException ex)
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy
+        };
+        foreach (var header in request.Headers)
         {
-            throw new InvalidOperationException(
-                "LLM request could not be sent. Check that the API key contains only plain text characters and does not include a 'Bearer ' prefix.",
-                ex);
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
-        catch (HttpRequestException ex)
+
+        if (request.Content is not null)
         {
-            throw new InvalidOperationException(
-                "Could not reach the LLM API from the Jellyfin server. Check internet access, DNS, and firewall rules.",
-                ex);
+            var bytes = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            clone.Content = new ByteArrayContent(bytes);
+            foreach (var header in request.Content.Headers)
+            {
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
         }
+
+        return clone;
     }
 
     private static HttpRequestMessage CreateAuthorizedRequest(HttpMethod method, string url, string apiKey)

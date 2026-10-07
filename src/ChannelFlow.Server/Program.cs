@@ -100,7 +100,7 @@ builder.Services.AddHttpClient("News", client =>
 });
 builder.Services.AddHttpClient("JellyfinPlugin", client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(15);
+    client.Timeout = TimeSpan.FromMinutes(2);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (guide-refresh)");
 });
 builder.Services.AddHttpClient("MediaServer", client =>

@@ -171,7 +171,7 @@ public sealed class NewsBulletinService
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
         var renderer = scope.ServiceProvider.GetRequiredService<NewsChannelService>();
-        var settings = await db.NewsSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+        var settings = await db.NewsSettings.AsNoTracking().OrderBy(s => s.Id).FirstOrDefaultAsync(cancellationToken)
             ?? new NewsSettings();
         var ledger = LoadLedger();
         var ranAt = DateTimeOffset.Now;

@@ -700,7 +700,12 @@ public class EpgService
                 .Append("\",")
                 .AppendLine(channel.Name);
 
-            var streamUrl = PluginApiKey.AppendQuery($"{baseUrl.TrimEnd('/')}/iptv/stream/{channel.Id:N}", apiKey);
+            var nextEnabled = FinTvRuntime.Current?.Configuration.NextTranscoding.Enabled == true;
+            var streamUrl = nextEnabled
+                ? PluginApiKey.AppendQuery(
+                    $"{baseUrl.TrimEnd('/')}/iptv/next/channel/{ChannelNumbers.Format(channel.Number)}.m3u8",
+                    apiKey)
+                : PluginApiKey.AppendQuery($"{baseUrl.TrimEnd('/')}/iptv/stream/{channel.Id:N}", apiKey);
             sb.AppendLine(streamUrl);
         }
 

@@ -255,6 +255,10 @@ public sealed class ApiKeyMiddleware
         var path = context.Request.Path.Value ?? string.Empty;
         // Programme posters are <img> URLs in XMLTV; the browser cannot send the IPTV API key.
         var isIptvPoster = path.StartsWith("/iptv/poster/", StringComparison.OrdinalIgnoreCase);
+        // ErsatzTV next bridge: the engine fetches resolver/source URLs with its internal
+        // token (checked in the controller), and players fetch proxied HLS session URLs that
+        // carry no API key (relative segment resolution drops query strings).
+        var isNextBridge = path.StartsWith("/iptv/next/", StringComparison.OrdinalIgnoreCase);
         var isClientLogIngest = HttpMethods.IsPost(context.Request.Method)
             && path.StartsWith("/api/client-logs", StringComparison.OrdinalIgnoreCase);
         var isClientSession = HttpMethods.IsPost(context.Request.Method)
@@ -262,6 +266,7 @@ public sealed class ApiKeyMiddleware
         var isClientForget = HttpMethods.IsDelete(context.Request.Method)
             && path.Equals("/api/clients/me", StringComparison.OrdinalIgnoreCase);
         var needsApiKey = !isIptvPoster
+            && !isNextBridge
             && (path.StartsWith("/iptv", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase)
                 || isClientLogIngest

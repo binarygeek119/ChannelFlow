@@ -6877,6 +6877,15 @@
             if ($('general-local-url')) {
                 $('general-local-url').value = settings.localBaseUrl || '';
             }
+            if ($('general-next-enabled')) {
+                $('general-next-enabled').checked = !!settings.nextEnabled;
+            }
+            if ($('general-next-base-url')) {
+                $('general-next-base-url').value = settings.nextBaseUrl || '';
+            }
+            if ($('general-next-resolver-base-url')) {
+                $('general-next-resolver-base-url').value = settings.nextResolverBaseUrl || '';
+            }
             await loadClientLogList();
         } catch (err) {
             reportApiError(err, 'Could not load general settings.');
@@ -6898,7 +6907,10 @@
                     playoutDaysToBuild: Number($('general-playout-days')?.value || '14'),
                     streamIdleTimeoutSeconds: Number($('general-stream-idle-timeout')?.value || '30'),
                     publicBaseUrl: ($('general-public-url')?.value || '').trim(),
-                    localBaseUrl: ($('general-local-url')?.value || '').trim()
+                    localBaseUrl: ($('general-local-url')?.value || '').trim(),
+                    nextEnabled: !!$('general-next-enabled')?.checked,
+                    nextBaseUrl: ($('general-next-base-url')?.value || '').trim(),
+                    nextResolverBaseUrl: ($('general-next-resolver-base-url')?.value || '').trim()
                 })
             });
             if ($('general-public-url')) {

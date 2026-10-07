@@ -3,6 +3,7 @@ using FinTv;
 using FinTv.Auth;
 using FinTv.Data;
 using FinTv.Domain;
+using FinTv.Next;
 using FinTv.News;
 using FinTv.Services;
 using FinTv.Services.MediaServers;
@@ -132,6 +133,20 @@ builder.Services.AddHttpClient(nameof(MusicPackService))
         AutomaticDecompression = DecompressionMethods.All
     });
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("next", client =>
+{
+    // HLS playlists/segments and the dynamic resolver stream for a long time; let
+    // per-request cancellation decide when to stop.
+    client.Timeout = Timeout.InfiniteTimeSpan;
+})
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = true,
+        AutomaticDecompression = DecompressionMethods.All
+    });
+
+builder.Services.AddSingleton<NextCoordinatorService>();
+builder.Services.AddSingleton<NextConfigHostedService>();
 
 builder.Services.AddSingleton<FinTvRuntime>();
 builder.Services.AddSingleton<FfmpegLocator>();
@@ -229,6 +244,7 @@ builder.Services.AddScoped<MediaServerService>();
 builder.Services.AddSingleton<DatabaseInitializer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseInitializer>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<NextConfigHostedService>());
 builder.Services.AddHostedService<ScheduledTaskHost>();
 builder.Services.AddHostedService<NewsRefreshHostedService>();
 builder.Services.AddHostedService<NewsBulletinHostedService>();

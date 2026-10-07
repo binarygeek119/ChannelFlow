@@ -106,7 +106,9 @@ public sealed class FinTvRuntime
         EnsureLocalPackMusicDefault();
         _configuration.Transcode ??= new TranscodeSettings();
         _configuration.Normalization ??= new NormalizationSettings();
+        _configuration.NextTranscoding ??= new NextTranscodingSettings();
         _configuration.YouTube ??= new YouTubeSettings();
+        EnsureNextResolverToken();
         ScheduleTimeZoneHelper.ApplyAsProcessTimeZone();
     }
 
@@ -141,6 +143,17 @@ public sealed class FinTvRuntime
         }
 
         _configuration.ApiKey = Auth.PluginApiKey.Generate();
+        SaveConfiguration();
+    }
+
+    private void EnsureNextResolverToken()
+    {
+        if (!string.IsNullOrWhiteSpace(_configuration.NextTranscoding.ResolverToken))
+        {
+            return;
+        }
+
+        _configuration.NextTranscoding.ResolverToken = Auth.PluginApiKey.Generate();
         SaveConfiguration();
     }
 

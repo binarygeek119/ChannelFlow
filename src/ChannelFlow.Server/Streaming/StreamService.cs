@@ -317,6 +317,97 @@ public class StreamService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Streams a single scheduled playout item to the output until its window ends or the
+    /// caller disconnects. Used by the ErsatzTV next live source (itemId mode) so a
+    /// commercial/art-slide/bumper resolved ahead of its wall-clock slot starts from its own
+    /// beginning instead of leaking the previous item's tail.
+    /// </summary>
+    public async Task StreamNextItemAsync(
+        Guid channelId,
+        Guid itemId,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        var item = await db.PlayoutItems.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == itemId && p.ChannelId == channelId, cancellationToken);
+        if (channel is null || item is null)
+        {
+            _logger.LogWarning("Next source requested missing item {ItemId} on channel {ChannelId}", itemId, channelId);
+            return;
+        }
+
+        var remaining = item.Finish.Kind == DateTimeKind.Utc
+            ? item.Finish - DateTime.UtcNow
+            : DateTime.SpecifyKind(item.Finish, DateTimeKind.Utc) - DateTime.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            remaining = TimeSpan.FromSeconds(5);
+        }
+
+        using var itemCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (remaining < TimeSpan.FromDays(2))
+        {
+            itemCts.CancelAfter(remaining);
+        }
+
+        var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
+        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
+        var youtubeCommercials = scope.ServiceProvider.GetRequiredService<YouTubeCommercialStreamService>();
+        var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
+        var ffmpegPath = _mediaEncoder.EncoderPath;
+
+        try
+        {
+            if (item.IsVirtual && item.VirtualSource == VirtualContentSource.MusicArtSlide)
+            {
+                await StreamMusicItemAsync(channel, item, catalog, ffmpegPath, output, itemCts.Token);
+            }
+            else if (item.IsVirtual && item.VirtualSource == VirtualContentSource.LogoBumper)
+            {
+                await StreamLogoBumperAsync(channel, item, ffmpegPath, output, itemCts.Token);
+            }
+            else if (item.IsVirtual && item.VirtualSource == VirtualContentSource.BundledVideo)
+            {
+                await StreamBundledVideoAsync(channel, item, ffmpegPath, output, itemCts.Token);
+            }
+            else if (item.IsVirtual && item.VirtualSource == VirtualContentSource.YouTubeMusicVideo)
+            {
+                await StreamYouTubeMusicVideoAsync(channel, item, youtubeCommercials, ffmpegPath, output, itemCts.Token);
+            }
+            else if (item.CommercialId.HasValue)
+            {
+                await StreamCommercialItemAsync(channel, item, catalog, youtubeCommercials, ffmpegPath, output, itemCts.Token);
+            }
+            else if (item.JellyfinItemId.HasValue)
+            {
+                await StreamMediaItemAsync(channel, item, catalog, holidays, ffmpegPath, output, new WeatherAlertCutInSession(), itemCts.Token);
+            }
+            else
+            {
+                await WriteEbsAsync(channel, ebs, ffmpegPath, output, 180, itemCts.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Item window expired (normal) or the caller disconnected; end the source.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Next source failed streaming item {Title}", item.Title);
+            try
+            {
+                await WriteEbsAsync(channel, ebs, ffmpegPath, output, 120, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
     private async Task StreamUntilCanceledAsync(
         string kind,
         string channelName,
@@ -425,6 +516,43 @@ public class StreamService : IDisposable
             .AsNoTracking()
             .Where(p => p.ChannelId == channelId && p.Start <= now && p.Finish > now)
             .OrderByDescending(p => p.Start)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Finds the playout item airing on a channel at an arbitrary UTC instant. Used by the
+    /// ErsatzTV next resolver, which asks "what should play at time X" for its transcode focus.
+    /// </summary>
+    public async Task<PlayoutItem?> GetItemAtAsync(
+        Guid channelId,
+        DateTime atUtc,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        return await db.PlayoutItems
+            .AsNoTracking()
+            .Where(p => p.ChannelId == channelId && p.Start <= atUtc && p.Finish > atUtc)
+            .OrderByDescending(p => p.Start)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Finds when the next scheduled item after a UTC instant starts (used to bound an
+    /// off-air/EBS live source so the resolver is re-hit at the next boundary).
+    /// </summary>
+    public async Task<DateTime?> GetNextItemStartAsync(
+        Guid channelId,
+        DateTime atUtc,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        return await db.PlayoutItems
+            .AsNoTracking()
+            .Where(p => p.ChannelId == channelId && p.Start > atUtc)
+            .OrderBy(p => p.Start)
+            .Select(p => (DateTime?)p.Start)
             .FirstOrDefaultAsync(cancellationToken);
     }
 

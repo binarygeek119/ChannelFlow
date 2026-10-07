@@ -110,6 +110,31 @@ channelflow.example.duckdns.org {
 }
 ```
 
+## ErsatzTV next (optional transcoding engine)
+
+ChannelFlow can delegate all live TV transcoding/streaming to [ErsatzTV next](https://github.com/ErsatzTV/next) — the Rust/HLS rewrite of ErsatzTV — while staying the front door for IPTV: ChannelFlow still schedules, resolves, and proxies. Enable it on **General → ErsatzTV next (transcoding)**:
+
+- ChannelFlow writes `lineup.json`, per-channel `channel.json`, and dynamic playout windows into `{config}/next` (mount that folder into next at `/config/next`).
+- The playout windows contain a single *dynamic* item: at every item boundary next asks ChannelFlow `GET /iptv/next/resolve/{channel}` and plays whatever comes back.
+  - Movies/TV/music/other real media → next transcodes **the file** directly (hardware accel, exact in/out points) with no ChannelFlow ffmpeg involved.
+  - WeatherStar/news/off-air → ChannelFlow's own compositors run as a live MPEG-TS HTTP source.
+  - Commercials/art slides/bumpers/YouTube music → a ChannelFlow single-item renderer, keyed so content aligns even though next works ~45 s ahead of wall clock.
+- ChannelFlow proxies next's HLS behind its own endpoints, so the M3U you give Jellyfin never changes: `…/iptv/next/channel/{n}.m3u8` (master) → `…/iptv/next/session/…` (playlists + segments). `/iptv/stream/{id}` stays live as a fallback.
+- EPG is unchanged (ChannelFlow's own XMLTV).
+
+Run next next to ChannelFlow (see `docker-compose.next.yml` / Unraid template `unraid/channelflow-next.xml`):
+
+```bash
+docker compose -f docker-compose.next.yml up -d
+```
+
+Requirements/notes:
+
+- Mount the media share at the **same `/media` path** ChannelFlow/Jellyfin use so file paths in playouts resolve.
+- Match next's `TZ` to the **General → schedule time zone** so the playout windows line up.
+- Set **Next server URL** = how ChannelFlow reaches next (`http://<host>:8409`) and **ChannelFlow URL (from inside next)** = how the next container reaches ChannelFlow (same LAN address as the Local base URL).
+- next reads lineup/channel configs **once at startup**: restart the next container after enabling, adding/renumbering channels, or changing normalization. Playout windows re-read on every item boundary, so schedule changes take effect live.
+
 ## Weather and news
 
 WeatherStar graphics are vendored from [ws4kp](https://github.com/netbymatt/ws4kp) and [ws3kp](https://github.com/netbymatt/ws3kp) (MIT) and rendered by the native compositor, then encoded to MPEG-TS with optional Jellyfin music as a bed.

@@ -141,6 +141,50 @@ public class PluginConfiguration
     /// Target video/audio format for every live MPEG-TS stream.
     /// </summary>
     public NormalizationSettings Normalization { get; set; } = new();
+
+    /// <summary>
+    /// ErsatzTV next integration: delegates transcoding/streaming to the next container
+    /// while ChannelFlow keeps scheduling and feeds it "things to play" over HTTP.
+    /// </summary>
+    public NextTranscodingSettings NextTranscoding { get; set; } = new();
+}
+
+public class NextTranscodingSettings
+{
+    /// <summary>
+    /// When true, channels are served through the ErsatzTV next container: ChannelFlow
+    /// writes next's lineup/channel/playout JSON, resolves what to play over HTTP, and
+    /// proxies next's HLS back through its own /iptv endpoints.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Base URL of the next HTTP server as seen by ChannelFlow, e.g. <c>http://192.168.1.2:8409</c>.
+    /// </summary>
+    public string? BaseUrl { get; set; }
+
+    /// <summary>
+    /// Base URL ChannelFlow is reachable at from inside the next container, e.g.
+    /// <c>http://192.168.1.2:8097</c>. Written into next's dynamic resolver URIs.
+    /// </summary>
+    public string? ResolverBaseUrl { get; set; }
+
+    /// <summary>
+    /// Shared secret the next container presents to <c>/iptv/next/resolve</c> and
+    /// <c>/iptv/next/source</c>. Generated at startup when missing.
+    /// </summary>
+    public string? ResolverToken { get; set; }
+
+    /// <summary>
+    /// Container path at which the config folder is mounted into the next container
+    /// (matches the host mount of <c>{DataFolder}/next</c>).
+    /// </summary>
+    public string NextConfigFolder { get; set; } = "/config/next";
+
+    /// <summary>
+    /// Container path where next writes its HLS segments (its own /tmp by default).
+    /// </summary>
+    public string HlsOutputFolder { get; set; } = "/tmp/next-hls";
 }
 
 public class TranscodeSettings

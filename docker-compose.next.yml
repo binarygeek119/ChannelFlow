@@ -1,0 +1,29 @@
+# ErsatzTV next — the transcoding/streaming engine ChannelFlow delegates to when
+# General → "ErsatzTV next (transcoding)" is enabled.
+#
+# ChannelFlow writes lineup.json, per-channel channel.json, and the dynamic playout
+# windows into its appdata `next` folder (e.g. /mnt/user/appdata/channelflow/next).
+# Mount that same folder at /config/next inside this container, and share the media
+# mount ChannelFlow/Jellyfin use (`/media` below) so playout file paths resolve.
+#
+# Restart this container after enabling next, adding/renumbering channels, or
+# changing normalization: next reads lineup/channel configs once at startup.
+#
+# Start with:
+#   docker compose -f docker-compose.next.yml up -d
+# or via podman:
+#   podman compose -f docker-compose.next.yml up -d
+services:
+  next:
+    image: ersatztv/next:develop
+    container_name: channelflow-next
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-America/Chicago}
+    ports:
+      - "8409:8409"          # HLS/session HTTP; ChannelFlow proxies these, no need to expose publicly
+    devices:
+      - /dev/dri:/dev/dri    # Intel VAAPI (remove for software-only decode)
+    volumes:
+      - ${NEXT_CONFIG:-/mnt/user/appdata/channelflow/next}:/config/next
+      - ${MEDIA_ROOT:-/mnt/user/media}:/media

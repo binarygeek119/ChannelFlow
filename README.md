@@ -118,6 +118,7 @@ ChannelFlow can delegate all live TV transcoding/streaming to [ErsatzTV next](ht
 - The playout windows contain a single *dynamic* item: at every item boundary next asks ChannelFlow `GET /iptv/next/resolve/{channel}` and plays whatever comes back.
   - Movies/TV/music/other real media → next transcodes **the file** directly (hardware accel, exact in/out points) with no ChannelFlow ffmpeg involved.
   - WeatherStar/news/off-air → ChannelFlow's own compositors run as a live MPEG-TS HTTP source.
+    - Give a weather/news channel an **RTSP stream URL** to play a camera feed instead: next pulls the `rtsp://` source and transcodes it directly (no ChannelFlow compositor). With next off, ChannelFlow encodes the RTSP feed itself.
   - Commercials/art slides/bumpers/YouTube music → a ChannelFlow single-item renderer, keyed so content aligns even though next works ~45 s ahead of wall clock.
 - ChannelFlow proxies next's HLS behind its own endpoints, so the M3U you give Jellyfin never changes: `…/iptv/next/channel/{n}.m3u8` (master) → `…/iptv/next/session/…` (playlists + segments). `/iptv/stream/{id}` stays live as a fallback.
 - EPG is unchanged (ChannelFlow's own XMLTV).

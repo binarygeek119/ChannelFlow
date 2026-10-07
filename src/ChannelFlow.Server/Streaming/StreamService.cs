@@ -1044,16 +1044,34 @@ public class StreamService : IDisposable
 
     private async Task RunFfmpegToStreamAsync(string ffmpegPath, IReadOnlyList<string> args, Stream output, CancellationToken cancellationToken)
     {
-        var stderr = new StringBuilder();
-        var result = await CliWrap.Cli.Wrap(ffmpegPath)
-            .WithArguments(args)
-            .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
-            .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(stderr))
-            .WithValidation(CliWrap.CommandResultValidation.None)
-            .ExecuteAsync(cancellationToken);
-
-        if (result.ExitCode != 0 && !cancellationToken.IsCancellationRequested)
+        // An exit code above 128 means ffmpeg was killed by a signal (135 = SIGBUS,
+        // 139 = SIGSEGV, 134 = SIGABRT…): a crash rather than a media error, so give
+        // the encoder one quick retry before the caller falls back to the slate.
+        const int maxAttempts = 2;
+        for (var attempt = 1; ; attempt++)
         {
+            var stderr = new StringBuilder();
+            var result = await CliWrap.Cli.Wrap(ffmpegPath)
+                .WithArguments(args)
+                .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
+                .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(stderr))
+                .WithValidation(CliWrap.CommandResultValidation.None)
+                .ExecuteAsync(cancellationToken);
+
+            if (result.ExitCode == 0 || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (result.ExitCode > 128 && attempt < maxAttempts)
+            {
+                _logger.LogWarning(
+                    "ffmpeg killed by a signal (exit {ExitCode}); retrying once before falling back",
+                    result.ExitCode);
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                continue;
+            }
+
             var error = stderr.ToString().Trim();
             if (error.Length > 2000)
             {

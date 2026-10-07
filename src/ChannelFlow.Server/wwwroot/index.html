@@ -1203,6 +1203,11 @@
                         <input id="general-public-url" type="text" class="emby-input" placeholder="https://channelflow.example.duckdns.org" autocomplete="off" spellcheck="false" inputmode="url">
                     </label>
                     <p class="hint">Used in M3U and XMLTV links when Jellyfin talks to ChannelFlow on the Docker network. Leave blank to use the request host, including HTTPS from your reverse proxy. Also settable as <code>CHANNELFLOW_PUBLIC_URL</code>.</p>
+                    <label class="field">
+                        <span>Local base URL (same network)</span>
+                        <input id="general-local-url" type="text" class="emby-input" placeholder="http://192.168.1.2:8097" autocomplete="off" spellcheck="false" inputmode="url">
+                    </label>
+                    <p class="hint">Used for the <strong>Local URL</strong> copy buttons and same-network app pairing, so they always hand out the LAN address (for example <code>http://192.168.1.2:8097</code>) even when you are browsing through the public URL. Leave blank to use the address the browser connected with.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-general" class="raised button-submit emby-button">Save General Settings</button>
                     </div>
@@ -1549,7 +1554,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets38"></script>
+  <script src="js/app.js?v=assets39"></script>
   <script src="js/shell.js?v=library6"></script>
 </body>
 </html>

@@ -32,7 +32,8 @@ public class GeneralController : ControllerBase
                 streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(config.StreamIdleTimeoutSeconds),
                 publicBaseUrl = config.PublicBaseUrl
                     ?? ReverseProxyHosting.NormalizePublicBaseUrl(AppEnvironment.Get("PUBLIC_URL"))
-                    ?? string.Empty
+                    ?? string.Empty,
+                localBaseUrl = config.LocalBaseUrl ?? string.Empty
             });
         }
         catch (Exception ex)
@@ -117,6 +118,11 @@ public class GeneralController : ControllerBase
                 plugin.Configuration.PublicBaseUrl = ReverseProxyHosting.NormalizePublicBaseUrl(request.PublicBaseUrl);
             }
 
+            if (request.LocalBaseUrl is not null)
+            {
+                plugin.Configuration.LocalBaseUrl = ReverseProxyHosting.NormalizeLocalBaseUrl(request.LocalBaseUrl);
+            }
+
             plugin.SaveConfiguration();
             return Ok(new
             {
@@ -126,7 +132,8 @@ public class GeneralController : ControllerBase
                 playoutDaysToBuild = plugin.Configuration.PlayoutDaysToBuild,
                 streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(
                     plugin.Configuration.StreamIdleTimeoutSeconds),
-                publicBaseUrl = plugin.Configuration.PublicBaseUrl ?? string.Empty
+                publicBaseUrl = plugin.Configuration.PublicBaseUrl ?? string.Empty,
+                localBaseUrl = plugin.Configuration.LocalBaseUrl ?? string.Empty
             });
         }
         catch (Exception ex)
@@ -165,4 +172,9 @@ public class GeneralSettingsRequest
     /// Public origin for M3U/XMLTV when reverse-proxied (https://channelflow.example.com).
     /// </summary>
     public string? PublicBaseUrl { get; set; }
+
+    /// <summary>
+    /// Same-network origin for Local URL copy and quick pairing (http://192.168.1.2:8097).
+    /// </summary>
+    public string? LocalBaseUrl { get; set; }
 }

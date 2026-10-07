@@ -33,6 +33,14 @@ public class PluginConfiguration
     public string? PublicBaseUrl { get; set; }
 
     /// <summary>
+    /// Same-network base URL used for Local URL copy and quick pairing when the admin is on
+    /// the LAN (for example <c>http://192.168.1.2:8097</c>). Empty falls back to the origin
+    /// the browser connected with.
+    /// </summary>
+    [JsonPropertyName("localBaseUrl")]
+    public string? LocalBaseUrl { get; set; }
+
+    /// <summary>
     /// Shared secret for IPTV <c>?apiKey=</c> on M3U and XMLTV URLs.
     /// Generated at startup when missing and edited on the General page.
     /// </summary>

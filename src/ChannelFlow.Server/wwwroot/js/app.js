@@ -6874,6 +6874,9 @@
             if ($('general-public-url')) {
                 $('general-public-url').value = settings.publicBaseUrl || '';
             }
+            if ($('general-local-url')) {
+                $('general-local-url').value = settings.localBaseUrl || '';
+            }
             await loadClientLogList();
         } catch (err) {
             reportApiError(err, 'Could not load general settings.');
@@ -6894,11 +6897,15 @@
                     scheduleTimeZone: $('general-schedule-tz')?.value || 'America/New_York',
                     playoutDaysToBuild: Number($('general-playout-days')?.value || '14'),
                     streamIdleTimeoutSeconds: Number($('general-stream-idle-timeout')?.value || '30'),
-                    publicBaseUrl: ($('general-public-url')?.value || '').trim()
+                    publicBaseUrl: ($('general-public-url')?.value || '').trim(),
+                    localBaseUrl: ($('general-local-url')?.value || '').trim()
                 })
             });
             if ($('general-public-url')) {
                 $('general-public-url').value = saved.publicBaseUrl || '';
+            }
+            if ($('general-local-url')) {
+                $('general-local-url').value = saved.localBaseUrl || '';
             }
             toast('General settings saved.', 'success');
             await loadGeneral();

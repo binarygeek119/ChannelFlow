@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -92,6 +94,86 @@ internal static class ReverseProxyHosting
         var prefix = request.PathBase.HasValue ? request.PathBase.Value!.TrimEnd('/') : "";
         return $"{request.Scheme}://{request.Host}{prefix}";
     }
+
+    public static string? NormalizeLocalBaseUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var url = value.Trim().TrimEnd('/');
+        if (!url.Contains("://", StringComparison.Ordinal))
+        {
+            url = "http://" + url;
+        }
+
+        return url;
+    }
+
+    /// <summary>
+    /// True when the host is a loopback or private-network IP literal, meaning the client is
+    /// reaching ChannelFlow directly on the local network rather than through the public URL.
+    /// </summary>
+    public static bool IsLocalHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var value = host.Trim();
+        if (value.StartsWith('[') && value.EndsWith(']'))
+        {
+            value = value[1..^1];
+        }
+
+        if (!IPAddress.TryParse(value, out var ip))
+        {
+            return false;
+        }
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        if (IPAddress.IsLoopback(ip))
+        {
+            return true;
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var bytes = ip.GetAddressBytes();
+            return bytes[0] == 10
+                || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+                || (bytes[0] == 192 && bytes[1] == 168)
+                || (bytes[0] == 169 && bytes[1] == 254);
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            var bytes = ip.GetAddressBytes();
+            return (bytes[0] & 0xFE) == 0xFC
+                || (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80);
+        }
+
+        return false;
+    }
+
+    public static bool IsLocalOrigin(string? origin)
+        => Uri.TryCreate(origin, UriKind.Absolute, out var uri) && IsLocalHost(uri.Host);
+
+    /// <summary>
+    /// Same-network base URL: the configured local URL when set, otherwise the origin the
+    /// browser connected with. A bridge-networked container cannot discover the host's LAN
+    /// address on its own, so the configured value wins whenever the admin browses through
+    /// the public URL.
+    /// </summary>
+    public static string LocalBaseUrl(HttpRequest request)
+        => NormalizeLocalBaseUrl(FinTvRuntime.Current?.Configuration.LocalBaseUrl)
+            ?? PublicOrigin(request);
 
     public static string? NormalizePublicBaseUrl(string? value)
     {

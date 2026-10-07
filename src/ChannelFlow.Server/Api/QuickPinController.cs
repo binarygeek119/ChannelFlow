@@ -32,18 +32,17 @@ public class QuickPinController : ControllerBase
     public async Task<ActionResult> Redeem([FromBody] QuickPinRedeemRequest? request, CancellationToken cancellationToken)
     {
         var publicBaseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        var localBaseUrl = ReverseProxyHosting.PublicOrigin(Request);
+        var requestOrigin = ReverseProxyHosting.PublicOrigin(Request);
+        var localBaseUrl = ReverseProxyHosting.LocalBaseUrl(Request);
         var client = _clients.Issue();
         var (m3uPublic, xmltvPublic) = PluginApiKey.BuildLiveTvUrls(publicBaseUrl, client.ApiKey);
         var (m3uLocal, xmltvLocal) = PluginApiKey.BuildLiveTvUrls(localBaseUrl, client.ApiKey);
 
-        // Pairing from anywhere other than the configured public URL means the admin (and the
-        // app being paired) is on the local network: send the local links as primary. Both sets
-        // always go out so the app can fall back either way.
-        var onLocalNetwork = !string.Equals(
-            localBaseUrl.TrimEnd('/'),
-            publicBaseUrl.TrimEnd('/'),
-            StringComparison.OrdinalIgnoreCase);
+        // Pairing from a local address (LAN IP or loopback) means the admin and the app being
+        // paired are on the same network: send the local links as primary. Both sets always go
+        // out so the app can fall back either way.
+        var onLocalNetwork = ReverseProxyHosting.IsLocalOrigin(requestOrigin)
+            || string.Equals(requestOrigin.TrimEnd('/'), localBaseUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
         var (m3u, xmltv) = onLocalNetwork ? (m3uLocal, xmltvLocal) : (m3uPublic, xmltvPublic);
 
         var urls = new QuickPinUrls(m3u, xmltv, m3uPublic, xmltvPublic, m3uLocal, xmltvLocal);

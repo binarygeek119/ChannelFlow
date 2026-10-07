@@ -151,7 +151,7 @@ public class SetupController : ControllerBase
     private object BuildUrlResponse()
     {
         var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        var localBaseUrl = ReverseProxyHosting.PublicOrigin(Request);
+        var localBaseUrl = ReverseProxyHosting.LocalBaseUrl(Request);
         var m3u = $"{baseUrl}/iptv/channels.m3u";
         var epg = $"{baseUrl}/iptv/epg.xml";
         var m3uLocal = $"{localBaseUrl}/iptv/channels.m3u";

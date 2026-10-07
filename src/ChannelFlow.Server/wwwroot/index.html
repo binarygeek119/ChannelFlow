@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=assets35">
+  <link rel="stylesheet" href="css/app.css?v=assets36">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -57,8 +57,20 @@
         </div>
         <div class="topbar-meta">
           <div class="topbar-actions">
-            <button type="button" id="btn-copy-m3u" class="emby-button" title="Copy the M3U tuner URL for Jellyfin Live TV or another app">Copy M3U</button>
-            <button type="button" id="btn-copy-xmltv" class="emby-button" title="Copy the XMLTV guide URL">Copy XMLTV</button>
+            <div class="copy-menu" id="copy-menu-m3u">
+                <button type="button" id="btn-copy-m3u" class="emby-button" aria-haspopup="true" aria-expanded="false" title="Copy the M3U tuner URL for Jellyfin Live TV or another app">Copy M3U</button>
+                <div class="copy-menu-panel hidden" role="menu">
+                    <button type="button" role="menuitem" data-copy-kind="m3u" data-copy-scope="public">Public URL</button>
+                    <button type="button" role="menuitem" data-copy-kind="m3u" data-copy-scope="local">Local URL</button>
+                </div>
+            </div>
+            <div class="copy-menu" id="copy-menu-xmltv">
+                <button type="button" id="btn-copy-xmltv" class="emby-button" aria-haspopup="true" aria-expanded="false" title="Copy the XMLTV guide URL">Copy XMLTV</button>
+                <div class="copy-menu-panel hidden" role="menu">
+                    <button type="button" role="menuitem" data-copy-kind="xmltv" data-copy-scope="public">Public URL</button>
+                    <button type="button" role="menuitem" data-copy-kind="xmltv" data-copy-scope="local">Local URL</button>
+                </div>
+            </div>
             <button type="button" id="btn-logout" class="emby-button">Sign out</button>
           </div>
           <div id="app-clock" class="app-clock" aria-live="polite"></div>
@@ -1537,7 +1549,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets37"></script>
+  <script src="js/app.js?v=assets38"></script>
   <script src="js/shell.js?v=library6"></script>
 </body>
 </html>

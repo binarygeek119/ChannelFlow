@@ -10113,17 +10113,74 @@
         }));
     }
 
-    async function copySetupUrl(kind) {
+    async function copySetupUrl(kind, scope) {
         try {
             const urls = await api('/setup/urls');
             const isM3u = kind === 'm3u';
-            const text = isM3u ? (urls?.m3u || '') : (urls?.epg || '');
+            const local = scope === 'local';
+            const text = isM3u
+                ? (local ? (urls?.m3uLocal || '') : (urls?.m3u || ''))
+                : (local ? (urls?.epgLocal || '') : (urls?.epg || ''));
             if (!text) {
                 throw new Error(isM3u ? 'M3U URL is not ready.' : 'XMLTV URL is not ready.');
             }
-            copyToClipboard(text, isM3u ? 'Copied M3U tuner URL.' : 'Copied XMLTV guide URL.');
+            const where = local ? 'local' : 'public';
+            copyToClipboard(text, `Copied ${isM3u ? 'M3U tuner URL' : 'XMLTV guide URL'} (${where}).`);
         } catch (err) {
             toast(err.message || 'Could not copy URL.', 'error');
+        }
+    }
+
+    function closeCopyMenus(except) {
+        document.querySelectorAll('.copy-menu-panel').forEach((panel) => {
+            if (panel === except) {
+                return;
+            }
+            panel.classList.add('hidden');
+            const button = panel.parentElement && panel.parentElement.querySelector('.emby-button');
+            if (button) {
+                button.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+
+    function toggleCopyMenu(button) {
+        const menu = button.parentElement;
+        if (!menu) {
+            return;
+        }
+        const panel = menu.querySelector('.copy-menu-panel');
+        if (!panel) {
+            return;
+        }
+        const willOpen = panel.classList.contains('hidden');
+        closeCopyMenus(willOpen ? panel : null);
+        panel.classList.toggle('hidden', !willOpen);
+        button.setAttribute('aria-expanded', String(willOpen));
+    }
+
+    function bindCopyMenus() {
+        [['btn-copy-m3u', 'm3u'], ['btn-copy-xmltv', 'xmltv']].forEach(([id, kind]) => {
+            const button = $(id);
+            if (button) {
+                button.onclick = (event) => {
+                    event.stopPropagation();
+                    toggleCopyMenu(button);
+                };
+            }
+        });
+
+        document.querySelectorAll('.copy-menu-panel [data-copy-scope]').forEach((item) => {
+            item.onclick = (event) => {
+                event.stopPropagation();
+                closeCopyMenus();
+                copySetupUrl(item.dataset.copyKind, item.dataset.copyScope);
+            };
+        });
+
+        if (!bindCopyMenus.documentBound) {
+            bindCopyMenus.documentBound = true;
+            document.addEventListener('click', () => closeCopyMenus());
         }
     }
 
@@ -10359,8 +10416,7 @@
             });
         }
 
-        click('btn-copy-m3u', () => copySetupUrl('m3u'));
-        click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
+        bindCopyMenus();
         click('btn-save-general', saveGeneralSettings);
         click('btn-refresh-clients', () => loadPairedClients().catch((e) => toast(e.message, 'error')));
         const clientsTable = $('clients-table');

@@ -151,18 +151,25 @@ public class SetupController : ControllerBase
     private object BuildUrlResponse()
     {
         var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
+        var localBaseUrl = ReverseProxyHosting.PublicOrigin(Request);
         var m3u = $"{baseUrl}/iptv/channels.m3u";
         var epg = $"{baseUrl}/iptv/epg.xml";
+        var m3uLocal = $"{localBaseUrl}/iptv/channels.m3u";
+        var epgLocal = $"{localBaseUrl}/iptv/epg.xml";
         if (User.Identity?.IsAuthenticated == true)
         {
             (m3u, epg) = PluginApiKey.BuildLiveTvUrls(baseUrl);
+            (m3uLocal, epgLocal) = PluginApiKey.BuildLiveTvUrls(localBaseUrl);
         }
 
         return new
         {
             baseUrl,
+            localBaseUrl,
             m3u,
             epg,
+            m3uLocal,
+            epgLocal,
             instructions = new[]
             {
                 "Dashboard → Live TV → Add Tuner → M3U Tuner",

@@ -314,6 +314,7 @@
             CatalogMode: c?.catalogMode ?? null,
             AiFineTunePrompt: c?.aiFineTunePrompt ?? null,
             CommercialPresetId: c?.commercialPresetId ?? null,
+            RtspUrl: c?.rtspUrl ?? null,
             CommercialSearchPlaylistIds: Array.isArray(c?.commercialSearchPlaylistIds)
                 ? c.commercialSearchPlaylistIds.slice()
                 : []
@@ -332,6 +333,7 @@
             LogoSetId: form.logoSetId,
             LogoFileName: form.logoFileName,
             WeatherLocationQuery: form.weatherLocationQuery,
+            RtspUrl: form.rtspUrl ?? null,
             Enabled: form.enabled
         }, form.deep || {});
     }
@@ -936,14 +938,19 @@
     }
 
     function toggleWeatherFields() {
-        [['ch-content-type', 'weather-fields'], ['deep-ch-content-type', 'deep-weather-fields']].forEach(([typeId, fieldsId]) => {
+        [
+            ['ch-content-type', 'weather-fields', ['4']],
+            ['deep-ch-content-type', 'deep-weather-fields', ['4']],
+            ['ch-content-type', 'channel-rtsp-fields', ['4', '5']],
+            ['deep-ch-content-type', 'deep-rtsp-fields', ['4', '5']]
+        ].forEach(([typeId, fieldsId, showFor]) => {
             const contentType = $(typeId);
-            const weatherFields = $(fieldsId);
-            if (!contentType || !weatherFields) {
+            const fields = $(fieldsId);
+            if (!contentType || !fields) {
                 return;
             }
 
-            weatherFields.classList.toggle('hidden', contentType.value !== '4');
+            fields.classList.toggle('hidden', !showFor.includes(contentType.value));
         });
     }
 
@@ -1201,6 +1208,9 @@
         if ($('ch-weather-location')) {
             $('ch-weather-location').value = parseWeatherLocationQuery(c.weatherLocationQuery) || '';
         }
+        if ($('ch-rtsp-url')) {
+            $('ch-rtsp-url').value = c.rtspUrl || '';
+        }
         $('ch-enabled').checked = c.enabled;
         populateLogoSelectors(c);
         toggleWeatherFields();
@@ -1253,6 +1263,7 @@
             logoSetId: $('ch-logo-set')?.value ? $('ch-logo-set').value : null,
             logoFileName: $('ch-logo-file')?.value || null,
             weatherLocationQuery,
+            rtspUrl: $('ch-rtsp-url')?.value.trim() || null,
             enabled: !!$('ch-enabled')?.checked
         });
 
@@ -1700,6 +1711,9 @@
         if ($('deep-ch-weather-location')) {
             $('deep-ch-weather-location').value = parseWeatherLocationQuery(channel.weatherLocationQuery) || '';
         }
+        if ($('deep-ch-rtsp-url')) {
+            $('deep-ch-rtsp-url').value = channel.rtspUrl || '';
+        }
         $('deep-ch-enabled').checked = channel.enabled !== false;
         $('deep-ch-library-tag').value = libraryTagFromFilter(channel.filterJson);
         setSelectEnum('deep-ch-catalog-mode', { 0: 0, 1: 1, 2: 2, 3: 3 }, channel.catalogMode, 2);
@@ -1805,6 +1819,7 @@
                 FilterJson: mergeLibraryTagIntoFilter(channel.filterJson, $('deep-ch-library-tag')?.value),
                 CatalogMode: readSelectEnum('deep-ch-catalog-mode', { 0: 0, 1: 1, 2: 2, 3: 3 }, 2),
                 AiFineTunePrompt: ($('deep-ch-ai-prompt')?.value || '').trim() || null,
+                RtspUrl: ($('deep-ch-rtsp-url')?.value || '').trim() || null,
                 CommercialSearchPlaylistIds: deepChannelPlaylistIds.slice()
             }
         });

@@ -155,6 +155,8 @@ public class NextVideoNormalization
     [JsonPropertyName("buffer_kbps")]
     public int? BufferKbps { get; set; }
 
+    public string? Profile { get; set; }
+
     public string? Accel { get; set; }
 
     [JsonPropertyName("vaapi_device")]
@@ -205,6 +207,7 @@ public class NextPlayoutItem
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "source_type")]
 [JsonDerivedType(typeof(NextLocalSource), "local")]
 [JsonDerivedType(typeof(NextHttpSource), "http")]
+[JsonDerivedType(typeof(NextRtspSource), "rtsp")]
 [JsonDerivedType(typeof(NextDynamicSource), "dynamic")]
 public abstract class NextPlayoutItemSource
 {
@@ -227,6 +230,19 @@ public class NextHttpSource : NextPlayoutItemSource
 
     [JsonPropertyName("is_live")]
     public bool? IsLive { get; set; }
+}
+
+/// <summary>
+/// A live RTSP feed next pulls and transcodes itself (weather/news channels pointed
+/// at an RTSP camera instead of ChannelFlow's own compositors).
+/// </summary>
+public class NextRtspSource : NextPlayoutItemSource
+{
+    public string Uri { get; set; } = "";
+
+    /// <summary>Optional microsecond connection/read timeout; null lets next decide.</summary>
+    [JsonPropertyName("timeout_us")]
+    public long? TimeoutUs { get; set; }
 }
 
 /// <summary>

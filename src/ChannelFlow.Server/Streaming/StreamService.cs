@@ -132,6 +132,22 @@ public class StreamService : IDisposable
             channel = found;
         }
 
+        if (channel.IsContinuousLive && !string.IsNullOrWhiteSpace(channel.RtspUrl))
+        {
+            var rtspUrl = channel.RtspUrl;
+            await StreamUntilCanceledAsync(
+                "RTSP",
+                channel.Name,
+                async () =>
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var rtsp = scope.ServiceProvider.GetRequiredService<RtspChannelService>();
+                    await rtsp.StreamAsync(channel, rtspUrl, output, cancellationToken);
+                },
+                cancellationToken);
+            return;
+        }
+
         if (channel.ContentType == ChannelContentType.Weather)
         {
             await StreamUntilCanceledAsync(

@@ -75,10 +75,25 @@ public class NextIptvController : ControllerBase
             : await _stream.GetItemAtAsync(id, atUtc, cancellationToken);
 
         var resolved = channel.IsContinuousLive
-            ? BuildHttpItem("live", now, until, BuildSourceUri(id, itemId: null))
+            ? BuildLiveItem(channel, now, until)
             : await BuildResolvedItemAsync(channel, item, now, until, cancellationToken);
 
         return Content(FinTvJson.Serialize(resolved), "application/json");
+    }
+
+    /// <summary>
+    /// Whole-window item for a continuous-live channel. A configured RTSP feed is handed
+    /// to next as an <c>rtsp</c> source (next pulls and transcodes it); otherwise the
+    /// channel's own compositor is surfaced as a live MPEG-TS HTTP source.
+    /// </summary>
+    private NextPlayoutItem BuildLiveItem(Channel channel, DateTimeOffset now, DateTimeOffset until)
+    {
+        if (!string.IsNullOrWhiteSpace(channel.RtspUrl))
+        {
+            return BuildRtspItem("live", now, until, channel.RtspUrl.Trim());
+        }
+
+        return BuildHttpItem("live", now, until, BuildSourceUri(channel.Id, itemId: null));
     }
 
     private async Task<NextPlayoutItem> BuildResolvedItemAsync(
@@ -321,6 +336,19 @@ public class NextIptvController : ControllerBase
             Start = start.ToString("o", CultureInfo.InvariantCulture),
             Finish = finish.ToString("o", CultureInfo.InvariantCulture),
             Source = new NextHttpSource { Uri = uri, IsLive = true },
+        };
+
+    private static NextPlayoutItem BuildRtspItem(
+        string id,
+        DateTimeOffset start,
+        DateTimeOffset finish,
+        string uri)
+        => new()
+        {
+            Id = id,
+            Start = start.ToString("o", CultureInfo.InvariantCulture),
+            Finish = finish.ToString("o", CultureInfo.InvariantCulture),
+            Source = new NextRtspSource { Uri = uri },
         };
 
     private string BuildSourceUri(Guid channelId, Guid? itemId)

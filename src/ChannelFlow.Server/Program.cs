@@ -228,6 +228,7 @@ builder.Services.AddSingleton<NewsBulletinService>();
 builder.Services.AddSingleton<NewsBulletinTask>();
 builder.Services.AddScoped<WeatherStarChannelService>();
 builder.Services.AddScoped<NewsChannelService>();
+builder.Services.AddScoped<RtspChannelService>();
 builder.Services.AddSingleton<CatalogSyncProgress>();
 builder.Services.AddSingleton<QuickPinService>();
 builder.Services.AddSingleton<ClientLogStore>();

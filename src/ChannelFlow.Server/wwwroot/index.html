@@ -112,6 +112,10 @@
                     <div id="deep-weather-fields" class="field-group hidden">
                         <label class="field"><span>Location</span><input id="deep-ch-weather-location" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon"></label>
                     </div>
+                    <div id="deep-rtsp-fields" class="field-group hidden">
+                        <label class="field"><span>RTSP stream URL</span><input id="deep-ch-rtsp-url" type="text" class="emby-input" placeholder="rtsp://user:pass@host:554/stream"></label>
+                        <p class="hint">Optional. Play a continuous RTSP feed instead of the built-in weather/news presentation. Handed to the ErsatzTV next engine to transcode.</p>
+                    </div>
                 </section>
                 <section class="card section-card">
                     <h3>Presentation</h3>
@@ -271,6 +275,13 @@
                                     <input id="ch-weather-location" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon">
                                 </label>
                                 <p class="hint">Weather channels stream live local weather 24/7 from this US ZIP, city, or lat,lon. Display screens and units are on the Weather tab.</p>
+                            </div>
+                            <div id="channel-rtsp-fields" class="field-group hidden">
+                                <label class="field">
+                                    <span>RTSP stream URL</span>
+                                    <input id="ch-rtsp-url" type="text" class="emby-input" placeholder="rtsp://user:pass@host:554/stream">
+                                </label>
+                                <p class="hint">Optional. Point this weather/news channel at a continuous RTSP feed (weather cam, security cam) instead of the built-in presentation. ChannelFlow hands the feed to the ErsatzTV next engine to transcode, or encodes it itself when next is off. Leave empty for the normal weather/news channel.</p>
                             </div>
                             <label class="field checkbox-field">
                                 <input id="ch-enabled" type="checkbox" checked>
@@ -1582,7 +1593,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets41"></script>
+  <script src="js/app.js?v=assets42"></script>
   <script src="js/shell.js?v=library6"></script>
 </body>
 </html>

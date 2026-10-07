@@ -30,6 +30,8 @@ public class ChannelUpsertRequest
 
     public string? WeatherLocationQuery { get; set; }
 
+    public string? RtspUrl { get; set; }
+
     public string? FilterJson { get; set; }
 
     public ChannelCatalogMode? CatalogMode { get; set; }
@@ -55,6 +57,7 @@ public class ChannelUpsertRequest
             LogoFileName = LogoFileName,
             AudioLanguage = AudioLanguage,
             WeatherLocationQuery = WeatherLocationQuery,
+            RtspUrl = string.IsNullOrWhiteSpace(RtspUrl) ? null : RtspUrl.Trim(),
             FilterJson = FilterJson,
             CatalogMode = CatalogMode,
             AiFineTunePrompt = AiFineTunePrompt,
@@ -66,6 +69,12 @@ public class ChannelUpsertRequest
         {
             var location = WeatherStarChannelService.ResolveLocationQuery(channel.WeatherLocationQuery);
             channel.WeatherLocationQuery = string.IsNullOrWhiteSpace(location) ? null : location;
+        }
+
+        // RTSP replaces the compositor only on the continuous-live (weather/news) channels.
+        if (channel.ContentType is not (ChannelContentType.Weather or ChannelContentType.News))
+        {
+            channel.RtspUrl = null;
         }
 
         return channel;

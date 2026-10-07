@@ -100,6 +100,52 @@ public class FfmpegCommandBuilder
         return args;
     }
 
+    /// <summary>
+    /// Encodes a live RTSP feed into the channel's normalized MPEG-TS for ChannelFlow's
+    /// own tuner path (used when ErsatzTV next is off). No seeking or duration limit —
+    /// ffmpeg runs until the feed drops or the caller cancels.
+    /// </summary>
+    public IReadOnlyList<string> BuildRtspCommand(Channel channel, string rtspUri)
+    {
+        var (width, height) = GetResolution(channel);
+        var gpuFilters = CanUseGpuVideoFilters(channel, overlayHeadline: null, alertTickerPath: null);
+        var context = CreateEncodingContext(width, height, mediaPath: rtspUri, gpuFilters: gpuFilters);
+
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-rtsp_transport", "tcp",
+            "-rtsp_flags", "prefer_tcp",
+            "-fflags", "+genpts+discardcorrupt",
+            "-probesize", "5000000",
+            "-analyzeduration", "10000000",
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_at_eof", "1",
+            "-reconnect_delay_max", "5"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(context.HardwareDecodeArgs);
+        args.AddRange(new[] { "-i", rtspUri });
+        AppendMediaVideoGraph(
+            args,
+            context,
+            channel,
+            width,
+            height,
+            bugImagePath: null,
+            overlayHeadline: null,
+            alertTickerPath: null,
+            overlayBug: false);
+        AppendVideoEncoderArgs(args, context);
+        AppendBroadcastAudioFilter(args);
+        AppendAacStereo48k(args);
+        AppendMpegTsPipe(args);
+
+        return args;
+    }
+
     public IReadOnlyList<string> BuildRemoteMediaCommand(
         Channel channel,
         string inputPath,

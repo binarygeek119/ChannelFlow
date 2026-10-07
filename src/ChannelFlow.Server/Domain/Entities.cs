@@ -38,6 +38,13 @@ public class Channel
 
     public string? WeatherLocationQuery { get; set; }
 
+    /// <summary>
+    /// Optional continuous RTSP feed (weather cam, security cam, etc.) that replaces the
+    /// built-in compositor on weather/news channels. Handed to the ErsatzTV next engine,
+    /// or encoded by ChannelFlow's own ffmpeg when next is off.
+    /// </summary>
+    public string? RtspUrl { get; set; }
+
     public string? FilterJson { get; set; }
 
     public ChannelCatalogMode? CatalogMode { get; set; }

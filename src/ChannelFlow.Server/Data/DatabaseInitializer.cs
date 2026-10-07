@@ -295,15 +295,21 @@ public class DatabaseInitializer : IHostedService
 
     private async Task EnsureChannelColumnsAsync(FinTvDbContext db, CancellationToken cancellationToken)
     {
-        try
+        var statements = new[]
         {
-            await db.Database.ExecuteSqlRawAsync(
-                """ALTER TABLE "Channels" ADD COLUMN IF NOT EXISTS "CommercialSearchPlaylistIdsJson" text NULL""",
-                cancellationToken);
-        }
-        catch (Exception ex)
+            """ALTER TABLE "Channels" ADD COLUMN IF NOT EXISTS "CommercialSearchPlaylistIdsJson" text NULL""",
+            """ALTER TABLE "Channels" ADD COLUMN IF NOT EXISTS "RtspUrl" text NULL""",
+        };
+        foreach (var sql in statements)
         {
-            _logger.LogDebug(ex, "Channel schema ensure skipped");
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Channel schema ensure skipped");
+            }
         }
     }
 

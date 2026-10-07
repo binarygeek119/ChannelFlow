@@ -177,8 +177,10 @@ public sealed class NextCoordinatorService
                     CopyFormats = copyMode ? NextCopyFormats.Audio : null,
                     Format = MapAudioCodec(normalization.AudioCodec),
                     BitrateKbps = ParseBitrate(normalization.AudioBitrate),
+                    BufferKbps = ParseBitrate(normalization.AudioBitrate) is int ab ? ab : null,
                     Channels = ParseChannels(normalization.AudioChannels),
                     SampleRateHz = ParseInt(normalization.AudioSampleRate),
+                    NormalizeLoudness = true,
                 },
                 Video = new NextVideoNormalization
                 {
@@ -188,6 +190,8 @@ public sealed class NextCoordinatorService
                     Width = width,
                     Height = height,
                     BitrateKbps = ParseBitrate(normalization.VideoBitrate),
+                    BufferKbps = ParseBitrate(normalization.VideoBitrate) is int v ? Math.Max(v * 2, 0) : null,
+                    Profile = MapH264Profile(normalization.VideoProfile, normalization.VideoCodec),
                     Accel = accel,
                     VaapiDevice = accel is "vaapi" or "qsv" ? vaapiDevice : null,
                     FrameRate = ParseFrameRate(normalization.FrameRate),
@@ -341,13 +345,24 @@ public sealed class NextCoordinatorService
         return frameRate.Trim();
     }
 
-    private static string MapVideoCodec(string? codec)
+    private static string? MapVideoCodec(string? codec)
         => codec?.Trim().ToLowerInvariant() switch
         {
             "hevc" or "h265" => "hevc",
             "mpeg2" or "mpeg2video" => "mpeg2video",
             _ => "h264",
         };
+
+    private static string? MapH264Profile(string? profile, string? codec)
+    {
+        if (string.IsNullOrWhiteSpace(codec) || codec.Trim().ToLowerInvariant() != "h264")
+        {
+            return null;
+        }
+
+        var p = profile?.Trim().ToLowerInvariant();
+        return p is "main" or "high" or "baseline" ? p : "main";
+    }
 
     private static string MapAudioCodec(string? codec)
         => codec?.Trim().ToLowerInvariant() switch

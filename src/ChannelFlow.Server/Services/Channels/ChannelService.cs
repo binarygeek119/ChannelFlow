@@ -98,6 +98,7 @@ public class ChannelService
         existing.AudioLanguage = updated.AudioLanguage;
         existing.PlayoutSeed = updated.PlayoutSeed;
         existing.WeatherLocationQuery = updated.WeatherLocationQuery;
+        existing.RtspUrl = updated.RtspUrl;
         existing.FilterJson = updated.FilterJson;
         existing.CatalogMode = updated.CatalogMode;
         existing.AiFineTunePrompt = updated.AiFineTunePrompt;

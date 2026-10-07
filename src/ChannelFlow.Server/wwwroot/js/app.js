@@ -58,6 +58,8 @@
     let presetNumberingMode = 1;
     let configPage = null;
     let aiSettings = null;
+    let aiProviderDraft = null;
+    let aiVisibleProviderId = 0;
     let aiChannels = [];
     let aiPlayoutTemplates = [];
     let aiPage = 'lineups';
@@ -3745,44 +3747,114 @@
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
     }
 
+    function defaultAiProviderDraft() {
+        return {
+            0: { model: 'gpt-4o-mini', key: null, keyEdited: false },
+            1: { model: 'gpt-4o-mini', key: null, keyEdited: false }
+        };
+    }
+
+    function ensureAiProviderDraft() {
+        if (!aiProviderDraft) {
+            aiProviderDraft = defaultAiProviderDraft();
+        }
+    }
+
+    function selectedAiProviderId() {
+        return Number($('ai-default-provider')?.value || '0') === 1 ? 1 : 0;
+    }
+
+    function maskedKeyForProvider(providerId) {
+        if (!aiSettings) {
+            return '';
+        }
+
+        return providerId === 1 ? aiSettings.veniceApiKeyMasked : aiSettings.openAiApiKeyMasked;
+    }
+
+    function stashAiProviderFields(providerId) {
+        ensureAiProviderDraft();
+        const draft = aiProviderDraft[providerId === 1 ? 1 : 0];
+        const modelEl = $('ai-model');
+        const keyEl = $('ai-api-key');
+        if (modelEl) {
+            draft.model = modelEl.value.trim() || 'gpt-4o-mini';
+        }
+
+        if (keyEl && keyEl.dataset.userEdited === '1') {
+            const key = normalizeApiKeyInput(keyEl.value);
+            const masked = maskedKeyForProvider(providerId);
+            if (key && !looksLikeMaskedApiKey(key) && key !== masked) {
+                draft.key = key;
+                draft.keyEdited = true;
+            }
+        }
+    }
+
+    function applyAiProviderFields() {
+        ensureAiProviderDraft();
+        const providerId = aiVisibleProviderId;
+        const venice = providerId === 1;
+        const draft = aiProviderDraft[providerId];
+        const keyLabel = $('ai-api-key-label');
+        const modelLabel = $('ai-model-label');
+        if (keyLabel) {
+            keyLabel.textContent = venice ? 'Venice API key' : 'OpenAI API key';
+        }
+
+        if (modelLabel) {
+            modelLabel.textContent = venice ? 'Venice model' : 'OpenAI model';
+        }
+
+        const modelEl = $('ai-model');
+        if (modelEl) {
+            modelEl.value = draft.model || 'gpt-4o-mini';
+        }
+
+        const keyEl = $('ai-api-key');
+        if (keyEl) {
+            keyEl.name = venice ? 'cf-ai-venice-token' : 'cf-ai-openai-token';
+            if (draft.keyEdited && draft.key) {
+                keyEl.value = draft.key;
+                keyEl.dataset.userEdited = '1';
+                keyEl.readOnly = false;
+            } else {
+                keyEl.value = '';
+                delete keyEl.dataset.userEdited;
+                keyEl.readOnly = true;
+            }
+        }
+
+        const keyStatus = $('ai-key-status');
+        if (keyStatus && aiSettings) {
+            keyStatus.textContent = venice
+                ? `Venice key: ${aiSettings.hasVeniceApiKey ? aiSettings.veniceApiKeyMasked : 'not set'}`
+                : `OpenAI key: ${aiSettings.hasOpenAiApiKey ? aiSettings.openAiApiKeyMasked : 'not set'}`;
+        }
+    }
+
+    function onAiProviderChange() {
+        stashAiProviderFields(aiVisibleProviderId);
+        aiVisibleProviderId = selectedAiProviderId();
+        applyAiProviderFields();
+    }
+
     function readAiSettingsFromForm() {
+        stashAiProviderFields(aiVisibleProviderId);
+        ensureAiProviderDraft();
         return {
             enabled: !!$('ai-enabled')?.checked,
             autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
             autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
             simulateOriginalBroadcasting: !!$('ai-simulate-original-broadcasting')?.checked,
-            defaultProvider: Number($('ai-default-provider')?.value || '0'),
-            openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
-            veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
+            defaultProvider: selectedAiProviderId(),
+            openAiModel: aiProviderDraft[0].model || 'gpt-4o-mini',
+            veniceModel: aiProviderDraft[1].model || 'gpt-4o-mini',
+            ttsModel: $('ai-tts-model')?.value?.trim() || '',
             ttsVoice: $('ai-tts-voice')?.value?.trim() || 'nova',
-            openAiApiKey: readEditedApiKey('ai-openai-key'),
-            veniceApiKey: readEditedApiKey('ai-venice-key')
+            openAiApiKey: aiProviderDraft[0].keyEdited ? aiProviderDraft[0].key : null,
+            veniceApiKey: aiProviderDraft[1].keyEdited ? aiProviderDraft[1].key : null
         };
-    }
-
-    function resetAiApiKeyField(id) {
-        const el = $(id);
-        if (!el) {
-            return;
-        }
-
-        el.value = '';
-        delete el.dataset.userEdited;
-        el.readOnly = true;
-    }
-
-    function readEditedApiKey(id) {
-        const el = $(id);
-        if (!el || el.dataset.userEdited !== '1') {
-            return null;
-        }
-
-        const key = normalizeApiKeyInput(el.value);
-        if (!key || looksLikeMaskedApiKey(key) || key === (aiSettings && (id === 'ai-openai-key' ? aiSettings.openAiApiKeyMasked : aiSettings.veniceApiKeyMasked))) {
-            return null;
-        }
-
-        return key;
     }
 
     function looksLikeMaskedApiKey(value) {
@@ -3795,34 +3867,32 @@
     }
 
     function bindAiApiKeyFields() {
-        ['ai-openai-key', 'ai-venice-key'].forEach((id) => {
-            const el = $(id);
-            if (!el || el.dataset.guardBound === '1') {
+        const el = $('ai-api-key');
+        if (!el || el.dataset.guardBound === '1') {
+            return;
+        }
+
+        el.dataset.guardBound = '1';
+        el.readOnly = true;
+        el.addEventListener('focus', () => {
+            el.readOnly = false;
+        });
+        el.addEventListener('keydown', (event) => {
+            if (event.metaKey || event.ctrlKey || event.altKey) {
                 return;
             }
-
-            el.dataset.guardBound = '1';
-            el.readOnly = true;
-            el.addEventListener('focus', () => {
-                el.readOnly = false;
-            });
-            el.addEventListener('keydown', (event) => {
-                if (event.metaKey || event.ctrlKey || event.altKey) {
-                    return;
-                }
-                if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
-                    el.dataset.userEdited = '1';
-                }
-            });
-            el.addEventListener('paste', () => {
+            if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
                 el.dataset.userEdited = '1';
-            });
-            el.addEventListener('input', (event) => {
-                const type = event.inputType || '';
-                if (type === 'insertText' || type === 'insertFromPaste' || type === 'insertFromDrop' || type === 'insertFromYank') {
-                    el.dataset.userEdited = '1';
-                }
-            });
+            }
+        });
+        el.addEventListener('paste', () => {
+            el.dataset.userEdited = '1';
+        });
+        el.addEventListener('input', (event) => {
+            const type = event.inputType || '';
+            if (type === 'insertText' || type === 'insertFromPaste' || type === 'insertFromDrop' || type === 'insertFromYank') {
+                el.dataset.userEdited = '1';
+            }
         });
     }
 
@@ -3838,15 +3908,13 @@
             if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').checked = !!aiSettings.autoApplyToAllChannelsOnSave;
             if ($('ai-simulate-original-broadcasting')) $('ai-simulate-original-broadcasting').checked = !!aiSettings.simulateOriginalBroadcasting;
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
-            if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
-            if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
+            aiProviderDraft = defaultAiProviderDraft();
+            aiProviderDraft[0].model = aiSettings.openAiModel || 'gpt-4o-mini';
+            aiProviderDraft[1].model = aiSettings.veniceModel || 'gpt-4o-mini';
+            aiVisibleProviderId = selectedAiProviderId();
+            applyAiProviderFields();
+            if ($('ai-tts-model')) $('ai-tts-model').value = aiSettings.ttsModel || '';
             if ($('ai-tts-voice')) $('ai-tts-voice').value = aiSettings.ttsVoice || 'nova';
-            resetAiApiKeyField('ai-openai-key');
-            resetAiApiKeyField('ai-venice-key');
-            const keyStatus = $('ai-key-status');
-            if (keyStatus) {
-                keyStatus.textContent = `OpenAI key: ${aiSettings.hasOpenAiApiKey ? aiSettings.openAiApiKeyMasked : 'not set'} · Venice key: ${aiSettings.hasVeniceApiKey ? aiSettings.veniceApiKeyMasked : 'not set'}`;
-            }
             aiChannels = await api('/ai/channels');
             aiPlayoutTemplates = await api('/ai/playout-templates');
             renderAiChannels();
@@ -4257,9 +4325,12 @@
                 enabled: form.enabled,
                 autoApplyOnChannelAdd: form.autoApplyOnChannelAdd,
                 autoApplyToAllChannelsOnSave: form.autoApplyToAllChannelsOnSave,
+                simulateOriginalBroadcasting: form.simulateOriginalBroadcasting,
                 defaultProvider: form.defaultProvider,
                 openAiModel: form.openAiModel,
-                veniceModel: form.veniceModel
+                veniceModel: form.veniceModel,
+                ttsModel: form.ttsModel,
+                ttsVoice: form.ttsVoice
             };
             if (form.openAiApiKey) payload.openAiApiKey = form.openAiApiKey;
             if (form.veniceApiKey) payload.veniceApiKey = form.veniceApiKey;
@@ -10304,6 +10375,7 @@
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
         bindAiApiKeyFields();
+        change('ai-default-provider', onAiProviderChange);
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
         click('btn-ai-clear-all-pools', () => clearAllAiPools().catch((e) => toast(e.message, 'error')));
         click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));

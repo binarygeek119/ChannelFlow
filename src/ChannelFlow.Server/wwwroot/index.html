@@ -817,28 +817,24 @@
                         </select>
                     </label>
                     <label class="field">
-                        <span>OpenAI API key</span>
-                        <input id="ai-openai-key" type="password" class="emby-input" name="cf-ai-openai-token" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" readonly placeholder="Leave blank to keep the saved key">
+                        <span id="ai-api-key-label">OpenAI API key</span>
+                        <input id="ai-api-key" type="password" class="emby-input" name="cf-ai-openai-token" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" readonly placeholder="Leave blank to keep the saved key">
                     </label>
                     <label class="field">
-                        <span>OpenAI model</span>
-                        <input id="ai-openai-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
+                        <span id="ai-model-label">OpenAI model</span>
+                        <input id="ai-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
                     <label class="field">
-                        <span>Venice API key</span>
-                        <input id="ai-venice-key" type="password" class="emby-input" name="cf-ai-venice-token" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" readonly placeholder="Leave blank to keep the saved key">
-                    </label>
-                    <label class="field">
-                        <span>Venice model</span>
-                        <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
+                        <span>AI TTS model</span>
+                        <input id="ai-tts-model" type="text" class="emby-input" placeholder="tts-1 or tts-kokoro" autocomplete="off">
                     </label>
                     <label class="field">
                         <span>AI voice</span>
                         <input id="ai-tts-voice" type="text" class="emby-input" placeholder="nova" autocomplete="off">
                     </label>
-                    <p class="hint">Voice id for AI text-to-speech (FlowWire, Catherine Wolfe, and any other AI speech). OpenAI and Venice use different names — pick one that matches the default provider. See <a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI voices</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice voices</a>.</p>
+                    <p class="hint">Leave the TTS model blank to auto-select: OpenAI uses <code>tts-1</code>, Venice uses <code>tts-kokoro</code>. Voice ids are provider-specific — OpenAI <code>nova</code> maps to Venice <code>af_nova</code>. See <a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI voices</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice voices</a>.</p>
                     <p id="ai-key-status" class="hint"></p>
-                    <p class="hint">Leave a key field blank to keep what is already saved. Password managers often dump the ChannelFlow login into these boxes; ChannelFlow ignores that unless you paste a new key yourself.</p>
+                    <p class="hint">Leave the key field blank to keep what is already saved. Password managers often dump the ChannelFlow login into this box; ChannelFlow ignores that unless you paste a new key yourself.</p>
                     <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. ChannelFlow-Server auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout. The scheduled task adds <strong>one day</strong> when the horizon drops to 13 days instead of rebuilding all 14. Queued new channels can also be processed from <strong>Dashboard → Scheduled Tasks → ChannelFlow-Server AI Lineup Auto-Apply (Channel Add)</strong>.</p>
                 </div>
                 <div class="card section-card">

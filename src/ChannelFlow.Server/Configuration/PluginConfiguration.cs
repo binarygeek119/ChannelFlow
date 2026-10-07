@@ -234,6 +234,11 @@ public class AiSettings
     public string VeniceModel { get; set; } = "gpt-4o-mini";
 
     /// <summary>
+    /// TTS model id. Leave blank to use <c>tts-1</c> for OpenAI or <c>tts-kokoro</c> for Venice.
+    /// </summary>
+    public string TtsModel { get; set; } = "";
+
+    /// <summary>
     /// Voice id for AI text-to-speech (OpenAI <c>nova</c>, Venice <c>af_sky</c>, etc.).
     /// </summary>
     public string TtsVoice { get; set; } = "nova";

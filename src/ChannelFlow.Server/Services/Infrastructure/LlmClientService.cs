@@ -105,11 +105,13 @@ public class LlmClientService
             throw new InvalidOperationException("TTS text is empty.");
         }
 
+        var model = ResolveSpeechModel(provider, settings);
+        var speechVoice = ResolveSpeechVoice(provider, settings, voice);
         var payload = new
         {
-            model = "tts-1",
+            model,
             input,
-            voice = ResolveSpeechVoice(settings, voice),
+            voice = speechVoice,
             response_format = "mp3"
         };
 
@@ -120,9 +122,15 @@ public class LlmClientService
         var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var message = TryExtractProviderError(Encoding.UTF8.GetString(bytes))
-                ?? $"AI TTS failed ({(int)response.StatusCode}).";
-            throw new InvalidOperationException(message);
+            var body = Encoding.UTF8.GetString(bytes);
+            _logger.LogWarning(
+                "AI TTS failed ({Status}) via {Provider}/{Model} voice={Voice}: {Body}",
+                (int)response.StatusCode,
+                provider,
+                model,
+                speechVoice,
+                body);
+            throw new InvalidOperationException(FormatSpeechError((int)response.StatusCode, provider, model, body));
         }
 
         if (bytes.Length < 64)
@@ -133,14 +141,23 @@ public class LlmClientService
         return bytes;
     }
 
-    private static string ResolveSpeechVoice(AiSettings settings, string? requested)
+    private static string ResolveSpeechModel(AiProvider provider, AiSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.TtsVoice))
+        if (!string.IsNullOrWhiteSpace(settings.TtsModel))
         {
-            return settings.TtsVoice.Trim();
+            return settings.TtsModel.Trim();
         }
 
-        return MapSpeechVoice(requested);
+        return provider == AiProvider.Venice ? "tts-kokoro" : "tts-1";
+    }
+
+    private static string ResolveSpeechVoice(AiProvider provider, AiSettings settings, string? requested)
+    {
+        var voice = !string.IsNullOrWhiteSpace(settings.TtsVoice)
+            ? settings.TtsVoice.Trim()
+            : MapSpeechVoice(requested);
+
+        return provider == AiProvider.Venice ? MapVeniceSpeechVoice(voice) : voice;
     }
 
     private static string MapSpeechVoice(string? voice)
@@ -158,6 +175,49 @@ public class LlmClientService
             "ja" or "ko" or "zh-cn" or "zh" => "alloy",
             _ => "alloy"
         };
+    }
+
+    private static string MapVeniceSpeechVoice(string voice)
+    {
+        if (voice.Contains('_', StringComparison.Ordinal))
+        {
+            return voice;
+        }
+
+        return voice.Trim().ToLowerInvariant() switch
+        {
+            "alloy" => "af_alloy",
+            "echo" => "am_echo",
+            "fable" => "bm_fable",
+            "onyx" => "am_onyx",
+            "nova" => "af_nova",
+            "shimmer" => "af_bella",
+            "coral" => "af_sarah",
+            "sage" => "af_kore",
+            "ash" => "am_michael",
+            "catherine" or "catherine wolfe" => "af_sky",
+            _ => voice
+        };
+    }
+
+    private static string FormatSpeechError(int statusCode, AiProvider provider, string model, string body)
+    {
+        var providerMessage = TryExtractProviderError(body);
+        if (!string.IsNullOrWhiteSpace(providerMessage))
+        {
+            return providerMessage;
+        }
+
+        var hint = provider == AiProvider.Venice
+            ? " Venice TTS expects a model such as tts-kokoro and a matching voice (for example af_sky)."
+            : string.Empty;
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return $"AI TTS failed ({statusCode}) via {provider}/{model}.{hint}";
+        }
+
+        var excerpt = body.Length <= 300 ? body : body[..300] + "…";
+        return $"AI TTS failed ({statusCode}) via {provider}/{model}: {excerpt}";
     }
 
     internal static string ExtractJsonFromText(string content)
@@ -336,12 +396,19 @@ public class LlmClientService
                 CommentHandling = JsonCommentHandling.Skip
             });
 
-            if (document.RootElement.TryGetProperty("error", out var error)
-                && error.ValueKind == JsonValueKind.Object
-                && error.TryGetProperty("message", out var message)
-                && message.ValueKind == JsonValueKind.String)
+            if (document.RootElement.TryGetProperty("error", out var error))
             {
-                return message.GetString();
+                if (error.ValueKind == JsonValueKind.String)
+                {
+                    return error.GetString();
+                }
+
+                if (error.ValueKind == JsonValueKind.Object
+                    && error.TryGetProperty("message", out var message)
+                    && message.ValueKind == JsonValueKind.String)
+                {
+                    return message.GetString();
+                }
             }
         }
         catch (JsonException)

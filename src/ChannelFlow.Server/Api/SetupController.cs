@@ -435,16 +435,19 @@ public class TasksController : ControllerBase
             }
         });
 
-        return Accepted(new { queued = true, status = await BuildCatalogCleanupStatusAsync(cancellationToken) });
+        return Accepted(new { queued = true, status = await BuildCatalogCleanupStatusAsync(cancellationToken, forceCleanupRunning: true) });
     }
 
-    private async Task<object> BuildCatalogCleanupStatusAsync(CancellationToken cancellationToken)
+    private async Task<object> BuildCatalogCleanupStatusAsync(
+        CancellationToken cancellationToken,
+        bool forceCleanupRunning = false,
+        bool forceScanRunning = false)
     {
         var status = await _catalogCleanup.GetStatusAsync(cancellationToken);
         return new
         {
             gracePeriodDays = status.GracePeriodDays,
-            isRunning = status.IsRunning,
+            isRunning = status.IsRunning || forceCleanupRunning,
             markedMissing = status.MarkedMissing,
             removed = status.Removed,
             currentlyMissing = status.CurrentlyMissing,
@@ -455,7 +458,7 @@ public class TasksController : ControllerBase
             lastCatalogSyncCompletedAt = status.LastCatalogSyncCompletedAt,
             localScan = new
             {
-                isRunning = status.LocalScanIsRunning,
+                isRunning = status.LocalScanIsRunning || forceScanRunning,
                 totalItems = status.LocalScanTotalItems,
                 processedItems = status.LocalScanProcessedItems,
                 found = status.LocalScanFound,
@@ -492,7 +495,7 @@ public class TasksController : ControllerBase
             }
         });
 
-        return Accepted(new { queued = true, status = await BuildCatalogCleanupStatusAsync(cancellationToken) });
+        return Accepted(new { queued = true, status = await BuildCatalogCleanupStatusAsync(cancellationToken, forceScanRunning: true) });
     }
 
     /// <summary>

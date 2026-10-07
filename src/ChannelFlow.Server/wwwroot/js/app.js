@@ -5566,6 +5566,48 @@
     }
 
     let catalogCleanupPollTimer = null;
+    let catalogCleanupPendingRun = null;
+
+    function beginCatalogCleanupPendingRun(status) {
+        // The run endpoint queues work in the background, so its response can be
+        // built before the server flips the running flag. Remember what "not yet
+        // started" looks like so an early poll cannot stop the status polling.
+        catalogCleanupPendingRun = {
+            since: Date.now(),
+            baselineCleanupCompletedAt: (status && status.lastCompletedAt) || null,
+            baselineScanCompletedAt: (status && status.localScan && status.localScan.lastCompletedAt) || null,
+            sawRun: false
+        };
+    }
+
+    function shouldContinueCatalogCleanupPolling(status) {
+        const running = !!(status.isRunning || (status.localScan && status.localScan.isRunning));
+        const pending = catalogCleanupPendingRun;
+        if (running) {
+            if (pending) {
+                pending.sawRun = true;
+            }
+            return true;
+        }
+
+        if (!pending) {
+            return false;
+        }
+
+        const cleanupFinished = !!(status.lastCompletedAt
+            && status.lastCompletedAt !== pending.baselineCleanupCompletedAt);
+        const scanFinished = !!(status.localScan && status.localScan.lastCompletedAt
+            && status.localScan.lastCompletedAt !== pending.baselineScanCompletedAt);
+        if (pending.sawRun || cleanupFinished || scanFinished || Date.now() - pending.since > 60000) {
+            // The queued run finished (this status already shows its result),
+            // or it never started within a minute — stop watching either way.
+            catalogCleanupPendingRun = null;
+            return false;
+        }
+
+        // Queued on the server but the running flag has not flipped yet.
+        return true;
+    }
 
     function renderCatalogCleanupStatus(status) {
         const el = $('catalog-cleanup-status');
@@ -5683,7 +5725,7 @@
         try {
             const status = await api('/tasks/catalog-cleanup');
             renderCatalogCleanupStatus(status);
-            if (status.isRunning || status.localScan?.isRunning) {
+            if (shouldContinueCatalogCleanupPolling(status)) {
                 startCatalogCleanupPolling();
             } else {
                 stopCatalogCleanupPolling();
@@ -5771,6 +5813,7 @@
         if (result.status) {
             renderCatalogCleanupStatus(result.status);
         }
+        beginCatalogCleanupPendingRun(result.status);
         startCatalogCleanupPolling();
         beginLibraryTaskPopup('cleanup', 'Catalog cleanup', mapCleanupTask(result.status));
         await loadCatalogCleanup();
@@ -5786,6 +5829,7 @@
         if (result.status) {
             renderCatalogCleanupStatus(result.status);
         }
+        beginCatalogCleanupPendingRun(result.status);
         startCatalogCleanupPolling();
         beginLibraryTaskPopup('cleanup', 'Catalog cleanup', mapCleanupTask(result.status) || {
             isRunning: true,

@@ -42,6 +42,7 @@ public sealed class StreamNormalizationService
             audioChannels = target.AudioChannels,
             audioSampleRate = target.AudioSampleRate.ToString(),
             audioBitrate = target.AudioBitrate,
+            normalizationMode = target.NormalizationMode,
             summary = target.Summary
         };
     }
@@ -61,7 +62,8 @@ public readonly record struct NormalizationTarget(
     string AudioLayout,
     int AudioChannelCount,
     int AudioSampleRate,
-    string AudioBitrate)
+    string AudioBitrate,
+    string NormalizationMode)
 {
     public static NormalizationTarget Default => FromSettings(null);
 
@@ -76,11 +78,12 @@ public readonly record struct NormalizationTarget(
             AudioCodec = AudioCodec,
             AudioChannels = AudioChannels,
             AudioSampleRate = AudioSampleRate.ToString(),
-            AudioBitrate = AudioBitrate
+            AudioBitrate = AudioBitrate,
+            NormalizationMode = NormalizationMode
         };
 
     public string Summary
-        => $"{VideoLabel} {ProfileLabel} {BitrateLabel} @ {SizeLabel} {FrameRate} fps, {AudioLabel}";
+        => $"{ModePrefix}{VideoLabel} {ProfileLabel} {BitrateLabel} @ {SizeLabel} {FrameRate} fps, {AudioLabel}";
 
     public bool IsMpeg2 => VideoCodec == "mpeg2";
 
@@ -118,6 +121,8 @@ public readonly record struct NormalizationTarget(
         var sampleRate = Pick(saved?.AudioSampleRate, NormalizationSettings.DefaultAudioSampleRate, "44100", "48000");
         var audioBitrate = Pick(saved?.AudioBitrate, NormalizationSettings.DefaultAudioBitrate,
             "128k", "192k", "256k", "320k", "448k", "640k");
+        var normalizationMode = Pick(saved?.NormalizationMode, NormalizationSettings.DefaultNormalizationMode,
+            "transcode", "copy");
         var (fpsFilter, fpsOutput, gop) = FrameRateParts(frameRate);
         var (layout, count) = ChannelLayoutParts(audioChannels);
         return new NormalizationTarget(
@@ -134,8 +139,11 @@ public readonly record struct NormalizationTarget(
             layout,
             count,
             sampleRate == "44100" ? 44100 : 48000,
-            audioBitrate);
+            audioBitrate,
+            normalizationMode);
     }
+
+    private string ModePrefix => NormalizationMode == "copy" ? "Stream copy / " : "";
 
     private string VideoLabel => VideoCodec == "mpeg2" ? "MPEG-2" : "H.264";
 

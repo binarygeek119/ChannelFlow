@@ -313,7 +313,8 @@ public sealed class GpuCapabilityService
             AudioCodec = settings.AudioCodec,
             AudioChannels = settings.AudioChannels,
             AudioSampleRate = settings.AudioSampleRate,
-            AudioBitrate = settings.AudioBitrate
+            AudioBitrate = settings.AudioBitrate,
+            NormalizationMode = settings.NormalizationMode
         };
     }
 

@@ -73,7 +73,8 @@ public class NormalizationController : ControllerBase
                         AudioCodec = request.AudioCodec ?? NormalizationSettings.DefaultAudioCodec,
                         AudioChannels = request.AudioChannels ?? NormalizationSettings.DefaultAudioChannels,
                         AudioSampleRate = request.AudioSampleRate ?? NormalizationSettings.DefaultAudioSampleRate,
-                        AudioBitrate = request.AudioBitrate ?? NormalizationSettings.DefaultAudioBitrate
+                        AudioBitrate = request.AudioBitrate ?? NormalizationSettings.DefaultAudioBitrate,
+                        NormalizationMode = request.NormalizationMode ?? NormalizationSettings.DefaultNormalizationMode
                     }).ToSettings(),
                     accel);
             plugin.SaveConfiguration();
@@ -106,6 +107,7 @@ public class NormalizationController : ControllerBase
             audioChannels = target.AudioChannels,
             audioSampleRate = target.AudioSampleRate.ToString(),
             audioBitrate = target.AudioBitrate,
+            normalizationMode = target.NormalizationMode,
             summary = target.Summary,
             pipeline = _commands.DescribePipeline(),
             capabilities = new
@@ -141,6 +143,9 @@ public class NormalizationSettingsRequest
     public string? AudioSampleRate { get; set; }
 
     public string? AudioBitrate { get; set; }
+
+    /// <summary><c>transcode</c> or <c>copy</c>. Apply the new next-normalization mode.</summary>
+    public string? NormalizationMode { get; set; }
 
     public bool? ResetToDefaults { get; set; }
 }

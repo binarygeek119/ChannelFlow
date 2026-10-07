@@ -163,6 +163,7 @@ public sealed class NextCoordinatorService
         var vaapiDevice = string.IsNullOrWhiteSpace(transcode.VaapiDevice)
             ? _encoding.EnvironmentVaapiDevice
             : transcode.VaapiDevice;
+        var copyMode = normalization.NormalizationMode.Equals("copy", StringComparison.OrdinalIgnoreCase);
 
         return new NextChannelConfig
         {
@@ -172,7 +173,8 @@ public sealed class NextCoordinatorService
             {
                 Audio = new NextAudioNormalization
                 {
-                    Mode = "transcode",
+                    Mode = copyMode ? "copy" : "transcode",
+                    CopyFormats = copyMode ? NextCopyFormats.Audio : null,
                     Format = MapAudioCodec(normalization.AudioCodec),
                     BitrateKbps = ParseBitrate(normalization.AudioBitrate),
                     Channels = ParseChannels(normalization.AudioChannels),
@@ -180,7 +182,8 @@ public sealed class NextCoordinatorService
                 },
                 Video = new NextVideoNormalization
                 {
-                    Mode = "transcode",
+                    Mode = copyMode ? "copy" : "transcode",
+                    CopyFormats = copyMode ? NextCopyFormats.Video : null,
                     Format = MapVideoCodec(normalization.VideoCodec),
                     Width = width,
                     Height = height,
@@ -363,4 +366,16 @@ public sealed class NextCoordinatorService
             "videotoolbox" => "videotoolbox",
             _ => null,
         };
+}
+
+/// <summary>
+/// Codecs that mux cleanly into HLS MPEG-TS. When Normalization mode is <c>copy</c>,
+/// next stream-copies sources whose codecs appear in these lists and transcodes the rest.
+/// Mirrors next's VideoCopyFormat / AudioCopyFormat enums.
+/// </summary>
+internal static class NextCopyFormats
+{
+    public static readonly List<string> Video = ["h264", "hevc", "mpeg2video"];
+
+    public static readonly List<string> Audio = ["aac", "ac3", "eac3", "mp2", "mp3"];
 }

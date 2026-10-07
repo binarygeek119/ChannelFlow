@@ -116,6 +116,9 @@ public class NextAudioNormalization
 {
     public string Mode { get; set; } = "transcode";
 
+    [JsonPropertyName("copy_formats")]
+    public List<string>? CopyFormats { get; set; }
+
     public string? Format { get; set; }
 
     [JsonPropertyName("bitrate_kbps")]
@@ -136,6 +139,9 @@ public class NextAudioNormalization
 public class NextVideoNormalization
 {
     public string Mode { get; set; } = "transcode";
+
+    [JsonPropertyName("copy_formats")]
+    public List<string>? CopyFormats { get; set; }
 
     public string? Format { get; set; }
 

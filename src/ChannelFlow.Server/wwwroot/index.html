@@ -1055,6 +1055,14 @@
                     <p class="hint">Target video and audio. Codec, profile, size, and frame rate follow the encoder on the Transcode card below.</p>
                     <div id="normalization-status" class="status-card hidden" hidden></div>
                     <label class="field">
+                        <span>Encoding mode</span>
+                        <select id="norm-mode" class="emby-select">
+                            <option value="transcode">Transcode always</option>
+                            <option value="copy">Stream copy when possible</option>
+                        </select>
+                    </label>
+                    <p class="hint">Stream copy lets the ErsatzTV next engine hand HLS-compatible sources to the segmenter without re-encoding (H.264/HEVC/MPEG-2 video, AAC/AC-3/E-AC-3/MP2/MP3 audio). Everything else — and any item with a logo/bug overlay — still transcodes to the target below. Applies when ErsatzTV next is enabled; the built-in tuner engine always transcodes.</p>
+                    <label class="field">
                         <span>Resolution</span>
                         <select id="norm-resolution" class="emby-select">
                             <option value="match">Match channel (1080p 16:9 or 4:3)</option>
@@ -1574,7 +1582,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets40"></script>
+  <script src="js/app.js?v=assets41"></script>
   <script src="js/shell.js?v=library6"></script>
 </body>
 </html>

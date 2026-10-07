@@ -6582,6 +6582,9 @@
         lines.push(runAhead > 0
             ? `Run-ahead buffer: ${runAhead}s`
             : 'Run-ahead buffer: off (real time)');
+        if (normalization?.normalizationMode === 'copy') {
+            lines.push('Stream copy: on — ErsatzTV next copies HLS-compatible sources and transcodes the rest.');
+        }
         if (transcode?.source) {
             lines.push(`Encoder source: ${transcode.source === 'saved' ? 'saved' : 'container environment'}`);
         }
@@ -6666,7 +6669,8 @@
                 audioCodec: $('norm-audio-codec')?.value || 'aac',
                 audioChannels: $('norm-audio-channels')?.value || '2.0',
                 audioSampleRate: $('norm-audio-rate')?.value || '48000',
-                audioBitrate: $('norm-audio-bitrate')?.value || '192k'
+                audioBitrate: $('norm-audio-bitrate')?.value || '192k',
+                normalizationMode: $('norm-mode')?.value || 'transcode'
             })
         });
         toast('Stream settings saved. The next program on each channel uses this pipeline.', 'success');
@@ -6728,7 +6732,8 @@
             'norm-audio-codec': settings.audioCodec || 'aac',
             'norm-audio-channels': mapNormAudioChannels(settings.audioChannels),
             'norm-audio-rate': String(settings.audioSampleRate || '48000'),
-            'norm-audio-bitrate': settings.audioBitrate || '192k'
+            'norm-audio-bitrate': settings.audioBitrate || '192k',
+            'norm-mode': settings.normalizationMode || 'transcode'
         };
         Object.entries(fields).forEach(([id, value]) => {
             const el = $(id);

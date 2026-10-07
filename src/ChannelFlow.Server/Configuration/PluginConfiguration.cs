@@ -237,6 +237,13 @@ public class NormalizationSettings
 
     public string AudioBitrate { get; set; } = DefaultAudioBitrate;
 
+    /// <summary>
+    /// <c>transcode</c> always encodes; <c>copy</c> lets the ErsatzTV next engine
+    /// stream-copy sources whose codec fits HLS MPEG-TS and transcode everything else.
+    /// The built-in channel engine always transcodes.
+    /// </summary>
+    public string NormalizationMode { get; set; } = DefaultNormalizationMode;
+
     public const string DefaultResolution = "match";
     public const string DefaultFrameRate = "30";
     public const string DefaultVideoCodec = "h264";
@@ -246,6 +253,7 @@ public class NormalizationSettings
     public const string DefaultAudioChannels = "2.0";
     public const string DefaultAudioSampleRate = "48000";
     public const string DefaultAudioBitrate = "192k";
+    public const string DefaultNormalizationMode = "transcode";
 
     public static NormalizationSettings CreateDefault() => new();
 }

@@ -1,6 +1,9 @@
+mod ai;
 mod api;
 mod model;
+mod openai;
 mod store;
+mod transcode;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -40,6 +43,7 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
+    let started = std::time::Instant::now();
     let config = args.config.unwrap_or_else(|| PathBuf::from("config"));
 
     // The image runs as `ersatztv` (uid 1000, inherited from the next base), so
@@ -74,6 +78,13 @@ async fn main() -> Result<()> {
     tracing::info!("web UI on http://{addr}/");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, api::router(store)).await?;
+    let bound = listener.local_addr()?;
+    let about = api::AboutInfo {
+        config_folder: config.display().to_string(),
+        listen_port: bound.port(),
+        started,
+    };
+    let http = openai::client().context("building the HTTP client for AI requests")?;
+    axum::serve(listener, api::router(store, about, http)).await?;
     Ok(())
 }

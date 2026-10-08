@@ -17,14 +17,20 @@ The image is multi-arch (amd64 + arm64) and is not pinned to a platform, so the 
 ```
 Cargo.toml                    workspace, excludes vendor/ersatztv-next
 crates/channelflow/
+  build.rs                    stamps GIT_SHA + RUSTC_VERSION for the About page
   src/main.rs                 CLI, startup, config directory
   src/model.rs                Channel / NewChannel / UpdateChannel
+  src/ai.rs                   OpenAI-compatible endpoint + TTS settings
+  src/openai.rs               the test call: a model listing, a chat reply, and one spoken phrase
+  src/transcode.rs            next's ffmpeg + normalization settings, defaults + merge
   src/store.rs                file-backed storage, distinct error types
   src/api.rs                  axum routes, HTTP status mapping, embedded UI
-  static/                     index.html, app.css, app.js — compiled in
+  static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
 Storage is **one JSON file per channel** under `<config>/channels/`, not a database. next is driven entirely by JSON documents, so the on-disk state is already close to the shape you hand to the engine, and nothing has to be installed before the server runs. If a real query layer becomes necessary later, `store.rs` is the only thing that changes.
+
+Instance transcode defaults live beside them in `<config>/transcode.json`, written on first run so it is a real, hand-editable file rather than an implied set of defaults. The AI page's connection settings live in `<config>/ai.json`, written `0600` — that is the one file holding a secret, so it is not left readable by every account on the host.
 
 Storage failures keep their own error type rather than collapsing into `anyhow`, so the API can answer `404` for a missing channel, `409` for a channel number already in use, and `400` for invalid input instead of reporting everything as `500`.
 
@@ -33,13 +39,47 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | Method | Path | Result |
 |---|---|---|
 | `GET` | `/api/health` | status, name, version |
+| `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |
 | `GET` | `/api/channels/{id}` | one channel, `404` if absent |
 | `POST` | `/api/channels` | create, `201`; `409` duplicate number, `400` invalid |
 | `PUT` | `/api/channels/{id}` | partial update |
 | `DELETE` | `/api/channels/{id}` | `204` |
+| `GET` | `/api/transcode` | the Transcode page's field list plus the instance defaults |
+| `PUT` | `/api/transcode` | replace the defaults, `400` if next's schema would reject it |
+| `GET` | `/api/ai` | the AI page's settings; the saved key is never returned |
+| `PUT` | `/api/ai` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
+| `POST` | `/api/ai/test` | try the endpoint now with the posted values; always `200`, the result carries `ok` |
+| `GET` | `/api/channels/{id}/transcode` | overrides, the defaults, and the effective settings |
+| `PUT` | `/api/channels/{id}/transcode` | store that channel's override patch |
+| `DELETE` | `/api/channels/{id}/transcode` | drop every override |
+| `GET` | `/live/channels.m3u` | every channel as an M3U playlist — `503` until the playout milestone |
+| `GET` | `/live/xmltv.xml` | the guide — `503` until the playout milestone |
+| `GET` | `/live/{n}.m3u8` | one channel's HLS stream — `503` until the playout milestone |
 
-The web UI is served at `/` and compiled into the binary via `include_str!`, so the image needs no asset directory and cannot start with a half-copied web root. A fresh install seeds channel 1 so there is something to look at.
+The web UI is served at `/` and compiled into the binary — the markup, CSS and JS via `include_str!`, the logo and favicons via `include_bytes!` — so the image needs no asset directory and cannot start with a half-copied web root. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
+
+The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer, all 22 menu items with their icons and group gaps, the near-black/rose palette, and the mark. Five menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the OpenAI connection below. The other 17 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+
+### AI settings
+
+The AI page is one OpenAI-compatible endpoint: an **API URL**, an **API key**, a **chat model**, a **TTS model** and a **voice**. There is no "OpenAI or Venice" switch on purpose — the URL *is* the choice. Point it at `https://api.openai.com/v1`, at a compatible provider, or at a model on the local network, and the same URLs serve both jobs. The API uses different models for different things, so two are named: the **chat model** for text — the lineup and guide copy the playout milestone will ask for — and the **TTS model** plus **voice** for speech.
+
+The API key is treated as a secret rather than an ordinary setting. `GET /api/ai` returns whether a key is saved but never the key itself, because this API has no authentication and the server listens on every interface by default. `ai.json` is written `0600`, and the page starts the field blank: a save that leaves it blank sends no key and keeps the stored one, while the field's **Remove** button is what clears it — so "leave it alone" and "get rid of it" stay distinguishable without either of them meaning a stray password-manager fill.
+
+**Test AI** answers "does this actually work?" without spending a save. It posts whatever is on the page — including a key typed but not yet stored — to `POST /api/ai/test`, which makes three real requests and writes nothing. The first lists models, which tells a wrong address or a rejected key apart from a working one; the second asks the chat model for a one-word reply; the third asks the endpoint to speak one short phrase. A bad key and a bad model look identical from a single failed request, so the result reports every probe with the endpoint's own message, and any HTTP status the endpoint returns is a normal `200` result rather than an error the page has to unwrap. The test passes when both the chat and speech probes answer — listing models stays informational, because a compatible server need not implement `/models` at all. This is the one place the server reaches the network, so `reqwest` with rustls — no OpenSSL — is the one dependency the settings pages added.
+
+### Transcode settings
+
+ErsatzTV next reads `ffmpeg` and `normalization` from a per-channel `channel_config.json`. `src/transcode.rs` mirrors exactly those two keys — the settings that change how a stream is encoded — and deliberately leaves out `playout` and `fallback`, which describe *what* plays. Two tests in that module walk `vendor/ersatztv-next/schema/channel_config.json`, one asserting the Rust types can hold every field it declares and write it back unchanged, the other asserting the Transcode page's field list names exactly the same set. A field added or renamed upstream fails the build instead of going unwritten.
+
+The page offers next's settings as **instance defaults**; each channel stores only its **differences** from them, deep-merged on top when the settings are read back. That is a third state per field, not two: an absent key inherits, while a key present with `null` is a real value — a channel can say "software encode" or "automatic bitrate" even when the default names a hardware encoder or a number. Because the stored patch is sparse, editing a default still reaches every channel that has not overridden that one field, which is what the Transcode page promises. The per-channel dialog diffs its edited values against the defaults to decide what to store, so a field is marked overridden exactly when it differs; there is no separate toggle to keep in sync.
+
+Overrides are plain JSON rather than a second typed struct, precisely because `Option<T>` cannot tell an absent key from a `null` one. A patch is validated by resolving it onto the defaults and deserialising the result into the typed settings, so anything next would reject — an unknown field, the wrong type, a frame rate outside next's pattern — is a `400` before it reaches the channel file.
+
+### Live TV
+
+The Live TV page lists every channel with the stream URL a player will use, plus the M3U and XMLTV playlist URLs, each with a copy button. Only port `8097` is published and the encoder listens inside the container on another port, so every URL is written against ChannelFlow's own origin: `/live/{n}.m3u8`, `/live/channels.m3u` and `/live/xmltv.xml`. Until the playout milestone produces those streams the routes answer `503` with a sentence rather than `404`, so a player pointed at one gets an honest "not yet" instead of "no such thing" — and the playout milestone repoints the same paths at ErsatzTV next without the page changing. There is no embedded player yet, on purpose: it would need a vendored `hls.js` to render an empty state, and it lands with the encoder.
 
 ## The vendored copy of next
 

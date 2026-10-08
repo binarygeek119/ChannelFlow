@@ -1172,6 +1172,9 @@ public class StreamService : IDisposable
 
     public async Task<string?> RenderEbsToTempAsync(Guid channelId, double durationSeconds, CancellationToken cancellationToken)
     {
+        // Defensive cap: this renders to disk synchronously inside the next resolver request,
+        // so an unbounded duration would stall resolution and fill the temp volume.
+        durationSeconds = Math.Clamp(durationSeconds, 5, 120);
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
@@ -1185,6 +1188,7 @@ public class StreamService : IDisposable
         var args = _ffmpeg.BuildEbsCommand(channel, plan);
         var tempDir = Path.Combine(Path.GetTempPath(), "ChannelFlow", "next-ebs");
         Directory.CreateDirectory(tempDir);
+        SweepStaleEbsTempFiles(tempDir);
         var tempFile = Path.Combine(tempDir, $"{channelId:N}_{DateTime.UtcNow.Ticks}.ts");
         try
         {
@@ -1197,6 +1201,29 @@ public class StreamService : IDisposable
             return null;
         }
         return tempFile;
+    }
+
+    /// <summary>
+    /// Rendered slates are handed to next as one-shot local sources; anything left behind by a
+    /// resolver call that was cancelled or crashed would accumulate on the temp volume forever.
+    /// </summary>
+    private static void SweepStaleEbsTempFiles(string tempDir)
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow.AddHours(-2);
+            foreach (var file in Directory.EnumerateFiles(tempDir, "*.ts"))
+            {
+                if (File.GetLastWriteTimeUtc(file) < cutoff)
+                {
+                    File.Delete(file);
+                }
+            }
+        }
+        catch
+        {
+            // Best effort; a locked or half-deleted file just gets swept next time.
+        }
     }
 
     private static string? ResolveBugPath(Channel channel, DateTime scheduleUtc, HolidayChannelService holidays)

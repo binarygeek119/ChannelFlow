@@ -24,6 +24,12 @@ public class NextIptvController : ControllerBase
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<NextIptvController> _logger;
 
+    /// <summary>
+    /// Longest EBS slate rendered to a temp file for next. Kept short because the render is
+    /// synchronous inside the resolver request; next re-resolves when the file ends.
+    /// </summary>
+    private const double EbsTempRenderSeconds = 30;
+
     private static readonly Regex SessionUrlRegex = new(
         @"https?://[^/""'\s]*/session/",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -210,31 +216,42 @@ public class NextIptvController : ControllerBase
             }
         }
 
-        // For EBS/off-air (no real media/bundled), try to give next a local rendered file
-        // so next handles transcoding directly.
-        try
+        // Off-air (no scheduled item at all): render a short EBS slate to a temp file so next
+        // transcodes it directly instead of double-encoding ChannelFlow's live output. The
+        // render is capped at EbsTempRenderSeconds so the resolver answers immediately and
+        // next re-resolves when the file ends. Everything that has a real renderer --
+        // commercials, weather star, news, art slides, bumpers -- must fall through to the
+        // live source below, or it would play as an EBS slate instead of its content.
+        if (item is null)
         {
-            var duration = Math.Max(5, (finishUtc - now.UtcDateTime).TotalSeconds);
-            var ebsPath = await _stream.RenderEbsToTempAsync(channel.Id, duration, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(ebsPath) && System.IO.File.Exists(ebsPath))
+            var ebsDuration = Math.Min((finishUtc - now.UtcDateTime).TotalSeconds, EbsTempRenderSeconds);
+            if (ebsDuration >= 5)
             {
-                return new NextPlayoutItem
+                try
                 {
-                    Id = item?.Id.ToString("N") ?? "offair",
-                    Start = now.ToString("o", CultureInfo.InvariantCulture),
-                    Finish = finishUtc.ToString("o", CultureInfo.InvariantCulture),
-                    Source = new NextLocalSource
+                    var ebsFinish = now.UtcDateTime.AddSeconds(ebsDuration);
+                    var ebsPath = await _stream.RenderEbsToTempAsync(channel.Id, ebsDuration, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(ebsPath) && System.IO.File.Exists(ebsPath))
                     {
-                        Path = ebsPath,
-                        InPointMs = 0,
-                        OutPointMs = (long)Math.Round(duration * 1000)
-                    },
-                };
+                        return new NextPlayoutItem
+                        {
+                            Id = "offair",
+                            Start = now.ToString("o", CultureInfo.InvariantCulture),
+                            Finish = ebsFinish.ToString("o", CultureInfo.InvariantCulture),
+                            Source = new NextLocalSource
+                            {
+                                Path = ebsPath,
+                                InPointMs = 0,
+                                OutPointMs = (long)Math.Round(ebsDuration * 1000)
+                            },
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to render EBS to temp for next; falling back to HTTP source");
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to render EBS to temp for next; falling back to HTTP source");
         }
 
         return new NextPlayoutItem

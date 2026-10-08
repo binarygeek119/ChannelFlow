@@ -735,6 +735,11 @@ public class FfmpegCommandBuilder
             args.AddRange(new[]
             {
                 "-thread_queue_size", "1024",
+                // The video side is a real-time pipe fed one JPEG at a time by the compositor,
+                // but ffmpeg reads a file input at full decode speed. Without -re the muxed
+                // audio timeline races far ahead of the video (measured ~20s of extra audio
+                // over a 45s run), so players underrun waiting for audio and the music chops.
+                "-re",
                 "-stream_loop", "-1",
                 "-i", audioPath!
             });

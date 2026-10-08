@@ -3,8 +3,9 @@ resolver = "2"
 members = [
     "crates/channelflow-core",
     "crates/channelflow-plugin-api",
-    "crates/plugins/ai",
 ]
+# Bundled plugins are fetched by git from the ChannelFlow-Plugins repo; this
+# workspace holds the base system and the SDK they are written against.
 # next's own workspace lives in the vendored copy; keep cargo out of it.
 exclude = ["vendor/ersatztv-next"]
 

@@ -261,7 +261,7 @@ dependencies = [
  "async-trait",
  "axum",
  "channelflow-plugin-ai",
- "channelflow-plugin-api",
+ "channelflow-plugin-api 2.0.0 (git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0)",
  "chrono",
  "clap",
  "reqwest",
@@ -278,10 +278,11 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-ai"
 version = "2.0.0"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#e7f1f426afcbc02b73aeb3aea0dd477279746582"
 dependencies = [
  "async-trait",
  "axum",
- "channelflow-plugin-api",
+ "channelflow-plugin-api 2.0.0 (git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0)",
  "reqwest",
  "serde",
  "serde_json",
@@ -293,6 +294,20 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-api"
 version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "channelflow-plugin-api"
+version = "2.0.0"
+source = "git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0#6924298ee0f604f44cbaa206e08568ca8eea6d4e"
 dependencies = [
  "async-trait",
  "axum",

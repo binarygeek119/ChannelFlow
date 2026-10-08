@@ -17,8 +17,13 @@ async-trait = "0.1"
 axum.workspace = true
 chrono.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-channelflow-plugin-api = { path = "../channelflow-plugin-api" }
-channelflow-plugin-ai = { path = "../plugins/ai" }
+# The SDK is fetched the same way the plugin repo fetches it — by git from
+# this repo's own branch — so there is exactly one channelflow-plugin-api in
+# the dependency graph and core's Plugin trait is the plugin's Plugin trait.
+channelflow-plugin-api = { git = "https://github.com/binarygeek119/ChannelFlow", branch = "2.0.0" }
+# The bundled plugins live in their own repo; the base builds against them by
+# git so the combined image still ships them compiled in.
+channelflow-plugin-ai = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

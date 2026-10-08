@@ -33,9 +33,9 @@ crates/plugins/ai/            the AI Provider Suite plugin (provider list, tests
   static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
-This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features that used to be core code now live in plugins that implement the `Plugin` trait. Plugins declare who they are in a `plugin.json` manifest — their id, version range against the base, requested permissions, and UI contributions — and get namespaced storage, an HTTP client, and a logger from `PluginApi`. The manager loads, lists, enables and disables them, and mounts each plugin's routes under `/api/plugins/{id}`. The **AI page is the first feature extracted**: the shell still renders it, but every call it makes goes to the AI plugin's routes, and its provider list is persisted in the plugin's own storage. The Transcode page stays core-owned for now. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as a `ChannelFlow-Plugins` repo.
+This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins that implement the `Plugin` trait. Plugins declare who they are in a `plugin.json` manifest — their id, version range against the base, requested permissions, and UI contributions — and get namespaced storage, an HTTP client, and a logger from `PluginApi`. The manager loads, lists, enables and disables them, and mounts each plugin's routes under `/api/plugins/{id}`. The **AI page is the first feature extracted**: the shell still renders it, but every call it makes goes to the AI plugin's routes, and its provider list is persisted in the plugin's own storage. The Transcode page stays core-owned for now.
 
-The plugin SDK and each plugin live in workspace crates ready to lift out into their own repo: a plugin depends on `channelflow-plugin-api` and nothing else in the base, so splitting is a file move plus a dependency change.
+Plugins live in their own repo, [`ChannelFlow-Plugins`](https://github.com/binarygeek119/ChannelFlow-Plugins), and this base pulls the bundled ones by **git dependency** — the SDK is fetched the same way everywhere, so there is exactly one `channelflow-plugin-api` in the graph and core's `Plugin` trait is the plugin's `Plugin` trait. The Transcode crates are the pattern for the next extraction. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
 
 Storage has two backends behind one `Store`, and either holds the same settings: the channels, the instance transcode defaults, and each plugin's own data.
 
@@ -171,7 +171,7 @@ From a source checkout: `cargo run --release -p channelflow -- --config ./config
 
 ## Where this goes next
 
-1. **Extract the next feature** — move the transcode settings into a `channelflow-plugin-ersatztv` crate (the AI plugin is the pattern), then lift the plugin crates into the `ChannelFlow-Plugins` repo with the base depending on them by git.
+1. **Extract the next feature** — move the transcode settings into a `channelflow-plugin-ersatztv` crate in the `ChannelFlow-Plugins` repo (the AI plugin is the pattern), driven by the same git dependency.
 2. **Dynamic loading** — load plugins as shared libraries from `/config/plugins` via the manifest's `entrypoint`, with the install/update/rollback flow and the repo index feeding the catalog.
 3. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
 4. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.

@@ -8,16 +8,17 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/binarygeek119/ChannelFlow</Support>
   <Project>https://github.com/binarygeek119/ChannelFlow</Project>
-  <Overview>ChannelFlow-Server — simulated live TV (channels, EPG, commercials, AI lineups, native WeatherStar, and news). On first launch the Web UI wizard sets PostgreSQL and the admin login. Add library connections and path remaps in the UI, then paste this server's M3U and XMLTV into Jellyfin Live TV.</Overview>
+  <Overview>ChannelFlow-Server — simulated live TV (channels, EPG, commercials, AI lineups, native WeatherStar, and news) with <a href="https://github.com/ErsatzTV/next">ErsatzTV next</a> bundled in as the transcoding engine: this one container runs both ChannelFlow and next, so there is no second container to install or keep in sync. On first launch the Web UI wizard sets PostgreSQL and the admin login. Add library connections and path remaps in the UI, then paste this server's M3U and XMLTV into Jellyfin Live TV.</Overview>
   <Category>MediaApp:Video</Category>
   <WebUI>http://[IP]:[PORT:8097]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/binarygeek119/ChannelFlow/master/unraid/channelflow.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/binarygeek119/ChannelFlow/master/logo-plane.png</Icon>
-  <Date>2026-08-29</Date>
-  <Requires>A PostgreSQL server ChannelFlow can reach (entered in the first-launch wizard). The same media files Jellyfin uses, mounted at /media.</Requires>
-  <Config Name="Web UI" Target="8097" Default="8097" Mode="tcp" Description="ChannelFlow Web UI, admin API, M3U/XMLTV, and live streams" Type="Port" Display="always" Required="true" Mask="false">8097</Config>
-  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/channelflow" Mode="rw" Description="Config, logos, logs, and caches. The setup wizard saves Postgres as database.json here. Logs are logs/channelflow-YYYYMMDD.log." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/channelflow</Config>
+  <Date>2026-10-08</Date>
+  <Requires>A PostgreSQL server ChannelFlow can reach (entered in the first-launch wizard). The same media files Jellyfin uses, mounted at /media. Only port 8097 is used — next's HLS is proxied through ChannelFlow, so there is nothing to publish on 8409. If streams ever go dark, check the container log for [entrypoint] and ersatztv lines; there is no automatic fallback to ChannelFlow's own encoder.</Requires>
+  <Config Name="Web UI" Target="8097" Default="8097" Mode="tcp" Description="ChannelFlow Web UI, admin API, M3U/XMLTV, and the proxied next HLS streams" Type="Port" Display="always" Required="true" Mask="false">8097</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/channelflow" Mode="rw" Description="Config, logos, logs, and caches. The setup wizard saves Postgres as database.json here. The bundled next engine is configured from the next/ subfolder (lineup.json, channels/), rewritten only when it really changes. Logs are logs/channelflow-YYYYMMDD.log." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/channelflow</Config>
   <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="rw" Description="Same library share Jellyfin uses. Remap Jellyfin prefixes to /media on Library → Connections." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
-  <Config Name="Intel GPU" Target="" Default="" Mode="" Description="Pass /dev/dri for Intel VAAPI / Quick Sync. Encode settings are on the Transcode tab." Type="Device" Display="always" Required="false" Mask="false">/dev/dri</Config>
+  <Config Name="Intel GPU" Target="" Default="" Mode="" Description="Pass /dev/dri for Intel VAAPI / Quick Sync — used by the bundled next encoder. Encode settings are on the Transcode tab." Type="Device" Display="always" Required="false" Mask="false">/dev/dri</Config>
   <Config Name="TZ" Target="TZ" Default="America/Chicago" Mode="" Description="IANA time zone for the container clock, log timestamps, and midnight jobs. Match General → schedule time zone." Type="Variable" Display="always" Required="true" Mask="false">America/Chicago</Config>
+  <Config Name="ERSATZTV_PATH" Target="ERSATZTV_PATH" Default="" Mode="" Description="Path to the ErsatzTV next binary. Leave blank to use the bundled /app/ersatztv; set it to run an external next instead." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 </Container>

@@ -19,32 +19,38 @@ RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -
     /p:Version=1.0.0 \
     /p:InformationalVersion=${CHANNELFLOW_VERSION}+${CHANNELFLOW_REVISION}
 
-# Same layout as https://github.com/ErsatzTV/legacy/blob/main/docker/Dockerfile:
-# .NET runtime on top of ersatztv-ffmpeg (VAAPI/QSV, libva 2.23, Intel iHD).
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-amd64 AS dotnet-runtime
 
-FROM --platform=linux/amd64 ghcr.io/ersatztv/ersatztv-ffmpeg:8.1.2
+# ChannelFlow sits on top of the ErsatzTV next image: next's patched ffmpeg
+# (VAAPI/QSV, libva, Intel iHD), its `ersatztv` binary and the playout/channel
+# tooling all come from that base, and ChannelFlow adds only the .NET runtime on
+# top of it. One container runs both processes; scripts/container-entrypoint.sh
+# supervises them and restarts next whenever ChannelFlow rewrites its config.
+FROM --platform=linux/amd64 ersatztv/next:develop
 ARG CHANNELFLOW_VERSION=1.0.0
 ARG CHANNELFLOW_REVISION=dev
+USER root
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 ENV TZ=America/Chicago \
     FONTCONFIG_PATH=/etc/fonts \
     DOTNET_ROOT=/usr/share/dotnet \
-    PATH="/usr/share/dotnet:${PATH}"
+    PATH="/usr/share/dotnet:${PATH}" \
+    ERSATZTV_PATH=/app/ersatztv
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tzdata \
         python3 \
         ca-certificates \
-        wget \
     && ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
     && echo "${TZ}" > /etc/timezone \
-    && fc-cache -f \
+    && { command -v fc-cache >/dev/null 2>&1 && fc-cache -f || true; } \
     && wget -qO /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     && chmod +x /usr/local/bin/yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/channelflow
 COPY --from=build /app/publish .
+COPY scripts/container-entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 ENV CHANNELFLOW_CONFIG=/config \
     FINTV_CONFIG=/config \
@@ -60,7 +66,9 @@ ENV CHANNELFLOW_CONFIG=/config \
     TZ=America/Chicago
 
 EXPOSE 8097
+# next's own port stays internal: ChannelFlow proxies its HLS on its own routes,
+# so publishing 8409 would only expose a second, competing entry point.
 VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8097/health >/dev/null || exit 1
-ENTRYPOINT ["/usr/share/dotnet/dotnet", "ChannelFlow.Server.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -1,4 +1,5 @@
 using FinTv.Domain;
+using FinTv.Next;
 using FinTv.Services;
 using FinTv.Auth;
 using Microsoft.AspNetCore.Authorization;
@@ -80,6 +81,17 @@ public class IptvController : ControllerBase
         if (!await _stream.ChannelExistsAsync(id, cancellationToken))
         {
             Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        // next is the transcoding engine: hand legacy TS bookmarks to its HLS output
+        // rather than standing up a second ChannelFlow encode for the same channel.
+        var number = NextCoordinatorService.IsEnabled
+            ? await _stream.GetChannelNumberAsync(id, cancellationToken)
+            : null;
+        if (number is not null)
+        {
+            Response.Redirect($"/iptv/next/channel/{Uri.EscapeDataString(number)}.m3u8");
             return;
         }
 

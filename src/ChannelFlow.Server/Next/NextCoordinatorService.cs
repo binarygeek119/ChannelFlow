@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
@@ -53,6 +55,54 @@ public sealed class NextCoordinatorService
         => Path.Combine(FinTvRuntime.Current?.DataFolder ?? "data", "next");
 
     /// <summary>
+    /// Marker file the container entrypoint watches to know the next configuration
+    /// changed and the running <c>ersatztv</c> process must be restarted.
+    /// </summary>
+    public const string GenerationFileName = ".generation";
+
+    public static string GenerationFile
+        => Path.Combine(HostFolder, GenerationFileName);
+
+    /// <summary>
+    /// Absolute path to the ErsatzTV next binary, or null when next is not installed
+    /// here (it ships inside the container at <c>/app/ersatztv</c>). Override with
+    /// <c>ERSATZTV_PATH</c>.
+    /// </summary>
+    public static string? ResolveBinaryPath()
+    {
+        var configured = AppEnvironment.Get("ERSATZTV_PATH");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return File.Exists(configured) ? configured : null;
+        }
+
+        if (File.Exists("/app/ersatztv"))
+        {
+            return "/app/ersatztv";
+        }
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(dir.Trim(), "ersatztv");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the next engine is installed alongside ChannelFlow. Only then is it
+    /// safe to default the integration on: a native <c>dotnet run</c> dev box has no
+    /// next binary, and enabling against one would hand every player a dead URL.
+    /// </summary>
+    public static bool IsBundled
+        => ResolveBinaryPath() is not null;
+
+    /// <summary>
     /// (Re)generates lineup.json, per-channel channel.json, and the playout windows.
     /// Idempotent; safe to call on startup, on settings save, and periodically.
     /// </summary>
@@ -85,6 +135,7 @@ public sealed class NextCoordinatorService
             .ToListAsync(cancellationToken);
 
         var entries = new List<NextChannelEntry>();
+        var written = new List<string>();
         foreach (var channel in channels)
         {
             var number = ChannelNumbers.Format(channel.Number);
@@ -92,12 +143,14 @@ public sealed class NextCoordinatorService
             Directory.CreateDirectory(channelFolder);
 
             var channelConfig = BuildChannelConfig(channel);
+            var channelJson = FinTvJson.Serialize(channelConfig);
             await File.WriteAllTextAsync(
                 Path.Combine(channelFolder, "channel.json"),
-                FinTvJson.Serialize(channelConfig),
+                channelJson,
                 cancellationToken);
+            written.Add(number + "|" + channelJson);
 
-            await WritePlayoutWindowsAsync(channel, number, next, cancellationToken);
+            await WritePlayoutWindowsAsync(channel, number, next, written, cancellationToken);
 
             entries.Add(new NextChannelEntry
             {
@@ -116,15 +169,53 @@ public sealed class NextCoordinatorService
             Channels = entries,
         };
 
+        var lineupJson = FinTvJson.Serialize(lineup);
         await File.WriteAllTextAsync(
             Path.Combine(root, "lineup.json"),
-            FinTvJson.Serialize(lineup),
+            lineupJson,
             cancellationToken);
+        written.Add("lineup|" + lineupJson);
+
+        var generation = WriteGenerationMarker(root, written);
 
         _logger.LogInformation(
-            "Wrote ErsatzTV next configuration for {Count} channels to {Folder}",
+            "Wrote ErsatzTV next configuration for {Count} channels to {Folder}{Restart}",
             channels.Count,
-            root);
+            root,
+            generation is null
+                ? string.Empty
+                : $" (generation {generation}; next restarts to pick it up)");
+    }
+
+    /// <summary>
+    /// Writes <c>.generation</c> only when the configuration actually changed. next reads
+    /// lineup/channel/playout once at startup, so the container entrypoint restarts it
+    /// whenever this value moves — and must NOT restart it on every 15-minute rewrite,
+    /// which would kill live sessions for no reason.
+    /// </summary>
+    /// <returns>The short generation id, or null when nothing changed.</returns>
+    private string? WriteGenerationMarker(string root, IReadOnlyList<string> written)
+    {
+        try
+        {
+            var joined = string.Join('\n', written);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(joined)))[..16];
+
+            var marker = Path.Combine(root, GenerationFileName);
+            var previous = File.Exists(marker) ? File.ReadAllText(marker).Trim() : null;
+            if (string.Equals(previous, hash, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            File.WriteAllText(marker, hash);
+            return hash;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write the next config generation marker in {Folder}", root);
+            return null;
+        }
     }
 
     /// <summary>
@@ -207,6 +298,7 @@ public sealed class NextCoordinatorService
         Channel channel,
         string number,
         NextTranscodingSettings next,
+        List<string> written,
         CancellationToken cancellationToken)
     {
         var folder = Path.Combine(HostFolder, "channels", number, "playout");
@@ -241,10 +333,12 @@ public sealed class NextCoordinatorService
                 ],
             };
 
+            var json = FinTvJson.Serialize(playout);
             await File.WriteAllTextAsync(
                 Path.Combine(folder, NextPlayoutFilename.ForWindow(start, finish)),
-                FinTvJson.Serialize(playout),
+                json,
                 cancellationToken);
+            written.Add($"{number}|playout|{start:o}|{json}");
         }
     }
 

@@ -94,6 +94,21 @@ public class StreamService : IDisposable
         return await db.Channels.AsNoTracking().AnyAsync(c => c.Id == channelId, cancellationToken);
     }
 
+    /// <summary>
+    /// Formatted channel number ("7" / "7.1"), used to send legacy <c>/iptv/stream</c>
+    /// bookmarks to the matching next HLS playlist. Null when the channel is gone.
+    /// </summary>
+    public async Task<string?> GetChannelNumberAsync(Guid channelId, CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var number = await db.Channels.AsNoTracking()
+            .Where(c => c.Id == channelId)
+            .Select(c => (decimal?)c.Number)
+            .FirstOrDefaultAsync(cancellationToken);
+        return number is null ? null : ChannelNumbers.Format(number.Value);
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)

@@ -33,7 +33,7 @@ Playback reads **local files**. On **Library → Connections**, set path remaps 
 
 - .NET 10 SDK to build, or a self-contained publish from `scripts/publish-native.sh`
 - PostgreSQL (your own instance)
-- FFmpeg on PATH (or set `FFMPEG_PATH`). The Docker image is based on [ersatztv-ffmpeg](https://github.com/ErsatzTV/ErsatzTV-ffmpeg) (`/usr/local/bin/ffmpeg`), same stack as [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy).
+- FFmpeg on PATH (or set `FFMPEG_PATH`). The Docker image is based on [`ersatztv/next`](https://github.com/ErsatzTV/next), which ships [ersatztv-ffmpeg](https://github.com/ErsatzTV/ErsatzTV-ffmpeg) (`/usr/local/bin/ffmpeg`) — the same stack as [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy).
 - Jellyfin 10+ (or sidecar folders). Emby and Plex connections can be saved now; catalog sync for those comes later
 - The same media paths readable by Jellyfin and ChannelFlow-Server
 
@@ -57,6 +57,14 @@ Load the `.env` values into the process environment, then run `ChannelFlow.Serve
 
 Local from source (Fedora/podman): `bash scripts/dev.sh` starts Postgres on `127.0.0.1:5433` and `dotnet run` on `http://127.0.0.1:8097`.
 
+Docker (ErsatzTV next is bundled — there is no second container to start):
+
+```bash
+docker compose up -d
+```
+
+That starts PostgreSQL plus one ChannelFlow container running **both** ChannelFlow and the next transcoding engine; only `8097` is published. A native `dotnet run` dev box has no next binary, so it keeps using ChannelFlow's own encoder and the defaults are not forced on.
+
 Then:
 
 1. Open `http://<host>:8097`. On first launch, enter PostgreSQL host/port/database/user/password, then create the admin username and password
@@ -66,7 +74,7 @@ Then:
 
 Items removed from a media server, or whose remapped local file is gone, are marked missing, then deleted by **Library → Removed items** (or Tasks) after the grace period (default 7 days). **Scan local files** checks each catalog path after remap.
 
-Set `FFMPEG_HWACCEL=vaapi` or `qsv` and pass `/dev/dri` access for Intel VAAPI / Quick Sync. The container ships ersatztv-ffmpeg 8.1.2 (VAAPI, QSV, NVENC, libva 2.23).
+Set `FFMPEG_HWACCEL=vaapi` or `qsv` and pass `/dev/dri` access for Intel VAAPI / Quick Sync. The container ships ersatztv-ffmpeg 8.1.2 (VAAPI, QSV, NVENC, libva 2.23), and it is the **next** engine that does the viewer-facing encode.
 
 In Jellyfin, add ChannelFlow's M3U and XMLTV URLs from the top of the web UI under Live TV (tuner + guide).
 
@@ -110,31 +118,38 @@ channelflow.example.duckdns.org {
 }
 ```
 
-## ErsatzTV next (optional transcoding engine)
+## ErsatzTV next (bundled transcoding engine)
 
-ChannelFlow can delegate all live TV transcoding/streaming to [ErsatzTV next](https://github.com/ErsatzTV/next) — the Rust/HLS rewrite of ErsatzTV — while staying the front door for IPTV: ChannelFlow still schedules, resolves, and proxies. Enable it on **General → ErsatzTV next (transcoding)**:
+The Docker image is built **on top of [`ersatztv/next:develop`](https://github.com/ErsatzTV/next)**, the Rust/HLS rewrite of ErsatzTV. One container runs two processes:
 
-- ChannelFlow writes `lineup.json`, per-channel `channel.json`, and dynamic playout windows into `{config}/next` (mount that folder into next at `/config/next`).
-- The playout windows contain a single *dynamic* item: at every item boundary next asks ChannelFlow `GET /iptv/next/resolve/{channel}` and plays whatever comes back.
+- **ChannelFlow** — scheduling, EPG, commercials, weather, news, EBS, and the compositor for everything next cannot render itself. Listens on `8097`.
+- **`ersatztv` (next)** — all video transcoding and HLS. Listens on `8409`, which stays **inside the container**: ChannelFlow proxies next's HLS, so you only ever publish `8097`.
+
+`scripts/container-entrypoint.sh` supervises both. If ChannelFlow exits, next is stopped and the container exits so your restart policy brings the pair back together. If next exits, it is restarted with capped backoff.
+
+No configuration is required on a fresh install — **General → ErsatzTV next (transcoding)** arrives pre-filled with `http://127.0.0.1:8409` and `http://127.0.0.1:8097` and enabled, because both processes share this container's loopback. The defaults are only applied while both URLs are still empty, so an explicitly configured or deliberately disabled integration is left alone, and they are skipped entirely when no next binary is present (a native `dotnet run` dev box).
+
+How playout flows:
+
+- ChannelFlow writes `lineup.json`, per-channel `channel.json`, and dynamic playout windows into `{config}/next`.
+- Each playout window contains a single *dynamic* item: at every item boundary next asks ChannelFlow `GET /iptv/next/resolve/{channel}` and plays whatever comes back.
   - Movies/TV/music/other real media → next transcodes **the file** directly (hardware accel, exact in/out points) with no ChannelFlow ffmpeg involved.
-  - WeatherStar/news/off-air → ChannelFlow's own compositors run as a live MPEG-TS HTTP source.
+  - WeatherStar/news/off-air → ChannelFlow's compositors run as a live MPEG-TS HTTP source.
     - Give a weather/news channel an **RTSP stream URL** to play a camera feed instead: next pulls the `rtsp://` source and transcodes it directly (no ChannelFlow compositor). With next off, ChannelFlow encodes the RTSP feed itself.
   - Commercials/art slides/bumpers/YouTube music → a ChannelFlow single-item renderer, keyed so content aligns even though next works ~45 s ahead of wall clock.
-- ChannelFlow proxies next's HLS behind its own endpoints, so the M3U you give Jellyfin never changes: `…/iptv/next/channel/{n}.m3u8` (master) → `…/iptv/next/session/…` (playlists + segments). `/iptv/stream/{id}` stays live as a fallback.
+  - Bundled video and genuine off-air EBS → a short local temp `.ts`, so next never waits on a live HTTP source for static content.
+- ChannelFlow proxies next's HLS behind its own endpoints, so the M3U you give Jellyfin never changes: `…/iptv/next/channel/{n}.m3u8` (master) → `…/iptv/next/session/…` (playlists + segments).
+- The M3U always points at next's HLS when it is enabled, and `/iptv/stream/{id}` **redirects** to the same playlist rather than standing up a second ChannelFlow encode. Without next (a dev box), that endpoint keeps serving ChannelFlow's own MPEG-TS.
 - EPG is unchanged (ChannelFlow's own XMLTV).
 
-Run next next to ChannelFlow (see `docker-compose.next.yml` / Unraid template `unraid/channelflow-next.xml`):
-
-```bash
-docker compose -f docker-compose.next.yml up -d
-```
+next reads lineup/channel configs **once at startup**, so ChannelFlow content-hashes what it writes and bumps `{config}/next/.generation` only when something really changed; the entrypoint restarts next on that bump. Routine 15-minute rewrites do not bounce live sessions — only adding/renumbering channels, changing normalization, and the midnight playout-window roll do.
 
 Requirements/notes:
 
-- Mount the media share at the **same `/media` path** ChannelFlow/Jellyfin use so file paths in playouts resolve.
-- Match next's `TZ` to the **General → schedule time zone** so the playout windows line up.
-- Set **Next server URL** = how ChannelFlow reaches next (`http://<host>:8409`) and **ChannelFlow URL (from inside next)** = how the next container reaches ChannelFlow (same LAN address as the Local base URL).
-- next reads lineup/channel configs **once at startup**: restart the next container after enabling, adding/renumbering channels, or changing normalization. Playout windows re-read on every item boundary, so schedule changes take effect live.
+- Mount the media share at the **same path** ChannelFlow and Jellyfin use so file paths in playouts resolve.
+- `TZ` (and **General → schedule time zone**) decide where the playout windows fall; the image defaults to `America/Chicago`.
+- Publish only `8097`. If you *do* run next as a separate container instead, point **Next server URL** at its `8409` and **ChannelFlow URL (from inside next)** at ChannelFlow's LAN address, and override `ERSATZTV_PATH` to keep the bundled process from starting.
+- **There is no automatic fallback.** If streams go dark, look for `[entrypoint]` and `ersatztv` lines in the container log — the entrypoint logs every next start, stop, crash retry, and config-driven restart.
 
 ## Weather and news
 

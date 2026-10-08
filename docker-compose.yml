@@ -1,16 +1,26 @@
-# Local development Postgres. System PostgreSQL already occupies 5432, so this
-# listens on 127.0.0.1:5433. Start with: podman run (see scripts/dev.sh) or
-# `podman compose up -d` if the compose plugin is installed.
+# ChannelFlow with ErsatzTV next bundled into the same image.
+#
+# The image is built FROM ersatztv/next:develop and runs two processes under one
+# entrypoint: ChannelFlow (scheduling, EPG, compositor, web UI) on 8097, and
+# `ersatztv` (all transcoding/HLS) on 8409. Only 8097 is published — ChannelFlow
+# proxies next's HLS on its own routes, and next's port stays on loopback inside
+# the container. There is no second container to start or keep in sync.
+#
+#   docker compose up -d
+#
+# Postgres stays separate because ChannelFlow keeps its schedule there.
+# Media is mounted at the same path Jellyfin uses so playout file paths resolve.
 services:
   postgres:
     image: docker.io/library/postgres:16-alpine
     container_name: channelflow-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: fintv
       POSTGRES_USER: fintv
       POSTGRES_PASSWORD: fintv
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - channelflow-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,5 +29,31 @@ services:
       timeout: 5s
       retries: 20
 
+  channelflow:
+    build: .
+    image: ghcr.io/binarygeek119/channelflow:latest
+    container_name: channelflow
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-America/Chicago}
+      PORT: "8097"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: fintv
+      POSTGRES_USER: fintv
+      POSTGRES_PASSWORD: fintv
+      FFMPEG_HWACCEL: ${FFMPEG_HWACCEL:-vaapi}
+    ports:
+      - "8097:8097"
+    devices:
+      - /dev/dri:/dev/dri    # Intel VAAPI / Quick Sync; delete for software-only encode
+    volumes:
+      - channelflow-config:/config
+      - ${MEDIA_ROOT:-/mnt/user/media}:/media
+
 volumes:
   channelflow-pgdata:
+  channelflow-config:

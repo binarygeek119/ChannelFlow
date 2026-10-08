@@ -1229,23 +1229,23 @@
                     <p class="hint">Used for the <strong>Local URL</strong> copy buttons and same-network app pairing, so they always hand out the LAN address (for example <code>http://192.168.1.2:8097</code>) even when you are browsing through the public URL. Leave blank to use the address the browser connected with.</p>
                     <div class="card section-card">
                         <h2>ErsatzTV next (transcoding)</h2>
-                        <p class="hint">ChannelFlow keeps scheduling, EPG, commercials, weather, news, and EBS, and delegates video encoding/streaming to the <a href="https://github.com/ErsatzTV/next" target="_blank" rel="noopener">ErsatzTV next</a> container. ChannelFlow writes its configuration into the appdata <code>next</code> folder (mount it into the container at <code>/config/next</code>) and pushes <em>what to play</em> to the engine over HTTP on every item boundary. The IPTV URLs stay the same — ChannelFlow proxies next's HLS behind them.</p>
+                        <p class="hint">ChannelFlow keeps scheduling, EPG, commercials, weather, news, and EBS, and delegates video encoding and streaming to <a href="https://github.com/ErsatzTV/next" target="_blank" rel="noopener">ErsatzTV next</a>, which ships <em>inside this container</em> and is started for you alongside ChannelFlow. ChannelFlow writes next's configuration into the appdata <code>next</code> folder and pushes <em>what to play</em> to the engine over HTTP on every item boundary; the bundled next process restarts itself whenever that configuration actually changes. Only ChannelFlow's port needs publishing — next's port 8409 stays internal.</p>
                         <label class="field checkbox-field">
                             <input id="general-next-enabled" type="checkbox">
                             <span class="channelflow-check-box" aria-hidden="true"></span>
                             <span>Serve channels through ErsatzTV next</span>
                         </label>
-                        <p class="hint">When enabled, the M3U handed to Jellyfin points at next's HLS (proxied through ChannelFlow) instead of ChannelFlow's own MPEG-TS encode. Old <code>/iptv/stream</code> URLs keep working as a fallback while the rest of your setup catches up.</p>
+                        <p class="hint">On by default. The M3U handed to Jellyfin points at next's HLS (proxied through ChannelFlow) and legacy <code>/iptv/stream</code> URLs redirect to the same playlist, so ChannelFlow never stands up a second encode for playback. There is no automatic fallback if next is down — if the streams are dark, check the container log for the <code>[entrypoint]</code> and <code>ersatztv</code> lines.</p>
                         <label class="field">
                             <span>Next server URL</span>
-                            <input id="general-next-base-url" type="text" class="emby-input" placeholder="http://192.168.1.2:8409" autocomplete="off" spellcheck="false" inputmode="url">
+                            <input id="general-next-base-url" type="text" class="emby-input" placeholder="http://127.0.0.1:8409" autocomplete="off" spellcheck="false" inputmode="url">
                         </label>
-                        <p class="hint">How ChannelFlow reaches the next container's HTTP server (port 8409 by default).</p>
+                        <p class="hint">How ChannelFlow reaches next's HTTP server. Bundled default <code>http://127.0.0.1:8409</code> — only change it if you run next as a separate container.</p>
                         <label class="field">
                             <span>ChannelFlow URL (from inside next)</span>
-                            <input id="general-next-resolver-base-url" type="text" class="emby-input" placeholder="http://192.168.1.2:8097" autocomplete="off" spellcheck="false" inputmode="url">
+                            <input id="general-next-resolver-base-url" type="text" class="emby-input" placeholder="http://127.0.0.1:8097" autocomplete="off" spellcheck="false" inputmode="url">
                         </label>
-                        <p class="hint">How the next container reaches ChannelFlow to ask <em>what is playing now</em>. Use the same LAN address as the Local base URL above. Start the next container after saving; add or renumbering channels and changing normalization needs a next restart (restart the container once after saving).</p>
+                        <p class="hint">How next reaches ChannelFlow to ask <em>what is playing now</em>. Bundled default <code>http://127.0.0.1:8097</code> — only change it if you run next as a separate container, in which case use the same LAN address as the Local base URL above.</p>
                     </div>
                     <div class="actions">
                         <button type="button" id="btn-save-general" class="raised button-submit emby-button">Save General Settings</button>

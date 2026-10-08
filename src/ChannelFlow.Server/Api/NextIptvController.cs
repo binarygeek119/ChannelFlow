@@ -210,6 +210,33 @@ public class NextIptvController : ControllerBase
             }
         }
 
+        // For EBS/off-air (no real media/bundled), try to give next a local rendered file
+        // so next handles transcoding directly.
+        try
+        {
+            var duration = Math.Max(5, (finishUtc - now.UtcDateTime).TotalSeconds);
+            var ebsPath = await _stream.RenderEbsToTempAsync(channel.Id, duration, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(ebsPath) && System.IO.File.Exists(ebsPath))
+            {
+                return new NextPlayoutItem
+                {
+                    Id = item?.Id.ToString("N") ?? "offair",
+                    Start = now.ToString("o", CultureInfo.InvariantCulture),
+                    Finish = finishUtc.ToString("o", CultureInfo.InvariantCulture),
+                    Source = new NextLocalSource
+                    {
+                        Path = ebsPath,
+                        InPointMs = 0,
+                        OutPointMs = (long)Math.Round(duration * 1000)
+                    },
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to render EBS to temp for next; falling back to HTTP source");
+        }
+
         return new NextPlayoutItem
         {
             Id = item?.Id.ToString("N") ?? "offair",

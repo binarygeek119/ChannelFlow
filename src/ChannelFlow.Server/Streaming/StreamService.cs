@@ -1170,6 +1170,35 @@ public class StreamService : IDisposable
         return (fadeIn, fadeOut);
     }
 
+    public async Task<string?> RenderEbsToTempAsync(Guid channelId, double durationSeconds, CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return null;
+        }
+        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
+        var ffmpegPath = _mediaEncoder.EncoderPath;
+        var plan = ebs.CreatePlaybackPlan(channel, durationSeconds);
+        var args = _ffmpeg.BuildEbsCommand(channel, plan);
+        var tempDir = Path.Combine(Path.GetTempPath(), "ChannelFlow", "next-ebs");
+        Directory.CreateDirectory(tempDir);
+        var tempFile = Path.Combine(tempDir, $"{channelId:N}_{DateTime.UtcNow.Ticks}.ts");
+        try
+        {
+            await using var stream = File.Create(tempFile);
+            await RunFfmpegToStreamAsync(ffmpegPath, args, stream, cancellationToken);
+        }
+        catch
+        {
+            try { if (File.Exists(tempFile)) File.Delete(tempFile); } catch { }
+            return null;
+        }
+        return tempFile;
+    }
+
     private static string? ResolveBugPath(Channel channel, DateTime scheduleUtc, HolidayChannelService holidays)
     {
         if (channel.BugPlacement == BugPlacementMode.None)

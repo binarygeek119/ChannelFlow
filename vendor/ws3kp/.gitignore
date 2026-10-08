@@ -1,0 +1,9 @@
+node_modules
+server/scripts/custom.js
+
+#dist folder
+dist/*
+!dist/readme.txt
+
+#environment variables
+.env

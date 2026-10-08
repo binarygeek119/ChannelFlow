@@ -1,0 +1,137 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+
+#almanac-html.weather-display {
+	background-image: url('../images/backgrounds/3.png');
+
+	// change the backgrounds for enhanced modes
+	.wide.enhanced & {
+		background-image: url('../images/backgrounds/3-wide-enhanced.png');
+	}
+
+	// change background for portrait
+	.portrait.enhanced & {
+		background-image: url(../images/backgrounds/3-portrait.png);
+	}
+}
+
+.weather-display .main.almanac {
+	font-family: 'Star4000';
+	font-size: 32px;
+	@include u.text-shadow();
+
+	.sun {
+		// Use CSS Grid for cross-browser consistency
+		// Grid is populated in reading order (left-to-right, top-to-bottom):
+		display: grid;
+		grid-template-columns: repeat(3, auto);
+		grid-template-rows: repeat(3, auto);
+		gap: 0px 90px;
+		margin: 3px auto 5px auto; // align the bottom of the div with the background
+		width: fit-content;
+		line-height: 30px;
+
+		.wide.enhanced & {
+			grid-template-columns: repeat(4, auto);
+		}
+
+		.portrait.enhanced & {
+			display: none;
+		}
+
+		.grid-item {
+			// Reset inherited styles that interfere with grid layout
+			width: auto;
+			height: auto;
+			padding: 0;
+			margin: 0;
+			position: relative;
+
+			// Column headers (day names)
+			&.header {
+				color: c.$column-header-text;
+				text-align: center;
+			}
+
+			// Row labels (Sunrise:, Sunset:)
+			&.row-label {
+				// color: c.$column-header-text; // screenshots show labels were white
+				text-align: right;
+			}
+
+			// Time values (sunrise/sunset)
+			&.time {
+				text-align: center;
+			}
+
+			&.wide-enhanced {
+				display: none;
+
+				.wide.enhanced & {
+					display: block;
+				}
+			}
+		}
+	}
+
+	.portrait.enhanced & {
+		font-size: 38px;
+
+	}
+
+	.sun.sun-portrait {
+		display: none;
+
+		.portrait.enhanced & {
+			display: grid;
+		}
+
+		.grid-item {
+			margin: 8px 0px;
+		}
+	}
+
+	.moon {
+		position: relative;
+		padding: 7px 50px;
+		line-height: 36px;
+
+		.title {
+			color: c.$column-header-text;
+			padding-left: 13px;
+
+
+		}
+
+		.days {
+			text-align: center;
+		}
+
+		.day {
+			display: inline-block;
+			text-align: center;
+			width: 132px;
+
+			.icon {
+				// shadow in image make it look off center
+				padding-left: 10px;
+			}
+
+			.date {
+				position: relative;
+				top: -10px;
+			}
+
+			&.wide-enhanced {
+				display: none;
+
+				.wide.enhanced & {
+					display: inline-block;
+				}
+			}
+		}
+	}
+
+
+
+}

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChannelFlow</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="mark"></span>
+    <h1>ChannelFlow</h1>
+    <span class="version" id="version">2.0.0</span>
+  </div>
+  <div class="header-right">
+    <span class="engine">built on ErsatzTV next</span>
+    <span class="status" id="status">connecting…</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Channels</h2>
+      <span class="count" id="count"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th class="num">#</th>
+          <th>Name</th>
+          <th>Description</th>
+          <th class="state">State</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="empty" id="empty" hidden>No channels yet — add one on the right.</p>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 id="form-title">Add channel</h2>
+    </div>
+    <form id="form" autocomplete="off">
+      <input type="hidden" id="id">
+      <label>
+        <span>Number</span>
+        <input type="number" id="number" min="1" step="1" required>
+      </label>
+      <label>
+        <span>Name</span>
+        <input type="text" id="name" maxlength="80" required placeholder="The Holiday Channel">
+      </label>
+      <label>
+        <span>Description</span>
+        <input type="text" id="description" maxlength="200" placeholder="Shown in the program guide">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="enabled" checked>
+        <span>Enabled</span>
+      </label>
+      <div class="actions">
+        <button type="submit" id="save">Add channel</button>
+        <button type="button" id="cancel" class="ghost" hidden>Cancel</button>
+      </div>
+    </form>
+    <p class="error" id="error" hidden></p>
+  </section>
+</main>
+
+<footer>
+  <span>Config is stored as one JSON file per channel under <code>config/channels/</code>.</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

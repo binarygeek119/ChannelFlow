@@ -1,0 +1,48 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+@use 'shared/positions'as p;
+
+#hazards-html.weather-display {
+	background-image: url('../images/backgrounds/7.png');
+
+}
+
+.weather-display .main.hazards {
+	&.main {
+		overflow-y: hidden;
+		height: p.$standard-height;
+		background-color: rgb(112, 35, 35);
+
+		width: p.$standard-width;
+
+		.wide.enhanced & {
+			left: 0px;
+		}
+
+		.portrait.enhanced & {
+			height: p.$portrait-height;
+		}
+
+		.hazard-lines {
+			min-height: 400px;
+			padding-top: 10px;
+
+			.hazard {
+				font-family: 'Star4000';
+				font-size: 32px;
+				color: white;
+				@include u.text-shadow(0px);
+				position: relative;
+				text-transform: uppercase;
+				margin-top: 10px;
+				margin-left: 80px;
+				margin-right: 80px;
+				padding-bottom: 10px;
+			}
+		}
+	}
+}
+
+.wide.hazards #container {
+	background: url(../images/backgrounds/7-wide.png);
+}

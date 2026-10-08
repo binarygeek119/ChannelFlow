@@ -1,0 +1,55 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+
+.weather-display .main.extended-forecast {
+	.day-container {
+		margin-top: 16px;
+		margin-left: 27px;
+	}
+
+	.day {
+		@include u.text-shadow();
+		padding: 5px;
+		height: 285px;
+		width: 155px;
+		display: inline-block;
+		margin: 0px 15px;
+		font-family: 'Star3000';
+		font-size: 24pt;
+		vertical-align: top;
+
+		.date {
+			text-transform: uppercase;
+			color: c.$title-color;
+		}
+
+		.condition {
+			height: 95px;
+			margin-top: 10px;
+		}
+
+		.temperatures {
+			width: 100%;
+			margin-top: 25px;
+
+			.temperature-block {
+				vertical-align: top;
+				// clear-fix
+				clear: both;
+
+				div {
+					width: 44%;
+				}
+
+				.label {
+					float: left;
+				}
+
+				.value {
+					float: right;
+				}
+
+			}
+		}
+	}
+}

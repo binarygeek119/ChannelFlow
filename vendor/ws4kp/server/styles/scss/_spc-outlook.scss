@@ -1,0 +1,164 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+@use 'shared/positions'as p;
+
+#spc-outlook-html.weather-display {
+	background-image: url('../images/backgrounds/6.png');
+
+	.portrait.enhanced & {
+		background-image: url('../images/backgrounds/6-portrait.png');
+	}
+}
+
+.weather-display .spc-outlook {
+
+	@include u.text-shadow();
+	font-size: 32px;
+
+	.header {
+		font-family: "Star4000 Large";
+		color: c.$title-color;
+		text-align: center;
+		margin-top: 12px;
+		line-height: 60px;
+	}
+
+	.container-categories {
+		top: 0px;
+		margin: 0px 10px;
+		box-sizing: border-box;
+		height: 300px;
+		overflow: hidden;
+
+		.enhanced.portrait & {
+			height: 420px;
+			margin-top: 40px;
+		}
+
+
+		.risk-levels {
+			position: relative;
+			left: 206px;
+			font-family: 'Star4000 Small';
+
+			// shifted left for portrait enhanced
+			.enhanced.portrait & {
+				left: 149px;
+			}
+
+
+			.risk-level {
+				position: relative;
+				top: -14px;
+				height: 20px;
+
+				&:nth-child(1) {
+					left: calc(20px * 5);
+				}
+
+				&:nth-child(2) {
+					left: calc(20px * 4);
+				}
+
+				&:nth-child(3) {
+					left: calc(20px * 3);
+				}
+
+				&:nth-child(4) {
+					left: calc(20px * 2);
+				}
+
+				&:nth-child(5) {
+					left: calc(20px * 1);
+				}
+
+				&:nth-child(6) {
+					left: calc(20px * 0);
+				}
+			}
+		}
+
+		.days {
+			position: relative;
+
+			.day {
+				height: 60px;
+
+				.enhanced.portrait & {
+					height: 80px;
+				}
+
+				.day-name {
+					position: absolute;
+					font-family: 'Star4000';
+					width: 200px;
+					text-align: right;
+					padding-top: 20px;
+
+					.enhanced.portrait & {
+						width: 143px;
+					}
+				}
+
+				.risk-bar {
+					position: absolute;
+					width: 150px;
+					height: 40px;
+					left: 210px;
+					margin-top: 20px;
+					border: 3px outset hsl(0, 0%, 70%);
+					background: linear-gradient(0deg, hsl(0, 0%, 40%) 0%, hsl(0, 0%, 60%) 50%, hsl(0, 0%, 40%) 100%);
+
+					.enhanced.portrait & {
+						left: 153px;
+					}
+				}
+			}
+		}
+	}
+
+	// only visible in portrait-enhanced
+	.container-details {
+
+		.header {
+			margin-top: 140px;
+		}
+
+		.table {
+
+			display: grid;
+			grid-template-columns: repeat(3, auto);
+			grid-template-rows: repeat(3, auto);
+			gap: 0px 70px;
+			margin: 30px auto 5px auto; // align the bottom of the div with the background
+			width: fit-content;
+			line-height: 50px;
+
+			.grid-item {
+				// Reset inherited styles that interfere with grid layout
+				width: auto;
+				height: auto;
+				padding: 0;
+				margin: 0;
+				position: relative;
+
+				// Column headers (day names)
+				&.header {
+					color: c.$column-header-text;
+					text-align: center;
+				}
+
+				// Row labels (Sunrise:, Sunset:)
+				&.row-label {
+					// color: c.$column-header-text; // screenshots show labels were white
+					text-align: right;
+				}
+
+				// Time values (sunrise/sunset)
+				&.percent {
+					text-align: center;
+				}
+			}
+		}
+	}
+}

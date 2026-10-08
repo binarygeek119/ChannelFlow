@@ -1,0 +1,149 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+@use 'shared/_margins'as m;
+
+.weather-display {
+	width: 640px;
+	height: 480px;
+	overflow: hidden;
+	position: relative;
+	background-image: url(../images/backgrounds/1.png);
+
+	/* this method is required to hide blocks so they can be measured while off screen */
+	height: 0px;
+
+	&.show {
+		height: 480px;
+	}
+
+	.template {
+		display: none;
+	}
+
+	.header {
+		width: 640px;
+		padding-top: 20px;
+		margin-left: m.$left-right;
+		margin-right: m.$left-right;
+
+		.title {
+			color: c.$title-color;
+			@include u.text-shadow(3px, 1.5px);
+			font-family: 'Star3000 Small';
+			font-size: 24pt;
+			width: 570px;
+
+			&.single {
+				height: 70px;
+				top: 25px;
+			}
+
+			&.tall {
+				height: 50px;
+				margin-top: 20px;
+				font-family: 'Star3000';
+				text-align: center;
+			}
+
+			&.dual {
+				height: 70px;
+
+				&>div {
+					position: absolute;
+				}
+
+				.top {
+					top: -3px;
+				}
+
+				.bottom {
+					top: 26px;
+				}
+			}
+
+		}
+
+		.title.single {
+			top: 40px;
+		}
+
+	}
+
+	.main {
+		position: relative;
+
+		&.has-scroll {
+			width: 640px;
+			height: 310px;
+			overflow: hidden;
+
+			&.no-header {
+				height: 400px;
+			}
+		}
+
+		&.has-box {
+			margin-left: m.$left-right;
+			margin-right: m.$left-right;
+			width: calc(100% - 2 * m.$left-right);
+		}
+
+	}
+
+
+	.scroll {
+		@include u.text-shadow(3px, 1.5px);
+		width: calc(640px - 2 * m.$left-right);
+		height: 70px;
+		overflow: hidden;
+		margin-top: 5px;
+		margin-left: m.$left-right;
+		margin-right: m.$left-right;
+
+		.fixed {
+			font-family: 'Star3000';
+			font-size: 24pt;
+			max-height: 40px;
+			overflow: hidden;
+
+			.scroll-area {
+				text-wrap: nowrap;
+				position: relative;
+				// the following added by js code as it is dependent on the content of the element
+				// transition: left (x)s;
+				// left: calc((elem width) - 640px);
+			}
+		}
+
+		.date-time {
+			color: c.$date-time;
+			font-family: 'Star3000 Small';
+			font-size: 24pt;
+			height: 18px;
+			position: relative;
+
+			&.date,
+			&.time {
+				top: -10px;
+				width: 40%;
+			}
+
+			&.date {
+				float: left;
+				text-align: left;
+			}
+
+			&.time {
+				float: right;
+				text-align: right;
+			}
+
+			&.time::after {
+				content: "";
+				clear: both;
+				display: table;
+			}
+
+		}
+	}
+}

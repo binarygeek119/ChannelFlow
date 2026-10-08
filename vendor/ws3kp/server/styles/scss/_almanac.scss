@@ -1,0 +1,54 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+
+.weather-display .main.almanac {
+	font-family: 'Star3000';
+	font-size: 24pt;
+	@include u.text-shadow();
+
+	.heading {
+		text-align: center;
+		font-weight: unset;
+	}
+
+	.sun,
+	.moon {
+		display: table;
+		margin-left: 50px;
+		height: 100px;
+
+		&>div {
+			display: table-row;
+			position: relative;
+
+			&>div {
+				display: table-cell;
+			}
+		}
+
+		.days {
+			text-align: right;
+
+			.day {
+				padding-right: 10px;
+			}
+		}
+
+		.times {
+			text-align: right;
+
+			.name {
+				width: 125px;
+			}
+
+			.sun-time {
+				width: 200px;
+			}
+
+			.large {
+				width: 400px;
+			}
+		}
+
+	}
+}

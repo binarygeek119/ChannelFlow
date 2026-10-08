@@ -1,0 +1,20 @@
+<div class="header">
+	<% if (locals?.titleDual) { %>
+		<div class="title dual">
+			<div class="top">
+				<%-titleDual.top %>
+			</div>
+			<div class="bottom">
+				<%-titleDual.bottom %>
+			</div>
+		</div>
+		<% } else if (locals?.titleTall) { %>
+			<div class="title tall">
+				<%-title %>
+			</div>
+		<% } else { %>
+				<div class="title single">
+					<%-title %>
+				</div>
+		<% } %>
+</div>

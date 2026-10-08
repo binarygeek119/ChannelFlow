@@ -5,31 +5,20 @@
 .vscode/
 .idea/
 
-## Build results. Scoped to src/ so the vendored ErsatzTV next sources
-## (crates/*/src/bin) are not caught by the .NET patterns.
-src/**/[Dd]ebug/
-src/**/[Rr]elease/
-src/**/[Bb]in/
-src/**/[Oo]bj/
-src/**/[Oo]ut/
-artifacts/
-release-artifact/
+## Rust build output
+/target/
+/vendor/ersatztv-next/target/
 
-## Rust build output for the vendored ErsatzTV next
-vendor/ersatztv-next/target/
-
-## NuGet
-*.nupkg
-
-## Runtime data written next to the app
-config/
+## Local runtime state (the config directory the server writes)
+/config/
 .env
 *.db
 *.db-shm
 *.db-wal
 
-## Vendored deps / scratch
+## Transient state from scripts/update-next.sh
+/vendor/ersatztv-next.old/
+
+## Vendored dependencies and scratch
 vendor/**/node_modules/
 __pycache__/
-tools/ffmpeg
-tools/ffprobe

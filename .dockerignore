@@ -3,14 +3,15 @@
 .vscode
 .idea
 **/.DS_Store
-# Scoped to src/: an unanchored **/bin would strip the vendored next
-# crates' entry points (crates/*/src/bin/*.rs) out of the build context.
-src/**/bin
-src/**/obj
-artifacts
-*.md
+
+# Rust build output
+target
+
+# next's source is reference material only and is never COPY'd into the
+# image. Drop this line to put it in the build context if we ever compile it.
+vendor/ersatztv-next
+
+# Local runtime state and secrets
+/config
 .env
 .env.*
-config
-# Rust build output, if anyone compiles the vendored copy
-vendor/ersatztv-next/target

@@ -1,0 +1,64 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+
+.weather-display .regional-forecast {
+
+	&.main {
+		overflow-y: hidden;
+
+		.column-headers {
+			height: 20px;
+			position: absolute;
+			width: 100%;
+		}
+
+		.column-headers {
+			top: 0px;
+
+			div {
+				display: inline-block;
+				font-family: 'Star3000 Small';
+				font-size: 24pt;
+				position: absolute;
+				top: -10px;
+				@include u.text-shadow();
+			}
+		}
+
+		.weather {
+			left: 280px;
+		}
+
+		.temp-low {
+			right: 70px;
+		}
+
+		.temp-high {
+			right: 0px;
+		}
+
+		.forecast-lines {
+			min-height: 338px;
+			padding-top: 10px;
+
+			.forecast-row {
+				font-family: 'Star3000';
+				font-size: 24pt;
+				@include u.text-shadow();
+				position: relative;
+				height: 40px;
+
+				>div {
+					position: absolute;
+					top: 8px;
+				}
+
+				.wind {
+					white-space: pre;
+					text-align: right;
+				}
+			}
+		}
+	}
+
+}

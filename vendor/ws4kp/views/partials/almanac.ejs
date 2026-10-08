@@ -1,0 +1,43 @@
+<%- include('header.ejs', {title:'Almanac', hasTime: true}) %>
+<div class="main has-scroll almanac can-enhance">
+  <div class="sun">
+    <div class="grid-item empty"></div>
+    <div class="grid-item header day-0"></div>
+    <div class="grid-item header day-1"></div>
+    <div class="grid-item header day-2 wide-enhanced"></div>
+    <div class="grid-item row-label">Sunrise:</div>
+    <div class="grid-item time rise-0"></div>
+    <div class="grid-item time rise-1"></div>
+    <div class="grid-item time rise-2 wide-enhanced"></div>
+    <div class="grid-item row-label">Sunset:</div>
+    <div class="grid-item time set-0"></div>
+    <div class="grid-item time set-1"></div>
+    <div class="grid-item time set-2 wide-enhanced"></div>
+  </div>
+	<div class="sun sun-portrait portrait-only">
+		<div class="grid-item empty"></div>
+    <div class="grid-item header sunrise">Sunrise</div>
+    <div class="grid-item header sunset">Sunset</div>
+		<div class="dayname template"><div class="grid-item row-label replaceable"></div></div>
+		<div class="sunrise template"><div class="grid-item time replaceable"></div></div>
+		<div class="sunset template"><div class="grid-item time replaceable"></div></div>
+	</div>
+  <div class="moon">
+    <div class="title">Moon Data:</div>
+    <div class="days">
+      <div class="day template">
+        <div class="type"></div>
+        <div class="icon"><img /></div>
+        <div class="date"></div>
+      </div>
+    </div>
+  </div>
+		<div class="sun moonrise sun-portrait portrait-only">
+		<div class="grid-item empty"></div>
+    <div class="grid-item header sunrise">Moonrise</div>
+    <div class="grid-item header sunset">Moonset</div>
+		<div class="dayname template"><div class="grid-item row-label replaceable"></div></div>
+		<div class="moonrise template"><div class="grid-item time replaceable"></div></div>
+		<div class="moonset template"><div class="grid-item time replaceable"></div></div>
+	</div>
+</div>

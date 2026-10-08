@@ -1,0 +1,36 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+@use 'shared/positions'as p;
+
+.weather-display .local-forecast {
+
+	// clamp width to standard
+	&.main {
+		width: calc(p.$standard-width - (2 * p.$blue-box-margin));
+	}
+
+	.container {
+		position: relative;
+		top: 15px;
+		margin: 0px 10px;
+		box-sizing: border-box;
+		height: 280px;
+		overflow: hidden;
+
+		.portrait.enhanced & {
+			height: 960px;
+		}
+	}
+
+	.forecasts {
+		position: relative;
+	}
+
+	.forecast {
+		font-family: 'Star4000';
+		font-size: 32px;
+		@include u.text-shadow();
+		min-height: 280px;
+		line-height: 40px;
+	}
+}

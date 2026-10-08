@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/channelflow"]
+# next's own workspace lives in the vendored copy; keep cargo out of it.
+exclude = ["vendor/ersatztv-next"]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = "thin"
+strip = true

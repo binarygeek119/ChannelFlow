@@ -1,0 +1,152 @@
+@use 'shared/_colors'as c;
+@use 'shared/_utils'as u;
+@use 'shared/positions'as p;
+
+.weather-display .main.current-weather {
+	&.main {
+		width: calc(p.$standard-width - (2 * p.$blue-box-margin));
+		@include u.text-shadow();
+
+		.portrait.enhanced & {
+			align-content: center;
+		}
+
+		.portrait-location {
+			text-align: center;
+			font-family: "Star4000 Large";
+			font-size: 42px;
+			color: c.$title-color;
+		}
+
+		.col {
+			width: 255px;
+			display: inline-block;
+			margin-top: 10px;
+			padding-top: 10px;
+			position: absolute;
+
+			.wide.enhanced & {
+				width: 300px;
+				margin-left: 25px;
+				margin-right: 25px;
+			}
+
+			.portrait.enhanced & {
+				margin-left: 20px;
+				width: calc(p.$blue-box-width - 40px);
+				display: block;
+				position: relative;
+
+				.wind-container {
+					margin-left: 50px;
+					width: calc(p.$blue-box-width - 140px);
+				}
+			}
+
+			&.left {
+				font-family: 'Star4000 Extended';
+				font-size: 32px;
+
+				.portrait.enhanced & {
+					font-size: 38px;
+					line-height: 40px;
+
+					.icon {
+						margin-top: 50px;
+						transform: scale(1.5);
+						margin-bottom: 50px;
+					}
+				}
+			}
+
+			&.right {
+				right: 0px;
+				font-family: "Star4000 Large";
+				font-size: 20px;
+				font-weight: bold;
+				line-height: 24px;
+
+				.portrait.enhanced & {
+					font-family: "Star4000 Extended";
+					font-size: 38px;
+					font-weight: 300;
+					line-height: 36px;
+				}
+
+
+				.row {
+					margin-bottom: 12px;
+
+					&.hidden {
+						display: none;
+					}
+
+					.label,
+					.value {
+						display: inline-block;
+					}
+
+					.label {
+						margin-left: 20px;
+					}
+
+					.value {
+						float: right;
+						text-align: right;
+						margin-right: 10px;
+					}
+
+				}
+
+			}
+		}
+
+		.center {
+			text-align: center;
+		}
+
+		.temp {
+			font-family: 'Star4000 Large';
+			font-size: 32px;
+		}
+
+		.icon {
+			img {
+				margin: 0 auto;
+				display: block;
+			}
+		}
+
+		.wind-container {
+			margin-left: 10px;
+
+			.standard-only & {
+				display: flex;
+			}
+
+			&>div {
+				width: 45%;
+				display: inline-block;
+			}
+
+			.wind {
+				text-align: right;
+				float: right;
+			}
+		}
+
+		.wind-gusts {
+			text-align: right;
+			font-size: 32px;
+		}
+
+		.location {
+			color: c.$title-color;
+			max-height: 32px;
+			margin-bottom: 10px;
+			padding-top: 4px;
+			overflow: hidden;
+			text-wrap: nowrap;
+		}
+	}
+}

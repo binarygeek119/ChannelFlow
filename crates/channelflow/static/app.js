@@ -30,8 +30,15 @@ const els = {
   aboutSystem: $("about-system"),
   aboutStream: $("about-stream"),
   aiVoice: $("ai-voice"),
+  aiName: $("ai-name"),
+  aiPriority: $("ai-priority"),
+  aiTabs: $("ai-tabs"),
   aiSave: $("ai-save"),
   aiTest: $("ai-test"),
+  aiDelete: $("ai-delete"),
+  aiTestAll: $("ai-test-all"),
+  aiFailover: $("ai-failover"),
+  aiFailoverResult: $("ai-failover-result"),
   aiTestResult: $("ai-test-result"),
   aiNote: $("ai-note"),
   aiBaseUrl: $("ai-base-url"),
@@ -225,12 +232,12 @@ els.rows.addEventListener("click", async (event) => {
 // rather than served -- a real route per menu comes with the wiring pass.
 
 const MENU = {
+  livetv: ["Live TV", "Watch your channels."],
   guide: ["TV Guide", "What's on now, and what's coming up across every channel."],
   general: ["General Settings", "Server-wide defaults for how ChannelFlow runs."],
   quickpin: ["Quick Pin", "Pin something to the top of a channel without building a full preset."],
   clients: ["Clients", "Players that have connected and what they're watching."],
   channels: ["Channels", "Manage Live TV channels"],
-  livetv: ["Live TV", "Watch your channels."],
   lineups: ["Lineups", "Group channels into playlists you can hand to a player."],
   presets: ["Presets", "Reusable scheduling rules you can drop onto any channel."],
   list: ["Lists", "Named lists of items you can reuse across channels and presets."],
@@ -243,7 +250,7 @@ const MENU = {
   weather: ["Weather", "Forecasts, alerts, and the crawl that runs over programming."],
   news: ["News", "News bumps, tickers, and insert clips."],
   emergency: ["Emergency Broadcast System", "The EBS slate, header, and attention tones."],
-  ai: ["AI", "The OpenAI-compatible endpoint ChannelFlow talks to."],
+  ai: ["AI", "OpenAI-compatible endpoints, tried in priority order."],
   transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
   about: ["About", "Version, build, and where this install keeps its data."],
@@ -315,11 +322,18 @@ async function loadAbout() {
 }
 
 // --- AI --------------------------------------------------------------------
-// One OpenAI-compatible endpoint, stored instance-wide in `ai.json`. The API
-// never returns the saved key, only whether one is set, so the field starts
-// blank and its contract is "leave blank to keep": a save that leaves it blank
-// sends no key at all, and the page's Remove button is what clears one.
+// A list of OpenAI-compatible providers, stored in `ai.json`. The first tab is
+// always "New provider"; every saved provider gets its own tab and its own
+// form. The API never returns a saved key, only whether one is set, so the
+// field starts blank and its contract is "leave blank to keep": a save that
+// leaves it blank sends no key at all, and the form's Remove button is what
+// clears one. Providers are tried by ascending priority, so the first tab
+// that works is the one the app uses.
 
+let aiProviders = [];
+let aiNextPriority = 1;
+let aiDefaults = { base_url: "", chat_model: "", tts_model: "", voice: "" };
+let aiActiveId = null; // null is the "New provider" tab
 let aiKeySet = false;
 
 function setAiNote(message, bad) {
@@ -335,67 +349,184 @@ function renderAiKeyState() {
   els.aiApiKey.placeholder = aiKeySet ? "•••••••• saved" : "sk-…";
 }
 
-function fillAi(data) {
-  els.aiBaseUrl.value = data.base_url;
-  els.aiChatModel.value = data.chat_model;
-  els.aiTtsModel.value = data.tts_model;
-  els.aiVoice.value = data.voice;
+// The tab strip: "New provider" first, then the saved providers in the order
+// the app will try them. A provider is addressed by its id, so renaming one
+// does not move it to a different tab.
+function renderAiTabs() {
+  els.aiTabs.replaceChildren();
+  const tabs = [{ id: null, label: "New provider" }].concat(
+    aiProviders.map((provider) => ({ id: provider.id, label: provider.name }))
+  );
+  for (const tab of tabs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "inner-tab";
+    button.textContent = tab.label;
+    button.setAttribute("role", "tab");
+    const active = tab.id === aiActiveId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.addEventListener("click", () => selectAiTab(tab.id));
+    els.aiTabs.appendChild(button);
+  }
+}
+
+// The running order shown under the form. It is the same list the tabs use, so
+// what the page shows is what the app does.
+function renderAiFailover() {
+  els.aiFailover.replaceChildren();
+  if (!aiProviders.length) {
+    const item = document.createElement("li");
+    item.className = "empty";
+    item.textContent = "No providers yet — add one above.";
+    els.aiFailover.appendChild(item);
+    return;
+  }
+  for (const provider of aiProviders) {
+    const item = document.createElement("li");
+    item.textContent = `${provider.priority} · ${provider.name} — ${provider.base_url}`;
+    els.aiFailover.appendChild(item);
+  }
+}
+
+// Point the one form at a provider, or at a blank new one.
+function fillAiForm(provider) {
+  if (provider) {
+    els.aiName.value = provider.name;
+    els.aiPriority.value = String(provider.priority);
+    els.aiBaseUrl.value = provider.base_url;
+    els.aiChatModel.value = provider.chat_model;
+    els.aiTtsModel.value = provider.tts_model;
+    els.aiVoice.value = provider.voice;
+    aiKeySet = provider.api_key_set;
+    els.aiSave.textContent = "Save provider";
+    els.aiDelete.hidden = false;
+  } else {
+    els.aiName.value = "";
+    els.aiPriority.value = String(aiNextPriority);
+    els.aiBaseUrl.value = aiDefaults.base_url;
+    els.aiChatModel.value = aiDefaults.chat_model;
+    els.aiTtsModel.value = aiDefaults.tts_model;
+    els.aiVoice.value = aiDefaults.voice;
+    aiKeySet = false;
+    els.aiSave.textContent = "Add provider";
+    els.aiDelete.hidden = true;
+  }
   els.aiApiKey.value = "";
-  aiKeySet = data.api_key_set;
+  els.aiApiKey.type = "password";
+  els.aiKeyReveal.textContent = "Show";
   renderAiKeyState();
-  // A new set of settings invalidates whatever the last test proved.
   els.aiTestResult.hidden = true;
 }
 
-async function loadAi() {
+function selectAiTab(id) {
+  if (id !== null && !aiProviders.some((provider) => provider.id === id)) {
+    id = null;
+  }
+  aiActiveId = id;
+  fillAiForm(id === null ? null : aiProviders.find((provider) => provider.id === id));
+  renderAiTabs();
+  els.aiFailoverResult.hidden = true;
+  setAiNote("");
+}
+
+async function loadAi(selectId) {
   try {
-    fillAi(await request("/api/ai"));
-    setAiNote("");
+    const data = await request("/api/ai");
+    aiProviders = data.providers;
+    aiNextPriority = data.next_priority;
+    aiDefaults = data.defaults;
+    const wanted = selectId !== undefined ? selectId : aiActiveId;
+    renderAiFailover();
+    selectAiTab(wanted);
   } catch (error) {
     setAiNote(error.message || "Could not load AI settings.", true);
   }
 }
 
-async function sendAi(body, message) {
-  try {
-    fillAi(await request("/api/ai", { method: "PUT", body: JSON.stringify(body) }));
-    setAiNote(message);
-  } catch (error) {
-    setAiNote(error.message || "Could not save AI settings.", true);
-  }
-}
-
-// The URL, chat model, TTS model and voice are always sent — clearing one is a
-// validation error worth showing, not a silent fall-back. The key is only sent
-// when the field holds something, so a blank field keeps the saved key.
+// The name, URL, models and a new key are always sent — clearing one is a
+// validation error worth showing, not a silent fall-back. Priority is left out
+// when the field is blank, which keeps the stored number on an edit; creating
+// a provider needs it, so `saveAi` checks first. The key is only sent when the
+// field holds something, so a blank field keeps the saved key.
 function aiBody() {
   const body = {
+    name: els.aiName.value,
     base_url: els.aiBaseUrl.value,
     chat_model: els.aiChatModel.value,
     tts_model: els.aiTtsModel.value,
     voice: els.aiVoice.value,
   };
+  const priority = els.aiPriority.value.trim();
+  if (priority !== "") body.priority = Number.parseInt(priority, 10);
   const key = els.aiApiKey.value.trim();
   if (key !== "") body.api_key = key;
   return body;
 }
 
-function saveAi() {
-  return sendAi(aiBody(), "Saved.");
+function newPriorityMissing() {
+  return aiActiveId === null && els.aiPriority.value.trim() === "";
 }
 
-// Tests what is on the page rather than what is saved, so a new key or model
-// can be checked before it is written. It makes the real requests — a model
-// listing, a chat reply and one spoken phrase — and stores nothing.
+async function saveAi() {
+  if (newPriorityMissing()) {
+    setAiNote("Give the provider a priority — a whole number, lowest is tried first.", true);
+    return;
+  }
+  try {
+    let saved;
+    let message;
+    if (aiActiveId === null) {
+      saved = await request("/api/ai/providers", {
+        method: "POST",
+        body: JSON.stringify(aiBody()),
+      });
+      message = `Added ${saved.name}.`;
+    } else {
+      saved = await request(`/api/ai/providers/${encodeURIComponent(aiActiveId)}`, {
+        method: "PUT",
+        body: JSON.stringify(aiBody()),
+      });
+      message = `Saved ${saved.name}.`;
+    }
+    await loadAi(saved.id);
+    setAiNote(message);
+  } catch (error) {
+    setAiNote(error.message || "Could not save the provider.", true);
+  }
+}
+
+async function deleteAi() {
+  const provider = aiProviders.find((entry) => entry.id === aiActiveId);
+  if (!provider) return;
+  if (!window.confirm(`Delete the "${provider.name}" provider?`)) return;
+  try {
+    await request(`/api/ai/providers/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
+    await loadAi(null);
+    setAiNote(`Deleted ${provider.name}.`);
+  } catch (error) {
+    setAiNote(error.message || "Could not delete the provider.", true);
+  }
+}
+
+// Tests what is on the page rather than what is saved, so a new key, model or
+// priority can be checked before it is written. It makes the real requests — a
+// model listing, a chat reply and one spoken phrase — and stores nothing.
 async function testAi() {
+  if (newPriorityMissing()) {
+    setAiNote("Give the provider a priority before testing it.", true);
+    return;
+  }
   els.aiTest.disabled = true;
   els.aiTest.textContent = "Testing…";
   els.aiTestResult.hidden = true;
   setAiNote("");
   try {
-    renderAiTest(
-      await request("/api/ai/test", { method: "POST", body: JSON.stringify(aiBody()) })
-    );
+    const path =
+      aiActiveId === null
+        ? "/api/ai/test"
+        : `/api/ai/providers/${encodeURIComponent(aiActiveId)}/test`;
+    renderAiTest(await request(path, { method: "POST", body: JSON.stringify(aiBody()) }));
   } catch (error) {
     setAiNote(error.message || "Could not run the test.", true);
   } finally {
@@ -421,6 +552,48 @@ function renderAiTest(report) {
   els.aiTestResult.hidden = false;
 }
 
+// Walk the providers in priority order and stop at the first that answers, so
+// the page shows which endpoint the app would actually use — and which ones
+// are never reached because a higher-priority one works.
+async function testAiAll() {
+  els.aiTestAll.disabled = true;
+  els.aiTestAll.textContent = "Testing…";
+  els.aiFailoverResult.hidden = true;
+  try {
+    renderFailover(await request("/api/ai/test-all", { method: "POST" }));
+  } catch (error) {
+    els.aiFailoverResult.className = "test-result bad";
+    els.aiFailoverResult.innerHTML = `<p class="test-head">${escapeHtml(
+      error.message || "Could not run the failover test."
+    )}</p>`;
+    els.aiFailoverResult.hidden = false;
+  } finally {
+    els.aiTestAll.disabled = false;
+    els.aiTestAll.textContent = "Test failover";
+  }
+}
+
+function renderFailover(report) {
+  const head = report.ok
+    ? `Connected — "${report.chosen}" answers first.`
+    : "No provider answered.";
+  els.aiFailoverResult.className = "test-result " + (report.ok ? "ok" : "bad");
+  els.aiFailoverResult.innerHTML =
+    `<p class="test-head">${escapeHtml(head)}</p>` +
+    report.attempts
+      .map((attempt) => {
+        const suffix = report.chosen === attempt.name && attempt.ok ? " (used first)" : "";
+        return (
+          `<div class="test-probe"><span class="test-name">${attempt.priority}</span>` +
+          `<span class="test-detail ${attempt.ok ? "ok" : "bad"}">${escapeHtml(
+            attempt.name
+          )} — ${escapeHtml(attempt.detail)}${suffix}</span></div>`
+        );
+      })
+      .join("");
+  els.aiFailoverResult.hidden = false;
+}
+
 function formatBytes(bytes) {
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MiB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
@@ -429,7 +602,22 @@ function formatBytes(bytes) {
 
 els.aiSave.addEventListener("click", saveAi);
 els.aiTest.addEventListener("click", testAi);
-els.aiKeyClear.addEventListener("click", () => sendAi({ api_key: "" }, "Saved key removed."));
+els.aiDelete.addEventListener("click", deleteAi);
+els.aiTestAll.addEventListener("click", testAiAll);
+els.aiKeyClear.addEventListener("click", async () => {
+  if (aiActiveId === null) return;
+  try {
+    await request(`/api/ai/providers/${encodeURIComponent(aiActiveId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ api_key: "" }),
+    });
+    aiKeySet = false;
+    renderAiKeyState();
+    setAiNote("Saved key removed.");
+  } catch (error) {
+    setAiNote(error.message || "Could not remove the key.", true);
+  }
+});
 els.aiKeyReveal.addEventListener("click", () => {
   const hidden = els.aiApiKey.type === "password";
   els.aiApiKey.type = hidden ? "text" : "password";

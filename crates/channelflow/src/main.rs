@@ -25,6 +25,11 @@ struct Args {
     #[arg(long, env = "CHANNELFLOW_CONFIG")]
     config: Option<PathBuf>,
 
+    /// Postgres connection string, e.g. postgres://user:pass@host:5432/db.
+    /// Empty (or unset) stores everything as JSON files under `--config`.
+    #[arg(long, env = "DATABASE_URL", default_value = "")]
+    database_url: String,
+
     /// Address to bind.
     #[arg(long, default_value = "0.0.0.0")]
     bind: String,
@@ -61,20 +66,36 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    let store = Store::open(&config).with_context(|| {
-        format!(
-            "opening the channel store under {} — that directory must be writable by uid 1000 (`ersatztv`)",
-            config.display()
-        )
-    })?;
-    store.seed()?;
+    let store = if args.database_url.trim().is_empty() {
+        Store::open(&config).with_context(|| {
+            format!(
+                "opening the channel store under {} — that directory must be writable by uid 1000 (`ersatztv`)",
+                config.display()
+            )
+        })?
+    } else {
+        Store::open_postgres(&args.database_url, &config)
+            .await
+            .with_context(|| {
+                format!(
+                    "connecting to Postgres at {} — the database must exist and this app must be able to create tables in it",
+                    redact_url(&args.database_url)
+                )
+            })?
+    };
+    store.seed().await?;
 
     let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
         .parse()
         .with_context(|| format!("invalid bind address {}:{}", args.bind, args.port))?;
 
-    let channels = store.list()?.len();
-    tracing::info!(config = %config.display(), channels, "ChannelFlow 2.0.0 started");
+    let channels = store.list().await?.len();
+    let backend = if args.database_url.trim().is_empty() {
+        "files"
+    } else {
+        "postgres"
+    };
+    tracing::info!(config = %config.display(), backend, channels, "ChannelFlow 2.0.0 started");
     tracing::info!("web UI on http://{addr}/");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -87,4 +108,19 @@ async fn main() -> Result<()> {
     let http = openai::client().context("building the HTTP client for AI requests")?;
     axum::serve(listener, api::router(store, about, http)).await?;
     Ok(())
+}
+
+/// Show a connection string without its password in logs and errors.
+fn redact_url(url: &str) -> String {
+    let mut shown: String = url
+        .split('@')
+        .last()
+        .unwrap_or(url)
+        .chars()
+        .take(120)
+        .collect();
+    if url.contains('@') {
+        shown = format!("<credentials>@{shown}");
+    }
+    shown
 }

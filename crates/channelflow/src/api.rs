@@ -4,13 +4,13 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::ai::AiView;
+use crate::ai::{AiConfig, AiView, ProviderView};
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::openai;
 use crate::store::{Store, StoreError};
@@ -53,8 +53,15 @@ pub fn router(store: Store, about_info: AboutInfo, http: reqwest::Client) -> Rou
             "/api/channels/{id}",
             get(get_channel).put(update_channel).delete(delete_channel),
         )
-        .route("/api/ai", get(get_ai).put(put_ai))
+        .route("/api/ai", get(get_ai))
+        .route("/api/ai/providers", post(create_ai_provider))
+        .route(
+            "/api/ai/providers/{id}",
+            put(update_ai_provider).delete(delete_ai_provider),
+        )
+        .route("/api/ai/providers/{id}/test", post(test_ai_provider))
         .route("/api/ai/test", post(test_ai))
+        .route("/api/ai/test-all", post(test_ai_all))
         .route("/api/transcode", get(get_transcode).put(put_transcode))
         .route(
             "/api/channels/{id}/transcode",
@@ -87,7 +94,8 @@ impl IntoResponse for ApiError {
             StoreError::Invalid(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Transcode(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Ai(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
-            StoreError::Io(_) | StoreError::Json(_) => {
+            StoreError::ProviderNotFound(_) => (StatusCode::NOT_FOUND, self.0.to_string()),
+            StoreError::Io(_) | StoreError::Json(_) | StoreError::Database(_) => {
                 tracing::error!(error = %self.0, "storage failure");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -213,21 +221,21 @@ fn format_bytes(bytes: f64) -> String {
 }
 
 async fn list_channels(State(state): State<AppState>) -> Result<Json<Vec<Channel>>, ApiError> {
-    Ok(Json(state.store.list()?))
+    Ok(Json(state.store.list().await?))
 }
 
 async fn get_channel(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Channel>, ApiError> {
-    Ok(Json(state.store.get(id)?))
+    Ok(Json(state.store.get(id).await?))
 }
 
 async fn create_channel(
     State(state): State<AppState>,
     Json(input): Json<NewChannel>,
 ) -> Result<(StatusCode, Json<Channel>), ApiError> {
-    let channel = state.store.create(input)?;
+    let channel = state.store.create(input).await?;
     Ok((StatusCode::CREATED, Json(channel)))
 }
 
@@ -236,42 +244,96 @@ async fn update_channel(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateChannel>,
 ) -> Result<Json<Channel>, ApiError> {
-    Ok(Json(state.store.update(id, input)?))
+    Ok(Json(state.store.update(id, input).await?))
 }
 
 async fn delete_channel(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.store.delete(id)?;
+    state.store.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The AI page's settings. The saved key is never returned — only whether one
+/// The AI page's providers. A saved key is never returned — only whether one
 /// is set — and an update that omits it keeps the stored one.
 async fn get_ai(State(state): State<AppState>) -> Result<Json<AiView>, ApiError> {
-    Ok(Json(state.store.ai_config()?.view()))
+    Ok(Json(state.store.ai_config().await?.view()))
 }
 
-async fn put_ai(
+/// Add a provider. Its name and priority must not collide with one already
+/// saved, and the new tab is addressed afterwards by the id in the response.
+async fn create_ai_provider(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
-) -> Result<Json<AiView>, ApiError> {
-    let current = state.store.ai_config()?;
-    let updated = current.apply(&body).map_err(StoreError::Ai)?;
-    state.store.save_ai_config(&updated)?;
-    Ok(Json(updated.view()))
+) -> Result<(StatusCode, Json<ProviderView>), ApiError> {
+    let mut config = state.store.ai_config().await?;
+    let provider = config.create(&body).map_err(StoreError::Ai)?;
+    state.store.save_ai_config(&config).await?;
+    Ok((StatusCode::CREATED, Json(provider.view())))
 }
 
-/// Try the endpoint now, with the values on the page rather than the stored
-/// ones, so a key or a voice can be checked before it is saved. Nothing is
-/// written, and a failed connection is a normal result — `200` with `ok`.
+async fn update_ai_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<ProviderView>, ApiError> {
+    let mut config = state.store.ai_config().await?;
+    if config.find(&id).is_none() {
+        return Err(StoreError::ProviderNotFound(id).into());
+    }
+    let provider = config.update(&id, &body).map_err(StoreError::Ai)?;
+    state.store.save_ai_config(&config).await?;
+    Ok(Json(provider.view()))
+}
+
+async fn delete_ai_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let mut config = state.store.ai_config().await?;
+    if config.find(&id).is_none() {
+        return Err(StoreError::ProviderNotFound(id).into());
+    }
+    config.delete(&id).map_err(StoreError::Ai)?;
+    state.store.save_ai_config(&config).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Try the values on the "New provider" tab — a provider that does not exist
+/// yet. Nothing is written, and a failed connection is a normal result: `200`
+/// with `ok` false.
 async fn test_ai(
     State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<openai::Report>, ApiError> {
-    let config = state.store.ai_config()?.apply(&body).map_err(StoreError::Ai)?;
-    Ok(Json(openai::run(&state.http, &config).await))
+    let provider = AiConfig::draft(&body).map_err(StoreError::Ai)?;
+    Ok(Json(openai::run(&state.http, &provider).await))
+}
+
+/// Try the values on a saved provider's tab: the stored provider with the
+/// form's changes laid over it, so an untouched key need not be retyped.
+async fn test_ai_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<openai::Report>, ApiError> {
+    let config = state.store.ai_config().await?;
+    if config.find(&id).is_none() {
+        return Err(StoreError::ProviderNotFound(id).into());
+    }
+    let provider = config.resolve(&id, &body).map_err(StoreError::Ai)?;
+    Ok(Json(openai::run(&state.http, &provider).await))
+}
+
+/// Show which provider the app would use: walk them in priority order and stop
+/// at the first that answers, so a dead endpoint is visible before it matters.
+async fn test_ai_all(
+    State(state): State<AppState>,
+) -> Result<Json<openai::FailoverReport>, ApiError> {
+    let config = state.store.ai_config().await?;
+    let providers = config.ordered();
+    Ok(Json(openai::failover(&state.http, &providers).await))
 }
 
 /// The streaming paths the Live TV page advertises.
@@ -301,7 +363,7 @@ async fn live_pending() -> Response {
 /// schema: `transcode::spec` is checked against
 /// `vendor/ersatztv-next/schema/channel_config.json` by a test in that module.
 async fn get_transcode(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults()?;
+    let defaults = state.store.transcode_defaults().await?;
     Ok(Json(json!({
         "spec": transcode::spec(),
         "defaults": defaults,
@@ -313,7 +375,7 @@ async fn put_transcode(
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let config = TranscodeConfig::parse(&body).map_err(StoreError::Transcode)?;
-    state.store.save_transcode_defaults(&config)?;
+    state.store.save_transcode_defaults(&config).await?;
     Ok(Json(json!({ "defaults": config })))
 }
 
@@ -323,8 +385,8 @@ async fn get_channel_transcode(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let channel = state.store.get(id)?;
-    let defaults = state.store.transcode_defaults()?;
+    let channel = state.store.get(id).await?;
+    let defaults = state.store.transcode_defaults().await?;
     let effective = defaults
         .merged(&channel.transcode)
         .map_err(StoreError::Transcode)?;
@@ -342,11 +404,11 @@ async fn put_channel_transcode(
     Path(id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults()?;
+    let defaults = state.store.transcode_defaults().await?;
     // Resolve before storing, so a patch next would reject never reaches the
     // channel document.
     let effective = defaults.merged(&body).map_err(StoreError::Transcode)?;
-    let channel = state.store.set_channel_transcode(id, body)?;
+    let channel = state.store.set_channel_transcode(id, body).await?;
     Ok(Json(json!({
         "overrides": channel.transcode,
         "effective": effective,
@@ -358,11 +420,10 @@ async fn clear_channel_transcode(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults()?;
-    let channel = state.store.set_channel_transcode(
-        id,
-        serde_json::Value::Object(serde_json::Map::new()),
-    )?;
+    let defaults = state.store.transcode_defaults().await?;
+    let channel = state.store
+        .set_channel_transcode(id, serde_json::Value::Object(serde_json::Map::new()))
+        .await?;
     Ok(Json(json!({
         "overrides": channel.transcode,
         "effective": defaults,

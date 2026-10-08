@@ -511,6 +511,41 @@ select:focus-visible, textarea:focus-visible {
 
 .hint.bad { color: var(--danger); }
 
+/* --- AI provider tabs and failover list --- */
+
+.inner-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 1rem 0 1.1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.inner-tab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+}
+.inner-tab:hover { color: var(--text); }
+.inner-tab.active {
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.failover-list {
+    margin: 0 0 0.9rem;
+    padding-left: 1.3rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+.failover-list li { padding: 0.12rem 0; }
+.failover-list li.empty { list-style: none; margin-left: -1.3rem; }
+
 /* --- Per-channel override dialog --- */
 
 .settings-dialog {

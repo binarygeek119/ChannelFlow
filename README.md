@@ -20,17 +20,19 @@ crates/channelflow/
   build.rs                    stamps GIT_SHA + RUSTC_VERSION for the About page
   src/main.rs                 CLI, startup, config directory
   src/model.rs                Channel / NewChannel / UpdateChannel
-  src/ai.rs                   OpenAI-compatible endpoint + TTS settings
-  src/openai.rs               the test call: a model listing, a chat reply, and one spoken phrase
+  src/ai.rs                   the AI provider list: names, priorities, models
+  src/openai.rs               provider tests plus the priority-order failover walk
   src/transcode.rs            next's ffmpeg + normalization settings, defaults + merge
-  src/store.rs                file-backed storage, distinct error types
+  src/store.rs                file- or Postgres-backed storage behind one Store
   src/api.rs                  axum routes, HTTP status mapping, embedded UI
   static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
-Storage is **one JSON file per channel** under `<config>/channels/`, not a database. next is driven entirely by JSON documents, so the on-disk state is already close to the shape you hand to the engine, and nothing has to be installed before the server runs. If a real query layer becomes necessary later, `store.rs` is the only thing that changes.
+Storage has two backends behind one `Store`, and either holds the same settings: the channels, the instance transcode defaults, and the AI providers.
 
-Instance transcode defaults live beside them in `<config>/transcode.json`, written on first run so it is a real, hand-editable file rather than an implied set of defaults. The AI page's connection settings live in `<config>/ai.json`, written `0600` — that is the one file holding a secret, so it is not left readable by every account on the host.
+**Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, plus `<config>/transcode.json` and `<config>/ai.json`. The AI file is written `0600` because it holds keys; a single-endpoint document written before providers existed is upgraded on first read. next is driven by JSON documents itself, so file storage keeps the on-disk state the same shape you would hand to the engine.
+
+**Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in three tables created automatically at startup: `channels`, and one-row `transcode_settings` and `ai_settings` holding the same JSON documents the files held. The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
 
 Storage failures keep their own error type rather than collapsing into `anyhow`, so the API can answer `404` for a missing channel, `409` for a channel number already in use, and `400` for invalid input instead of reporting everything as `500`.
 
@@ -47,9 +49,13 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `DELETE` | `/api/channels/{id}` | `204` |
 | `GET` | `/api/transcode` | the Transcode page's field list plus the instance defaults |
 | `PUT` | `/api/transcode` | replace the defaults, `400` if next's schema would reject it |
-| `GET` | `/api/ai` | the AI page's settings; the saved key is never returned |
-| `PUT` | `/api/ai` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
-| `POST` | `/api/ai/test` | try the endpoint now with the posted values; always `200`, the result carries `ok` |
+| `GET` | `/api/ai` | every provider, ordered by priority, plus the next free number and the new-provider defaults; keys are never returned |
+| `POST` | `/api/ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
+| `PUT` | `/api/ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
+| `DELETE` | `/api/ai/providers/{id}` | `204`; `404` if the id is unknown |
+| `POST` | `/api/ai/test` | try an unsaved provider from the "New provider" tab; always `200`, the result carries `ok` |
+| `POST` | `/api/ai/providers/{id}/test` | try a saved provider with the form's changes laid over it |
+| `POST` | `/api/ai/test-all` | walk the providers by priority and report the first that answers |
 | `GET` | `/api/channels/{id}/transcode` | overrides, the defaults, and the effective settings |
 | `PUT` | `/api/channels/{id}/transcode` | store that channel's override patch |
 | `DELETE` | `/api/channels/{id}/transcode` | drop every override |
@@ -59,15 +65,17 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 
 The web UI is served at `/` and compiled into the binary — the markup, CSS and JS via `include_str!`, the logo and favicons via `include_bytes!` — so the image needs no asset directory and cannot start with a half-copied web root. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
 
-The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer, all 22 menu items with their icons and group gaps, the near-black/rose palette, and the mark. Five menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the OpenAI connection below. The other 17 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer, all 22 menu items with their icons and group gaps, the near-black/rose palette, and the mark. Five menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the provider list below. The other 17 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
 
 ### AI settings
 
-The AI page is one OpenAI-compatible endpoint: an **API URL**, an **API key**, a **chat model**, a **TTS model** and a **voice**. There is no "OpenAI or Venice" switch on purpose — the URL *is* the choice. Point it at `https://api.openai.com/v1`, at a compatible provider, or at a model on the local network, and the same URLs serve both jobs. The API uses different models for different things, so two are named: the **chat model** for text — the lineup and guide copy the playout milestone will ask for — and the **TTS model** plus **voice** for speech.
+The AI page holds a **list** of OpenAI-compatible providers shown as tabs. The first tab is always **New provider** and is what the page opens on: give it a **name**, a **priority**, an **API URL**, an **API key**, and the **chat model**, **TTS model** and **voice** to use. Saving adds the provider as its own tab, where the settings can be edited, saved, or deleted. There is no "OpenAI or Venice" switch on purpose — the URL *is* the choice, so OpenAI itself, a compatible provider, and a model on the local network are the same kind of thing configured in different ways.
 
-The API key is treated as a secret rather than an ordinary setting. `GET /api/ai` returns whether a key is saved but never the key itself, because this API has no authentication and the server listens on every interface by default. `ai.json` is written `0600`, and the page starts the field blank: a save that leaves it blank sends no key and keeps the stored one, while the field's **Remove** button is what clears it — so "leave it alone" and "get rid of it" stay distinguishable without either of them meaning a stray password-manager fill.
+Providers are tried in **priority order, lowest number first**, and the app moves on to the next when one cannot be reached — the whole reason to keep more than one. The first provider is used, and the rest are only contacted when the ones above them fail. Priority must be unique, since two providers sharing a number would leave the order to chance; so must the name, because it is the tab's title. The **Failover order** list under the form shows the running order, and **Test failover** walks it for real: it tries providers from lowest priority up and stops at the first that answers, reporting any it had to skip. That walk lives in `openai::failover` and is what the playout milestone's AI calls will use to pick an endpoint.
 
-**Test AI** answers "does this actually work?" without spending a save. It posts whatever is on the page — including a key typed but not yet stored — to `POST /api/ai/test`, which makes three real requests and writes nothing. The first lists models, which tells a wrong address or a rejected key apart from a working one; the second asks the chat model for a one-word reply; the third asks the endpoint to speak one short phrase. A bad key and a bad model look identical from a single failed request, so the result reports every probe with the endpoint's own message, and any HTTP status the endpoint returns is a normal `200` result rather than an error the page has to unwrap. The test passes when both the chat and speech probes answer — listing models stays informational, because a compatible server need not implement `/models` at all. This is the one place the server reaches the network, so `reqwest` with rustls — no OpenSSL — is the one dependency the settings pages added.
+Each provider's key is treated as a secret. `GET /api/ai` returns whether a key is saved per provider but never the key itself, because this API has no authentication and the server listens on every interface by default. `ai.json` is written `0600`, and a provider's form starts its key field blank: a save that leaves it blank sends no key and keeps the stored one, while the field's **Remove** button is what clears it — so "leave it alone" and "get rid of it" stay distinguishable without either of them meaning a stray password-manager fill.
+
+**Test AI** answers "does this provider actually work?" without spending a save. It posts whatever is on the form — including a key typed but not yet stored — and makes three real requests, writing nothing. The first lists models, which tells a wrong address or a rejected key apart from a working one; the second asks the chat model for a one-word reply; the third asks the endpoint to speak one short phrase. A bad key and a bad model look identical from a single failed request, so the result reports every probe with the endpoint's own message, and any HTTP status the endpoint returns is a normal `200` result rather than an error the page has to unwrap. The test passes when both the chat and speech probes answer — listing models stays informational, because a compatible server need not implement `/models` at all. This is the one place the server reaches the network, so `reqwest` with rustls — no OpenSSL — is the one dependency the settings pages added.
 
 ### Transcode settings
 
@@ -138,7 +146,15 @@ Then open `http://127.0.0.1:8097/`.
 
 The container runs as **uid 1000 (`ersatztv`)**, inherited from the next base, so the mounted `config` directory must be writable by that user — `chmod 777 config` for a quick test, or `chown 1000:1000 config` for a real setup. The server says exactly this if the directory is not writable.
 
-From a source checkout: `cargo run --release -p channelflow -- --config ./config --port 8097`.
+Without `DATABASE_URL` everything is stored as JSON files under `/config`. To store everything in Postgres instead, pass a connection string — nothing else changes, and on the first run the existing files are imported:
+
+```bash
+docker run --rm -p 8097:8097 \
+  -e DATABASE_URL=postgres://channelflow:channelflow@db-host:5432/channelflow \
+  -v "$PWD/config:/config" channelflow:2.0.0
+```
+
+From a source checkout: `cargo run --release -p channelflow -- --config ./config --port 8097`, or `--database-url "$DATABASE_URL"` for the same Postgres mode. The scratch-database test in `store.rs` runs only when `TEST_DATABASE_URL` is set.
 
 ## Where this goes next
 

@@ -1,0 +1,40 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - CHANGELOG.md
+      - README.md
+  # pr.yml doesn't package or build images
+  pull_request:
+    paths:
+      - .github/**
+      - docker/**
+jobs:
+  calculate_version:
+    name: Calculate version information
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Calculate version
+        id: version
+        run: .github/scripts/develop-tag.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+
+  build_artifacts:
+    uses: ./.github/workflows/artifacts.yml
+    needs: calculate_version
+    with:
+      tag: ${{ needs.calculate_version.outputs.tag }}
+      publish: false
+
+  build_images:
+    uses: ./.github/workflows/docker.yml
+    needs: calculate_version
+    with:
+      tag: ${{ needs.calculate_version.outputs.tag }}
+      publish: false

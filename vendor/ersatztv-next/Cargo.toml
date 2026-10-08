@@ -1,0 +1,71 @@
+[workspace]
+members = [
+    "crates/ersatztv",
+    "crates/ersatztv-channel",
+    "crates/ersatztv-core",
+    "crates/ersatztv-playout",
+    "crates/ersatztv-playout-generator",
+    "crates/ffpipeline",
+    "crates/libamf-sys",
+    "crates/libcl-sys",
+    "crates/libd3d11-sys",
+    "crates/libmpp-sys",
+    "crates/libnvidia-sys",
+    "crates/libva-sys",
+    "crates/libvpl-sys",
+    "crates/libvt-sys",
+    "crates/libvulkan-sys",
+]
+resolver = "3"
+
+[workspace.package]
+# set by .github/scripts/prep-release.sh
+version = "0.2.0"
+publish = false
+
+[workspace.dependencies]
+axum = "0.8"
+clap = { version = "4.6", features = ["derive"] }
+derive_more = { version = "2.1.1", features = ["display"] }
+dyn-clone = "1.0"
+enum_dispatch = "0.3.13"
+env_logger = "0.11"
+ersatztv = { path = "crates/ersatztv" }
+ersatztv-core = { path = "crates/ersatztv-core" }
+ersatztv-playout = { path = "crates/ersatztv-playout" }
+ffpipeline = { path = "crates/ffpipeline" }
+filetime = "0.2"
+futures-core = "0.3.32"
+futures-util = "0.3.32"
+libc = "0.2"
+libloading = "0.9"
+libamf-sys = { path = "crates/libamf-sys" }
+libcl-sys = { path = "crates/libcl-sys" }
+libd3d11-sys = { path = "crates/libd3d11-sys" }
+libmpp-sys = { path = "crates/libmpp-sys" }
+libnvidia-sys = { path = "crates/libnvidia-sys" }
+libva-sys = { path = "crates/libva-sys" }
+libvpl-sys = { path = "crates/libvpl-sys" }
+libvt-sys = { path = "crates/libvt-sys" }
+libvulkan-sys = { path = "crates/libvulkan-sys" }
+log = "0.4"
+quick-xml = "0.40.0"
+rand = { version = "0.10", features = ["thread_rng"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json"] }
+rstest = "0.26.1"
+schemars = "1.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+simple-expand-tilde = "0.5.3"
+strum = { version = "0.28", features = ["derive"] }
+tempfile = "3"
+thiserror = "2.0"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
+tokio = { version = "1.50", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = {  version = "0.7.18", features = ["io-util", "rt"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+uuid = { version = "1.23", features = ["v4"] }
+walkdir = "2.5"
+which = "8.0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

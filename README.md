@@ -27,6 +27,19 @@ Scaffold a lineup first if `/config` is empty:
 docker run --rm -v ./config:/config channelflow:2.0.0 add-lineup /config/lineup.json --channels 1
 ```
 
+## The vendored copy of next
+
+`vendor/ersatztv-next/` is a plain copy of [`ErsatzTV/next`](https://github.com/ErsatzTV/next) at `main` commit `46796e9` — the source the base image is built from, sitting next to ChannelFlow's own code. It is a copy, not a submodule or a subtree: no history, no linkage back to upstream.
+
+What's in there that matters most:
+
+- `docker/Dockerfile` — upstream's own image build, the reference for how `ersatztv/next:develop` is produced.
+- `schema/` — `playout.json`, `channel_config.json` and `lineup_config.json`. These are the public contract; ChannelFlow writes documents that must match them.
+- `crates/` — the Rust workspace (ffpipeline, ersatztv-channel, ersatztv, and the `lib*-sys` FFI crates).
+- `examples/` — a worked `playout.json`, `channel.json` and `lineup.json`.
+
+To refresh it, replace the directory from a fresh clone of upstream `main` and update the commit noted above.
+
 ## Where this goes next
 
 ChannelFlow comes over one piece at a time, each landing as its own layer in the `Dockerfile`:

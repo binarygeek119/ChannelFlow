@@ -1,0 +1,102 @@
+name: Pull Request
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Show Toolchain
+        run: rustup show active-toolchain
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D clippy::all
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            rust_target: x86_64-pc-windows-msvc
+            should_run_tests: true
+          - os: ubuntu-22.04
+            target: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            should_run_tests: true
+          - os: ubuntu-latest
+            target: linux-musl-x64
+            rust_target: x86_64-unknown-linux-musl
+            should_run_tests: false
+          - os: ubuntu-22.04-arm
+            target: linux-arm64
+            rust_target: aarch64-unknown-linux-gnu
+            should_run_tests: true
+          - os: macos-15-intel
+            target: macos-x64
+            rust_target: x86_64-apple-darwin
+            should_run_tests: true
+          - os: macos-15
+            target: macos-arm64
+            rust_target: aarch64-apple-darwin
+            should_run_tests: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Show Toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Must vary by runner image: rust-cache keys on os/arch only, so 22.04 and
+          # latest would share a key and restore each other's host build scripts.
+          prefix-key: v3-${{ matrix.os }}
+          # Workaround for https://github.com/Swatinem/rust-cache/issues/341:
+          # on the updated macOS runner image, cache-bin's restored cargo/rustc
+          # dispatches as rustup-init and fails with "unexpected argument".
+          cache-bin: ${{ runner.os == 'macOS' && 'false' || 'true' }}
+
+      - name: Install Cross-Compilation Tools
+        if: runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.rust_target }}
+
+      - name: Install Rust target
+        if: runner.os == 'macOS'
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build
+        run: cargo build --locked --workspace --all-features --target ${{ matrix.rust_target }}
+
+      - name: Compile Tests
+        run: cargo test --locked --no-run --workspace --all-features --target ${{ matrix.rust_target }}
+
+      - name: Run Tests
+        if: matrix.should_run_tests
+        run: cargo test --locked --workspace --all-features --target ${{ matrix.rust_target }}

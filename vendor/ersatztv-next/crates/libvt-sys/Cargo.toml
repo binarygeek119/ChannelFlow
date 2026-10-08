@@ -1,0 +1,8 @@
+[package]
+name = "libvt-sys"
+version.workspace = true
+publish.workspace = true
+edition = "2024"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"

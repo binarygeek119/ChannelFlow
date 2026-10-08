@@ -1,0 +1,41 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum FFPipelineError {
+    #[error("unable to locate a usable video stream for graphics layer {0}")]
+    GraphicsStreamNotFound(usize),
+    #[error("error detecting ffmpeg capabilities: {0}")]
+    FfmpegCapabilitiesError(String),
+    #[error("ffprobe failed")]
+    ProbeFailed,
+    #[error("failed to parse ffprobe output")]
+    ProbeFailedToParse,
+    #[error("audio input is required")]
+    AudioInputIsRequired,
+    #[error("video input is required")]
+    VideoInputIsRequired,
+    #[error("error detecting amf capabilities: {0}")]
+    AmfCapabilitiesError(String),
+    #[error("error detecting nvidia capabilities: {0}")]
+    NvidiaCapabilitiesError(String),
+    #[error("error detecting opencl capabilities: {0}")]
+    OpenCLCapabilitiesError(String),
+    #[error("error detecting qsv capabilities: {0}")]
+    QsvCapabilitiesError(String),
+    #[error("error detecting rkmpp capabilities: {0}")]
+    RkmppCapabilitiesError(String),
+    #[error("error detecting vaapi capabilities: {0}")]
+    VaapiCapabilitiesError(String),
+    #[error("error detecting videotoolbox capabilities: {0}")]
+    VideoToolboxCapabilitiesError(String),
+    #[error("error detecting vulkan capabilities: {0}")]
+    VulkanCapabilitiesError(String),
+    #[error("failed to convert subtitle")]
+    FailedToConvertSubtitle,
+    #[error("failed to parse subtitle")]
+    FailedToParseSubtitle,
+    #[error("keyframe search failed: {0}")]
+    KeyframeSearchFailed(String),
+    #[error("no keyframe {0}")]
+    NoKeyframe(String),
+}

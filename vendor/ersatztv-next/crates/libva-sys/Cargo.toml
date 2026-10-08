@@ -1,0 +1,9 @@
+[package]
+name = "libva-sys"
+version.workspace = true
+publish.workspace = true
+edition = "2024"
+
+[dependencies]
+derive_more = { workspace = true }
+libloading = { workspace = true }

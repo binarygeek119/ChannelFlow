@@ -1,0 +1,2495 @@
+use std::fmt::Formatter;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use serde::Serialize;
+use strum::{Display, EnumString};
+
+use crate::ArgVec;
+use crate::audio_codec::AudioCodec;
+use crate::audio_decoder::AudioDecoder;
+use crate::audio_filter::AudioFilter;
+use crate::color::FrameColor;
+use crate::copy_decision::{
+    CopyDecision, CopyDecisions, VideoCopyContext, audio_copy_decision, video_copy_decision,
+};
+use crate::error::FFPipelineError;
+use crate::ffmpeg_info::FfmpegInfo;
+use crate::filter_chain::{FilterChain, PipelineFilter};
+use crate::frame_rate::FrameRate;
+use crate::frame_size::{FrameSize, parse_aspect_ratio};
+use crate::global_option::{GlobalOption, LogLevel};
+use crate::hw_accel::{HardwareAccel, HwAccel};
+use crate::input::{
+    FfmpegInputArgs, FfmpegInputRequestContext, GraphicsInput, GraphicsKind, GraphicsLocation,
+    InputSettings, InputSource, ProbedInput,
+};
+use crate::output_option::OutputOption;
+use crate::output_settings::{
+    OutputSettings, ScalingMode, SubtitleMode, VideoFilterOptions, YadifOptions,
+};
+use crate::overlay_filter::{
+    FramePoint, OverlayFilter, OverlayKind, OverlaySource, SoftwareOverlay,
+};
+use crate::probe::{ProbeResultAudioStream, ProbeResultVideoStream};
+use crate::video_codec::{MetadataBsf, VideoCodec, VideoEncoder};
+use crate::video_decoder::VideoDecoder;
+use crate::video_filter::{
+    ColorChannelMixerFilter, CropFilter, DeinterlaceFilter, Dv5WorkaroundFilter, EnsureAlphaFilter,
+    FadeFilter, FormatFilter, FpsFilter, LoopFilter, PadFilter, ScaleFilter,
+    SoftwareDeinterlaceFilter, SoftwareDeinterlaceOptions, SubtitleImageScaleFilter,
+    SubtitlesFilter, ToneMapFilter, TransposeDir, TransposeFilter, VideoFilter,
+};
+
+pub const KEYFRAME_INTERVAL_SECONDS: u32 = 2;
+pub const SEGMENT_SECONDS: u32 = 4;
+
+#[derive(Debug, Clone, Copy, Display, EnumString)]
+#[strum(serialize_all = "lowercase")]
+pub enum AudioFormat {
+    Aac,
+    Ac3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Kbps(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hz(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, Serialize)]
+#[strum(serialize_all = "lowercase")]
+pub enum VideoFormat {
+    Av1,
+    H264,
+    Hevc,
+    Mpeg2Video,
+    Vc1,
+    Vp8,
+    Vp9,
+}
+
+impl VideoFormat {
+    /// other codecs carry interlaced content as progressive pictures
+    pub fn has_interlaced_coding(&self) -> bool {
+        matches!(
+            self,
+            VideoFormat::H264 | VideoFormat::Mpeg2Video | VideoFormat::Vc1
+        )
+    }
+}
+
+/// The formats next can encode. `VideoFormat` identifies a codec (decode, capability probes);
+/// this is the subset a channel can target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumString, Serialize)]
+#[strum(serialize_all = "lowercase")]
+pub enum EncodeFormat {
+    H264,
+    Hevc,
+    Mpeg2Video,
+}
+
+impl From<EncodeFormat> for VideoFormat {
+    fn from(value: EncodeFormat) -> Self {
+        match value {
+            EncodeFormat::H264 => VideoFormat::H264,
+            EncodeFormat::Hevc => VideoFormat::Hevc,
+            EncodeFormat::Mpeg2Video => VideoFormat::Mpeg2Video,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct PtsOffset {
+    pub duration: Duration,
+}
+
+impl Default for PtsOffset {
+    fn default() -> Self {
+        PtsOffset {
+            duration: Duration::ZERO,
+        }
+    }
+}
+
+enum SubtitleBurn<'a> {
+    Image {
+        stream: &'a ProbeResultVideoStream,
+        input: &'a ProbedInput,
+        size: FrameSize,
+    },
+    Text {
+        stream: &'a ProbeResultVideoStream,
+        input: &'a ProbedInput,
+    },
+}
+
+pub(crate) struct OutputContext {
+    pub(crate) frame_rate: FrameRate,
+    pub(crate) audio_codec: AudioCodec,
+    pub(crate) audio_channels: Option<u32>,
+    pub(crate) video_encoder: VideoEncoder,
+    pub(crate) pts_offset: Option<PtsOffset>,
+    pub(crate) preferred_surface: FrameSurface,
+    pub(crate) preferred_pixel_format: Option<PixelFormat>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
+pub enum FrameSurface {
+    System,
+    Amf,
+    Cuda,
+    Qsv,
+    Rkmpp,
+    Vaapi,
+    VideoToolbox,
+    Vulkan,
+    OpenCL,
+}
+
+impl FrameSurface {
+    pub(crate) fn device_name(&self) -> Option<&'static str> {
+        match self {
+            FrameSurface::Amf => Some("amf"),
+            FrameSurface::Cuda => Some("cuda"),
+            FrameSurface::OpenCL => Some("opencl"),
+            FrameSurface::Qsv => Some("qsv"),
+            FrameSurface::Rkmpp => Some("rkmpp"),
+            FrameSurface::Vaapi => Some("vaapi"),
+            FrameSurface::Vulkan => Some("vulkan"),
+            FrameSurface::VideoToolbox => Some("videotoolbox"),
+            FrameSurface::System => None,
+        }
+    }
+}
+
+pub type SurfaceSet = std::collections::HashSet<FrameSurface>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelFormat {
+    Bgra,
+    Rgba,
+    Yuv420p,
+    Yuv420p10le,
+    Yuva420p,
+    Yuva420p10le,
+    Nv12,
+    Nv15,
+    P010le,
+    P016,
+}
+
+gen_subset!(HwPixelFormat, PixelFormat, Nv12, Nv15, P010le);
+
+impl PixelFormat {
+    pub fn parse(pix_fmt: &str) -> PixelFormat {
+        match pix_fmt.to_lowercase().as_str() {
+            "bgra" => PixelFormat::Bgra,
+            "rgba" => PixelFormat::Rgba,
+            "yuv420p" => PixelFormat::Yuv420p,
+            "yuv420p10le" => PixelFormat::Yuv420p10le,
+            "yuva420p" => PixelFormat::Yuva420p,
+            "yuva420p10le" => PixelFormat::Yuva420p10le,
+            "nv12" => PixelFormat::Nv12,
+            "nv15" => PixelFormat::Nv15,
+            "p010le" => PixelFormat::P010le,
+            _ => {
+                log::warn!("assuming unknown pixel format {} is yuv420p", pix_fmt);
+                PixelFormat::Yuv420p
+            }
+        }
+    }
+
+    pub(crate) fn bit_depth(&self) -> u8 {
+        match self {
+            PixelFormat::Bgra
+            | PixelFormat::Rgba
+            | PixelFormat::Yuv420p
+            | PixelFormat::Yuva420p
+            | PixelFormat::Nv12 => 8,
+            PixelFormat::Yuv420p10le
+            | PixelFormat::Yuva420p10le
+            | PixelFormat::P010le
+            | PixelFormat::Nv15 => 10,
+            PixelFormat::P016 => 16,
+        }
+    }
+
+    pub(crate) fn has_alpha(&self) -> bool {
+        matches!(
+            self,
+            PixelFormat::Bgra
+                | PixelFormat::Rgba
+                | PixelFormat::Yuva420p
+                | PixelFormat::Yuva420p10le
+        )
+    }
+
+    pub(crate) fn as_arg(&self) -> &str {
+        match self {
+            PixelFormat::Bgra => "bgra",
+            PixelFormat::Rgba => "rgba",
+            PixelFormat::Yuv420p => "yuv420p",
+            PixelFormat::Yuv420p10le => "yuv420p10le",
+            PixelFormat::Yuva420p => "yuva420p",
+            PixelFormat::Yuva420p10le => "yuva420p10le",
+            PixelFormat::Nv12 => "nv12",
+            PixelFormat::Nv15 => "nv15",
+            PixelFormat::P010le => "p010le",
+            PixelFormat::P016 => "p016",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HdrFormat {
+    None,
+    /// PQ without metadata
+    Pq,
+    /// PQ with metadata
+    Hdr10,
+    Hlg,
+    Dv5,
+}
+
+#[derive(Clone, Debug, derive_more::Display)]
+#[display(
+    "FrameState(size={},is_anamorphic={},surface={})",
+    size,
+    is_anamorphic,
+    surface
+)]
+pub struct FrameState {
+    pub(crate) size: FrameSize,
+    pub(crate) is_anamorphic: bool,
+    pub(crate) is_interlaced: bool,
+    pub(crate) sample_aspect_ratio: Option<String>,
+    pub(crate) display_aspect_ratio: Option<String>,
+    pub(crate) surface: FrameSurface,
+    pub(crate) pixel_format: PixelFormat,
+    pub(crate) color: FrameColor,
+    pub(crate) hdr_format: HdrFormat,
+    pub(crate) rotation: Option<i32>,
+}
+
+impl FrameState {
+    pub(crate) fn apply_rotation(&mut self) {
+        if let Some(dir) = self.rotation.and_then(TransposeDir::from_rotation)
+            && dir.is_quarter_turn()
+        {
+            std::mem::swap(&mut self.size.width, &mut self.size.height);
+            // rotation does not make pixels square. hints may omit SAR, so keep DAR.
+            for ratio in [
+                &mut self.sample_aspect_ratio,
+                &mut self.display_aspect_ratio,
+            ] {
+                *ratio = ratio
+                    .as_deref()
+                    .and_then(parse_aspect_ratio)
+                    .map(|value| (1.0 / value).to_string());
+            }
+        }
+
+        self.rotation = None;
+    }
+
+    /// All tonemap filters output SDR BT.709.
+    pub(crate) fn apply_tonemap(&mut self) {
+        self.hdr_format = HdrFormat::None;
+        self.color = FrameColor::bt709();
+    }
+}
+
+pub enum PipelineInput {
+    Audio {
+        input_source: InputSource,
+        index: u32,
+        path: String,
+        seek: Duration,
+        channels: u32,
+        decoder: AudioDecoder,
+        /// Open the file again for audio, even when it is also the video input.
+        own_input: bool,
+    },
+    Video {
+        input_source: InputSource,
+        index: u32,
+        path: String,
+        seek: Duration,
+        realtime: bool,
+        decoder: VideoDecoder,
+    },
+    Subtitle {
+        input_source: InputSource,
+        index: u32,
+        path: String,
+        seek: Duration,
+    },
+    Graphics {
+        input: GraphicsInput,
+        layer_index: usize,
+        index: u32,
+        path: String,
+        extra_input_args: ArgVec,
+    },
+}
+
+impl PipelineInput {
+    fn sort_order(&self) -> usize {
+        match self {
+            PipelineInput::Video { .. } => 0,
+            PipelineInput::Audio { .. } => 1,
+            PipelineInput::Subtitle { .. } => 2,
+            PipelineInput::Graphics { layer_index, .. } => 3 + *layer_index,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EnvironmentVariable {
+    pub key: String,
+    pub value: String,
+}
+
+pub struct Pipeline {
+    ffmpeg_info: FfmpegInfo,
+    copy_decisions: CopyDecisions,
+    accel: Option<HardwareAccel>,
+    filter_options: VideoFilterOptions,
+    initial_state: FrameState,
+
+    global_options: Vec<GlobalOption>,
+    inputs: Vec<PipelineInput>,
+    filter_chain: FilterChain,
+    output_options: Vec<OutputOption>,
+    env_vars: Vec<EnvironmentVariable>,
+
+    input_request_context: FfmpegInputRequestContext,
+    output_context: OutputContext,
+}
+
+impl Pipeline {
+    fn full(
+        ffmpeg_info: &FfmpegInfo,
+        input_settings: InputSettings,
+        output_settings: OutputSettings,
+    ) -> Result<Pipeline, FFPipelineError> {
+        let mut final_output_settings = output_settings;
+
+        if let Some(accel) = &final_output_settings.accel
+            && accel
+                .known_accel()
+                .map(|a| !ffmpeg_info.has_hw_accel(a))
+                .unwrap_or(false)
+        {
+            log::warn!("ffmpeg does not support requested accel {:?}", accel);
+            final_output_settings.accel = None;
+        }
+
+        let video_transcode = &mut final_output_settings.video.transcode;
+        if video_transcode.format == EncodeFormat::Mpeg2Video && video_transcode.bit_depth == 10 {
+            log::debug!("mpeg2video does not support 10-bit output, using 8-bit");
+            video_transcode.bit_depth = 8;
+        }
+
+        let mut duration = std::cmp::min(
+            input_settings.audio_input.out_point - input_settings.audio_input.in_point,
+            input_settings.video_input.out_point - input_settings.video_input.in_point,
+        );
+
+        let video_stream = input_settings.select_video_stream()?;
+        let audio_stream = input_settings.select_audio_stream()?;
+        let graphics_streams: Vec<_> = input_settings
+            .graphics_inputs
+            .iter()
+            .map(|input| input_settings.select_graphics_stream(input))
+            .collect();
+
+        let video_transcode = &final_output_settings.video.transcode;
+        let is_still_image = input_settings.video_input.probe_result.is_still_image();
+
+        let subtitle_burn = subtitle_burn(&input_settings, &final_output_settings, video_stream);
+        let copy_decisions = copy_decisions(
+            &input_settings,
+            &final_output_settings,
+            video_stream,
+            audio_stream,
+            subtitle_burn.as_ref(),
+        );
+
+        let audio_codec = match (
+            &copy_decisions.audio,
+            final_output_settings.audio.transcode.format,
+        ) {
+            (Some(CopyDecision::Copy), _) => AudioCodec::Copy,
+            (_, AudioFormat::Aac) => AudioCodec::Aac,
+            (_, AudioFormat::Ac3) => AudioCodec::Ac3,
+        };
+
+        // TODO: add target profile to config
+        let video_encoder = match &copy_decisions.video {
+            Some(CopyDecision::Copy) => VideoEncoder::Copy,
+            _ => {
+                let format = video_transcode.format;
+                let bit_depth = video_transcode.bit_depth;
+                VideoEncoder::Encode(
+                    final_output_settings
+                        .accel
+                        .as_ref()
+                        .filter(|a| a.can_encode(&format, bit_depth))
+                        .and_then(|a| a.codec_for_format(&format, bit_depth, video_transcode.size))
+                        .unwrap_or_else(|| match format {
+                            EncodeFormat::H264 => VideoCodec::libx264(),
+                            EncodeFormat::Hevc => VideoCodec::libx265(),
+                            EncodeFormat::Mpeg2Video => VideoCodec::mpeg2video(),
+                        }),
+                )
+            }
+        };
+
+        let mut pts_offset = final_output_settings.pts_offset;
+        let mut video_seek = input_settings.video_input.in_point;
+        let mut copy_output_options = Vec::new();
+        if video_encoder == VideoEncoder::Copy {
+            if let Some(copy_seek) = &input_settings.video_copy_seek {
+                let frame_duration =
+                    Duration::from_secs_f64(1.0 / video_stream.frame_rate.parsed_frame_rate);
+                let args = copy_seek.args(duration, frame_duration);
+                video_seek = args.input_seek;
+                duration = args.duration;
+                if let Some(output_seek) = args.output_seek {
+                    copy_output_options.push(OutputOption::Seek(output_seek));
+                }
+                if let Some(offset) = pts_offset.as_mut()
+                    && offset.duration > args.ts_offset_correction
+                {
+                    offset.duration -= args.ts_offset_correction;
+                }
+            }
+
+            // ffmpeg adds SPS/PPS only before IDR slices, so an open-GOP seek or segment that
+            // starts on another I-frame can't decode. HEVC adds them on every IRAP.
+            if video_stream.codec == "h264" {
+                copy_output_options.push(OutputOption::H264CopyParameterSets);
+            }
+        }
+
+        let video_decoder = VideoDecoder::new(
+            ffmpeg_info,
+            video_stream,
+            is_still_image,
+            &video_encoder,
+            final_output_settings.accel.as_ref(),
+        );
+
+        let hdr = match (
+            video_stream.dv_profile,
+            video_stream.color_params.color_transfer.as_deref(),
+        ) {
+            (Some(5), _) => HdrFormat::Dv5,
+            (_, Some("smpte2084")) if video_stream.color_params.has_hdr10_metadata => {
+                HdrFormat::Hdr10
+            }
+            (_, Some("smpte2084")) => HdrFormat::Pq,
+            (_, Some("arib-std-b67")) => HdrFormat::Hlg,
+            _ => HdrFormat::None,
+        };
+
+        let initial_state = FrameState {
+            size: FrameSize {
+                width: video_stream
+                    .width
+                    .ok_or(FFPipelineError::VideoInputIsRequired)?,
+                height: video_stream
+                    .height
+                    .ok_or(FFPipelineError::VideoInputIsRequired)?,
+            },
+            is_anamorphic: video_stream.is_anamorphic(),
+            // if user does not want to deinterlace, pretend content is not interlaced
+            is_interlaced: video_transcode.deinterlace && video_stream.is_interlaced(),
+            sample_aspect_ratio: video_stream.sample_aspect_ratio.to_owned(),
+            display_aspect_ratio: video_stream.display_aspect_ratio.to_owned(),
+            surface: video_decoder.output_surface(),
+            pixel_format: video_decoder
+                .output_format(&PixelFormat::parse(video_stream.pix_fmt.as_str())),
+            color: FrameColor::from(&video_stream.color_params),
+            hdr_format: hdr,
+            rotation: video_stream.rotation,
+        };
+
+        // copy can't change the rate; only items already at the target are copied
+        let output_frame_rate = final_output_settings
+            .frame_rate
+            .clone()
+            .filter(|_| video_encoder != VideoEncoder::Copy);
+
+        let output_context = OutputContext {
+            audio_codec,
+            audio_channels: final_output_settings.audio.transcode.channels,
+            video_encoder: video_encoder.clone(),
+            pts_offset,
+            frame_rate: output_frame_rate
+                .clone()
+                .unwrap_or_else(|| video_stream.frame_rate.to_owned()),
+            preferred_surface: video_encoder.preferred_surface(),
+            preferred_pixel_format: video_encoder.preferred_pixel_format(video_transcode.bit_depth),
+        };
+
+        let mut filters = vec![
+            PipelineFilter::Audio(AudioFilter::LoudNorm {
+                settings: final_output_settings.audio.transcode.loudness.clone(),
+                sample_rate: final_output_settings.audio.transcode.sample_rate,
+            }),
+            PipelineFilter::Audio(AudioFilter::Resample),
+            PipelineFilter::Audio(AudioFilter::Pad),
+        ];
+
+        filters.extend([
+            PipelineFilter::Video(
+                LoopFilter {
+                    is_still_image,
+                    loops: None,
+                }
+                .into(),
+            ),
+            PipelineFilter::Video(Dv5WorkaroundFilter.into()),
+        ]);
+
+        // tonemap first when decoded with vulkan (for libplacebo), or when not downscaling
+        let source = initial_state.size;
+        let tonemap_first = video_decoder.output_surface() == FrameSurface::Vulkan
+            || video_transcode
+                .size
+                .is_none_or(|target| target.pixel_count() >= source.pixel_count());
+
+        let tonemap = PipelineFilter::Video(
+            ToneMapFilter {
+                algorithm: video_transcode.filter_options.tonemap.tonemap.clone(),
+                output_format: match video_transcode.bit_depth {
+                    10 => PixelFormat::Yuv420p10le,
+                    _ => PixelFormat::Yuv420p,
+                },
+            }
+            .into(),
+        );
+
+        let geometry_filters = [
+            PipelineFilter::Video(
+                DeinterlaceFilter {
+                    filter: SoftwareDeinterlaceFilter::Yadif(YadifOptions::default()),
+                    options: SoftwareDeinterlaceOptions {
+                        bwdif: video_transcode.filter_options.bwdif.clone(),
+                        w3fdif: video_transcode.filter_options.w3fdif.clone(),
+                        yadif: video_transcode.filter_options.yadif.clone(),
+                    },
+                    input_is_interlaced: initial_state.is_interlaced,
+                }
+                .into(),
+            ),
+            // after deinterlace, which can double the rate; before the rest, so it runs at the
+            // target rate
+            PipelineFilter::Video(
+                FpsFilter {
+                    frame_rate: output_frame_rate.clone(),
+                }
+                .into(),
+            ),
+            PipelineFilter::Video(TransposeFilter::default().into()),
+            PipelineFilter::Video(
+                ScaleFilter {
+                    size: video_transcode.size,
+                    scaling_mode: video_transcode.scaling_mode,
+                    input_is_anamorphic: initial_state.is_anamorphic,
+                }
+                .into(),
+            ),
+            PipelineFilter::Video(
+                PadFilter {
+                    size: video_transcode.size,
+                    scaling_mode: video_transcode.scaling_mode,
+                }
+                .into(),
+            ),
+            PipelineFilter::Video(
+                CropFilter {
+                    size: video_transcode.size,
+                    scaling_mode: video_transcode.scaling_mode,
+                }
+                .into(),
+            ),
+        ];
+
+        if tonemap_first {
+            filters.push(tonemap);
+            filters.extend(geometry_filters);
+        } else {
+            filters.extend(geometry_filters);
+            filters.push(tonemap);
+        }
+
+        let mut inputs = vec![
+            PipelineInput::Audio {
+                input_source: input_settings.audio_input.input_source.to_owned(),
+                index: audio_stream.stream_index,
+                path: input_settings.audio_input.probe_result.path.to_owned(),
+                seek: input_settings.audio_input.in_point,
+                channels: audio_stream.channels,
+                decoder: AudioDecoder::new(audio_stream, &final_output_settings),
+                // decided in optimize, once overlay surfaces are resolved
+                own_input: false,
+            },
+            PipelineInput::Video {
+                input_source: input_settings.video_input.input_source.to_owned(),
+                index: video_stream.stream_index,
+                path: input_settings.video_input.probe_result.path.to_owned(),
+                seek: if is_still_image {
+                    Duration::ZERO
+                } else {
+                    video_seek
+                },
+                realtime: final_output_settings.realtime && !final_output_settings.is_live,
+                decoder: video_decoder,
+            },
+        ];
+
+        match subtitle_burn {
+            Some(SubtitleBurn::Image {
+                stream: subtitle_stream,
+                input: subtitle_input,
+                size,
+            }) => {
+                inputs.push(PipelineInput::Subtitle {
+                    input_source: subtitle_input.input_source.to_owned(),
+                    index: subtitle_stream.stream_index,
+                    path: subtitle_input.probe_result.path.to_owned(),
+                    seek: subtitle_input.in_point,
+                });
+
+                let secondary_initial_state = FrameState {
+                    size,
+                    is_anamorphic: subtitle_stream.is_anamorphic(),
+                    is_interlaced: false,
+                    sample_aspect_ratio: subtitle_stream.sample_aspect_ratio.to_owned(),
+                    display_aspect_ratio: subtitle_stream.display_aspect_ratio.to_owned(),
+                    surface: FrameSurface::System,
+                    pixel_format: if subtitle_stream.pix_fmt.is_empty() {
+                        PixelFormat::Bgra
+                    } else {
+                        PixelFormat::parse(&subtitle_stream.pix_fmt)
+                    },
+                    color: FrameColor::from(&subtitle_stream.color_params),
+                    hdr_format: HdrFormat::None,
+                    rotation: None,
+                };
+
+                filters.push(PipelineFilter::Overlay(OverlayFilter {
+                    kind: SoftwareOverlay::default().into(),
+                    secondary: vec![SubtitleImageScaleFilter { size }.into()],
+                    secondary_initial_state,
+                    secondary_source: OverlaySource::Subtitle,
+                    location: None,
+                }));
+            }
+            Some(SubtitleBurn::Text {
+                stream: subtitle_stream,
+                input: subtitle_input,
+            }) => {
+                // only use force_style with SRT, which doesn't have any styling of its own
+                let mut final_force_style = None;
+                if subtitle_stream.codec == "srt" || subtitle_stream.codec == "subrip" {
+                    final_force_style = final_output_settings.subtitle_force_style;
+                }
+
+                filters.push(PipelineFilter::Video(
+                    SubtitlesFilter {
+                        path: subtitle_input.probe_result.path.to_owned(),
+                        seek: subtitle_input.in_point,
+                        fonts_folder: final_output_settings.fonts_folder.to_owned(),
+                        force_style: final_force_style,
+                    }
+                    .into(),
+                ))
+            }
+            None => {}
+        }
+
+        for (graphics_input, graphics_stream) in
+            input_settings.graphics_inputs.iter().zip(graphics_streams)
+        {
+            let Some(graphics_stream) = graphics_stream else {
+                return Err(FFPipelineError::GraphicsStreamNotFound(
+                    graphics_input.layer_index,
+                ));
+            };
+            let (Some(height), Some(width)) = (graphics_stream.height, graphics_stream.width)
+            else {
+                return Err(FFPipelineError::GraphicsStreamNotFound(
+                    graphics_input.layer_index,
+                ));
+            };
+            if graphics_input.kind == GraphicsKind::Canvas {
+                // location is required by the schema, so only a non-default value is worth naming
+                let ignored = [
+                    (
+                        !matches!(graphics_input.location, GraphicsLocation::TopLeft),
+                        "location",
+                    ),
+                    (graphics_input.width_percent.is_some(), "width_percent"),
+                    (
+                        graphics_input.within_source_content.is_some(),
+                        "within_source_content",
+                    ),
+                    (
+                        graphics_input.horizontal_margin_percent.is_some(),
+                        "horizontal_margin_percent",
+                    ),
+                    (
+                        graphics_input.vertical_margin_percent.is_some(),
+                        "vertical_margin_percent",
+                    ),
+                    (graphics_input.opacity_percent.is_some(), "opacity_percent"),
+                    (graphics_input.timing.is_some(), "timing"),
+                ]
+                .into_iter()
+                .filter_map(|(present, name)| present.then_some(name))
+                .collect::<Vec<_>>();
+
+                if !ignored.is_empty() {
+                    log::warn!(
+                        "ignoring {} on canvas graphics layer {}",
+                        ignored.join(", "),
+                        graphics_input.layer_index
+                    );
+                }
+            }
+
+            let extra_input_args = if graphics_input.kind == GraphicsKind::Canvas {
+                // local canvas shouldn't restart from beginning after bursting
+                let seek = input_settings.playout_offset + graphics_input.in_point;
+                if seek > Duration::ZERO
+                    && matches!(graphics_input.input_source, InputSource::Local(_))
+                {
+                    args![
+                        "-ss",
+                        format!("{}ms", seek.as_millis()),
+                        "-t",
+                        format!("{}ms", duration.as_millis())
+                    ]
+                } else {
+                    args!["-t", format!("{}ms", duration.as_millis())]
+                }
+            } else if graphics_stream.is_still_image() {
+                // decode a single frame; the loop filter below repeats it *after* scaling, so
+                // decode and scale happen once instead of once per output frame
+                args!["-framerate", output_context.frame_rate.r_frame_rate.clone()]
+            } else if graphics_stream.codec == "gif" || graphics_stream.codec == "apng" {
+                args![
+                    "-ignore_loop",
+                    "0",
+                    "-t",
+                    format!("{}ms", duration.as_millis())
+                ]
+            } else {
+                args![
+                    "-stream_loop",
+                    "-1",
+                    "-t",
+                    format!("{}ms", duration.as_millis())
+                ]
+            };
+
+            inputs.push(PipelineInput::Graphics {
+                input: graphics_input.clone(),
+                layer_index: graphics_input.layer_index,
+                index: graphics_stream.stream_index,
+                path: graphics_input.probe_result.path.to_owned(),
+                extra_input_args,
+            });
+
+            let secondary_initial_state = FrameState {
+                size: FrameSize { width, height },
+                is_anamorphic: false,
+                is_interlaced: false,
+                sample_aspect_ratio: Some(String::from("1:1")),
+                display_aspect_ratio: None,
+                surface: FrameSurface::System,
+                pixel_format: if graphics_stream.pix_fmt.is_empty() {
+                    PixelFormat::Bgra
+                } else {
+                    PixelFormat::parse(&graphics_stream.pix_fmt)
+                },
+                color: FrameColor::from(&graphics_stream.color_params),
+                hdr_format: HdrFormat::None,
+                rotation: None,
+            };
+
+            let video_size = video_transcode.size.as_ref().unwrap_or(&initial_state.size);
+
+            // a canvas is authored at the output size; a mismatch means the playout metadata is
+            // stale, so scale rather than fail the whole item
+            let canvas_needs_scale = graphics_input.kind == GraphicsKind::Canvas
+                && video_size != &secondary_initial_state.size;
+            if canvas_needs_scale {
+                log::warn!(
+                    "canvas graphics layer {} is {}x{} but output is {}x{}; scaling in software",
+                    graphics_input.layer_index,
+                    secondary_initial_state.size.width,
+                    secondary_initial_state.size.height,
+                    video_size.width,
+                    video_size.height
+                );
+            }
+
+            let source_content_size = match video_transcode.scaling_mode {
+                ScalingMode::ScaleAndPad => {
+                    let mut rotated_state = initial_state.clone();
+                    rotated_state.apply_rotation();
+                    video_size.square_pixel_size_contain(&rotated_state)
+                }
+                ScalingMode::Crop | ScalingMode::Stretch => *video_size,
+            };
+
+            let scaled_size =
+                graphics_input.scaled_size(FrameSize { width, height }, video_transcode.size);
+
+            let location = if graphics_input.kind == GraphicsKind::Canvas {
+                Some(FramePoint { x: 0, y: 0 })
+            } else {
+                Some(graphics_input.frame_location(&source_content_size, &scaled_size, video_size))
+            };
+
+            let fade_filters = if graphics_input.kind == GraphicsKind::Canvas {
+                vec![]
+            } else {
+                FadeFilter::for_graphics(
+                    graphics_input.timing.as_ref(),
+                    input_settings.start,
+                    input_settings.playout_offset,
+                    duration,
+                )
+            };
+
+            let ensure_alpha_filter: VideoFilter = EnsureAlphaFilter {
+                format: match secondary_initial_state.pixel_format.bit_depth() {
+                    10 => PixelFormat::Yuva420p10le,
+                    _ => PixelFormat::Bgra,
+                },
+            }
+            .into();
+
+            let mut secondary_filters: Vec<VideoFilter> =
+                if graphics_input.kind == GraphicsKind::Canvas {
+                    // convert to bgra, not yuva420p: most hw overlays upload bgra, and yuva420p
+                    // removes chroma detail. evaluate removes this filter for a bgra canvas. the
+                    // filter also keeps alpha for formats that `PixelFormat::parse` does not know
+                    let mut filters: Vec<VideoFilter> = vec![
+                        FormatFilter {
+                            format: PixelFormat::Bgra,
+                        }
+                        .into(),
+                    ];
+                    if canvas_needs_scale {
+                        // stretch, not contain: the canvas has to stay exactly the output size or
+                        // the (0,0) overlay would pin a smaller canvas to the top left corner
+                        filters.push(
+                            ScaleFilter {
+                                size: Some(*video_size),
+                                scaling_mode: ScalingMode::Stretch,
+                                input_is_anamorphic: false,
+                            }
+                            .into(),
+                        );
+                    }
+                    filters
+                } else {
+                    vec![
+                        ensure_alpha_filter,
+                        ColorChannelMixerFilter {
+                            alpha: graphics_input.opacity_percent.unwrap_or(100f32) / 100.0f32,
+                        }
+                        .into(),
+                        ScaleFilter {
+                            size: Some(scaled_size),
+                            scaling_mode: ScalingMode::ScaleAndPad,
+                            input_is_anamorphic: false,
+                        }
+                        .into(),
+                    ]
+                };
+
+            // a still image is decoded as a single frame; only fades need it repeated (they act on
+            // frame timestamps). otherwise the overlay's repeatlast holds it, which keeps the
+            // per-frame format conversion and hwupload out of the chain entirely
+            if !fade_filters.is_empty() {
+                secondary_filters.push(
+                    LoopFilter::bounded(
+                        graphics_stream.is_still_image(),
+                        duration,
+                        &output_context.frame_rate,
+                    )
+                    .into(),
+                );
+            }
+
+            secondary_filters.extend(fade_filters.iter().map(|f| f.clone().into()));
+
+            filters.push(PipelineFilter::Overlay(OverlayFilter {
+                kind: SoftwareOverlay::default().into(),
+                secondary: secondary_filters,
+                secondary_initial_state,
+                secondary_source: OverlaySource::Graphics(graphics_input.layer_index),
+                location,
+            }));
+        }
+
+        let mut env_vars = Vec::new();
+
+        if let Some(reports_folder) = final_output_settings
+            .reports_folder
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            && let Some(report_id) = final_output_settings
+                .report_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+        {
+            let folder = PathBuf::from(reports_folder);
+            if let Err(err) = std::fs::create_dir_all(&folder) {
+                log::warn!("failed to create ffmpeg reports folder: {err}; will not save report");
+            } else {
+                let file = folder
+                    .join(format!(".in-flight-{}.log", report_id))
+                    .to_string_lossy()
+                    .to_string()
+                    .replace(r"%", r"%%");
+
+                #[cfg(target_os = "windows")]
+                let mut file = file;
+
+                #[cfg(target_os = "windows")]
+                {
+                    file = file.replace(r"\", r"/").replace(r":/", r"\:/");
+                }
+
+                env_vars = vec![EnvironmentVariable {
+                    key: String::from("FFREPORT"),
+                    value: format!("file={file}:level=32"),
+                }]
+            }
+        }
+
+        let input_request_context = FfmpegInputRequestContext {
+            channel_number: input_settings.channel_number.clone(),
+            playout_offset: input_settings.playout_offset,
+            duration,
+            frame_rate: output_context.frame_rate.r_frame_rate.clone(),
+        };
+
+        Ok(Pipeline {
+            ffmpeg_info: ffmpeg_info.clone(),
+            copy_decisions,
+            accel: final_output_settings.accel.clone(),
+            filter_options: final_output_settings.video.transcode.filter_options,
+            initial_state: initial_state.clone(),
+            global_options: vec![
+                // hardware accel should use a single thread
+                GlobalOption::Threads(match &final_output_settings.accel {
+                    Some(_) => 1,
+                    _ => 0,
+                }),
+                GlobalOption::NoStdIn,
+                GlobalOption::HideBanner,
+                GlobalOption::LogLevel(LogLevel::Error),
+                GlobalOption::StandardFormatFlags,
+            ],
+            inputs,
+            filter_chain: FilterChain::new(filters),
+            output_options: [
+                OutputOption::NoDemuxDecodeDelay,
+                OutputOption::MovFlagsFastStart,
+                OutputOption::CudaNoAutoScale,
+                OutputOption::AudioCodec(audio_codec),
+                OutputOption::AudioBitrate(final_output_settings.audio.transcode.bitrate),
+                OutputOption::AudioBuffer(final_output_settings.audio.transcode.buffer),
+                OutputOption::AudioChannels(final_output_settings.audio.transcode.channels),
+                OutputOption::AudioSampleRate(final_output_settings.audio.transcode.sample_rate),
+                OutputOption::VideoCodec(video_encoder),
+            ]
+            .into_iter()
+            .chain(copy_output_options)
+            .chain([
+                OutputOption::VideoBitrate(final_output_settings.video.transcode.bitrate),
+                OutputOption::VideoBuffer(final_output_settings.video.transcode.buffer),
+                OutputOption::DoNotMapMetadata,
+                OutputOption::Duration(duration),
+                // apad does not end; stop at the end of video
+                OutputOption::Shortest(None),
+                OutputOption::TsOffset(pts_offset),
+                OutputOption::VideoTrackTimeScale(90_000),
+                OutputOption::FrameRate(output_frame_rate),
+                OutputOption::Format(final_output_settings.format),
+            ])
+            .collect(),
+            input_request_context,
+            output_context,
+            env_vars,
+        })
+    }
+
+    pub fn copy_decisions(&self) -> &CopyDecisions {
+        &self.copy_decisions
+    }
+
+    pub fn optimize(&mut self) {
+        // audio copy shouldn't have bitrate etc
+        if self.output_context.audio_codec == AudioCodec::Copy {
+            self.output_options.retain(|o| {
+                !matches!(
+                    o,
+                    OutputOption::AudioBitrate(_)
+                        | OutputOption::AudioBuffer(_)
+                        | OutputOption::AudioChannels(_)
+                        | OutputOption::AudioSampleRate(_)
+                        | OutputOption::Shortest(_)
+                )
+            });
+
+            self.filter_chain.disable_audio();
+        };
+
+        // remove audio channels output option if input channel count matches;
+        // aac with more than 2 channels still needs it to normalize layout
+        let aac_surround = self.output_context.audio_codec == AudioCodec::Aac
+            && self.output_context.audio_channels.is_some_and(|c| c > 2);
+        if let Some(audio_channels) = self.inputs.iter().find_map(|s| match s {
+            PipelineInput::Audio { channels, .. } => Some(channels),
+            _ => None,
+        }) && Some(audio_channels) == self.output_context.audio_channels.as_ref()
+            && !aac_surround
+        {
+            self.output_options
+                .retain(|o| !matches!(o, OutputOption::AudioChannels(_)));
+        }
+
+        // video copy shouldn't have bitrate, etc
+        if self.output_context.video_encoder == VideoEncoder::Copy {
+            self.output_options.retain(|o| {
+                !matches!(
+                    o,
+                    OutputOption::VideoBitrate(_) | OutputOption::VideoBuffer(_)
+                )
+            });
+
+            self.filter_chain.disable_video();
+        }
+
+        let final_state = self
+            .filter_chain
+            .evaluate(&self.initial_state, &self.ffmpeg_info);
+
+        // ffmpeg keeps only the last -bsf:v, so all header fixups share one filter
+        let tonemapped = self.initial_state.hdr_format != HdrFormat::None
+            && final_state.hdr_format == HdrFormat::None;
+        if let VideoEncoder::Encode(codec) = &self.output_context.video_encoder
+            && let Some(bsf) = self
+                .accel
+                .as_ref()
+                .and_then(|a| a.metadata_bsf(codec))
+                .map(|bsf| MetadataBsf {
+                    bt709: bsf.bt709 && tonemapped,
+                    ..bsf
+                })
+                .filter(|bsf| !bsf.is_empty())
+            && let Some(index) = self
+                .output_options
+                .iter()
+                .position(|o| matches!(o, OutputOption::VideoCodec(_)))
+        {
+            self.output_options
+                .insert(index + 1, OutputOption::VideoMetadata(bsf));
+        }
+        self.filter_chain.resolve(
+            &self.ffmpeg_info,
+            &self.accel,
+            &self.filter_options,
+            &self.initial_state,
+            &self.output_context.preferred_surface,
+            &self.output_context.preferred_pixel_format,
+        );
+
+        // prepend decoder filters;
+        // this is a special case that's only really needed for CUDA's hwupload workaround
+        if let Some(video_decoder) = self.inputs.iter().find_map(|s| match s {
+            PipelineInput::Video { decoder, .. } => Some(decoder),
+            _ => None,
+        }) {
+            self.filter_chain.prepend(video_decoder.filters());
+        }
+
+        self.filter_chain.optimize();
+
+        if self.audio_needs_own_input() {
+            for input in &mut self.inputs {
+                if let PipelineInput::Audio { own_input, .. } = input {
+                    *own_input = true;
+                }
+            }
+        }
+
+        if self.shortest_needs_small_buffer() {
+            for option in &mut self.output_options {
+                if let OutputOption::Shortest(buffer) = option {
+                    *buffer = Some(Duration::from_millis(500));
+                }
+            }
+        }
+
+        if let Some(accel) = &self.accel {
+            let mut surfaces = self.filter_chain.surfaces().clone();
+            surfaces.insert(self.initial_state.surface);
+            surfaces.insert(self.output_context.preferred_surface);
+            if surfaces.iter().any(|s| *s != FrameSurface::System) {
+                let args = accel.init_hw_device(&surfaces);
+                self.global_options.push(GlobalOption::InitHwDevice(args));
+            }
+        }
+    }
+
+    /// loudnorm holds back ~3 s of audio, so a shared demuxer keeps decoding video ahead of a
+    /// slow canvas. The qsv frames queued for overlay_qsv exhaust fixed pools (runtime < 2.9).
+    fn audio_needs_own_input(&self) -> bool {
+        let Some(HardwareAccel::Qsv(qsv)) = &self.accel else {
+            return false;
+        };
+
+        let canvas_layers: Vec<usize> = self
+            .inputs
+            .iter()
+            .filter_map(|i| match i {
+                PipelineInput::Graphics {
+                    input, layer_index, ..
+                } if input.kind == GraphicsKind::Canvas => Some(*layer_index),
+                _ => None,
+            })
+            .collect();
+
+        let qsv_overlays_canvas = self.filter_chain.filters.iter().any(|f| {
+            matches!(
+                f,
+                PipelineFilter::Overlay(OverlayFilter {
+                    kind: OverlayKind::Qsv(_),
+                    secondary_source: OverlaySource::Graphics(layer),
+                    ..
+                }) if canvas_layers.contains(layer)
+            )
+        });
+
+        qsv.capabilities.requires_fixed_pool() && self.has_loudnorm() && qsv_overlays_canvas
+    }
+
+    /// loudnorm delays audio by ~3 s, so -shortest queues video until audio arrives.
+    /// The default 10 s queue uses all surfaces of a fixed qsv pool (64), with or without a canvas.
+    fn shortest_needs_small_buffer(&self) -> bool {
+        let Some(HardwareAccel::Qsv(qsv)) = &self.accel else {
+            return false;
+        };
+
+        qsv.capabilities.requires_fixed_pool() && self.has_loudnorm()
+    }
+
+    fn has_loudnorm(&self) -> bool {
+        self.filter_chain.filters.iter().any(|f| {
+            matches!(
+                f,
+                PipelineFilter::Audio(AudioFilter::LoudNorm {
+                    settings: Some(_),
+                    ..
+                })
+            )
+        })
+    }
+
+    pub fn args(&self) -> ArgVec {
+        let mut result: ArgVec = Vec::new();
+
+        let mut audio_label = String::from("0:a");
+        let mut video_label = String::from("0:v");
+        let mut subtitle_label = None;
+        let mut graphics_labels = vec![
+            None;
+            self.inputs
+                .iter()
+                .filter_map(|i| match i {
+                    PipelineInput::Graphics { layer_index, .. } => Some(*layer_index),
+                    _ => None,
+                })
+                .max()
+                .map_or(0, |i| i + 1)
+        ];
+
+        let mut input_paths: Vec<&str> = Vec::new();
+
+        // audio decoder options must come before their input's `-i`.
+        // the video input writes that `-i` when both share a demuxer.
+        let audio_decoder_args: Option<(&str, ArgVec)> = self.inputs.iter().find_map(|i| match i {
+            PipelineInput::Audio {
+                path,
+                decoder,
+                own_input: false,
+                ..
+            } => Some((path.as_str(), decoder.as_arg())),
+            _ => None,
+        });
+
+        let mut sorted_inputs: Vec<&PipelineInput> = self.inputs.iter().collect();
+        sorted_inputs.sort_by_key(|i| i.sort_order());
+
+        result.extend(self.global_options.iter().flat_map(|o| o.as_arg()));
+
+        for input in sorted_inputs.iter() {
+            match input {
+                PipelineInput::Video {
+                    input_source,
+                    index,
+                    path,
+                    seek,
+                    realtime,
+                    decoder,
+                    ..
+                } => {
+                    input_paths.push(path.as_str());
+
+                    result.extend(decoder.as_arg());
+
+                    if let Some((audio_path, audio_args)) = &audio_decoder_args
+                        && *audio_path == path.as_str()
+                    {
+                        result.extend(audio_args.to_owned());
+                    }
+
+                    let video_input_index = input_paths.iter().position(|p| p == path).unwrap_or(0);
+                    video_label = format!("{}:{}", video_input_index, index);
+
+                    if !seek.is_zero() {
+                        result.extend(args!["-ss", format!("{}ms", seek.as_millis())]);
+                    }
+
+                    if *realtime {
+                        result.extend(args!["-readrate", "1.0"]);
+                    }
+
+                    // ffmpeg's autorotate only applies to system-memory frames and would run
+                    // ahead of deinterlacing, so TransposeFilter rotates explicitly instead
+                    result.extend(args!["-noautorotate"]);
+
+                    result.extend(input_source.args_for_input());
+
+                    result.extend(args!["-i", path.to_owned()]);
+                }
+                PipelineInput::Audio {
+                    input_source,
+                    index,
+                    path,
+                    seek,
+                    decoder,
+                    own_input,
+                    ..
+                } => {
+                    let shared_index = input_paths
+                        .iter()
+                        .position(|p| p == path)
+                        .filter(|_| !own_input);
+
+                    let audio_input_index = match shared_index {
+                        Some(shared_index) => shared_index,
+                        None => {
+                            input_paths.push(path.as_str());
+
+                            result.extend(decoder.as_arg());
+
+                            // lavfi can't seek
+                            if !seek.is_zero() && !matches!(input_source, InputSource::Lavfi(_)) {
+                                result.extend(args!["-ss", format!("{}ms", seek.as_millis())]);
+                            }
+
+                            result.extend(input_source.args_for_input());
+
+                            result.extend(args!["-i", path.to_owned()]);
+
+                            input_paths.len() - 1
+                        }
+                    };
+                    audio_label = format!("{}:{}", audio_input_index, index);
+                }
+                PipelineInput::Subtitle {
+                    input_source,
+                    index,
+                    path,
+                    seek,
+                    ..
+                } => {
+                    if !input_paths.contains(&path.as_str()) {
+                        input_paths.push(path.as_str());
+
+                        if !seek.is_zero() {
+                            result.extend(args!["-ss", format!("{}ms", seek.as_millis())]);
+                        }
+
+                        result.extend(input_source.args_for_input());
+
+                        result.extend(args!["-i", path.to_owned()]);
+                    }
+
+                    let subtitle_input_index =
+                        input_paths.iter().position(|p| p == path).unwrap_or(0);
+                    subtitle_label = Some(format!("{}:{}", subtitle_input_index, index));
+                }
+                PipelineInput::Graphics {
+                    input,
+                    layer_index,
+                    index,
+                    path,
+                    extra_input_args,
+                } => {
+                    input_paths.push(path.as_str());
+
+                    if input.kind == GraphicsKind::Canvas {
+                        result.extend(
+                            input
+                                .input_source
+                                .args_for_input_with_context(&self.input_request_context),
+                        );
+                    } else {
+                        result.extend(input.input_source.args_for_input());
+                    }
+                    result.extend(extra_input_args.clone());
+                    result.extend(args!["-i", path.to_owned()]);
+                    let graphics_input_index = input_paths.len() - 1;
+                    graphics_labels[*layer_index] =
+                        Some(format!("{}:{}", graphics_input_index, index));
+                }
+            }
+        }
+
+        let mut filter_chain = self.filter_chain.to_owned();
+        filter_chain.build(
+            &audio_label,
+            &video_label,
+            subtitle_label.as_ref(),
+            &graphics_labels,
+        );
+
+        result.extend(filter_chain.as_arg());
+
+        result.extend(args!["-map", filter_chain.video_label().to_owned()]);
+        result.extend(args!["-map", filter_chain.audio_label().to_owned()]);
+
+        result.extend(
+            self.output_options
+                .iter()
+                .flat_map(|o| o.as_arg(&self.output_context)),
+        );
+
+        result
+    }
+
+    pub fn envs(&self) -> Vec<EnvironmentVariable> {
+        let mut result = self.env_vars.clone();
+
+        if let Some(a) = &self.accel {
+            result.extend(a.envs())
+        }
+
+        result
+    }
+}
+
+impl std::fmt::Display for Pipeline {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "args: {}", self.args().join(" "))
+    }
+}
+
+fn subtitle_burn<'a>(
+    input_settings: &'a InputSettings,
+    output_settings: &OutputSettings,
+    video_stream: &ProbeResultVideoStream,
+) -> Option<SubtitleBurn<'a>> {
+    match (
+        input_settings.select_subtitle_stream(),
+        input_settings.subtitle_input.as_ref(),
+    ) {
+        (Some(stream), Some(input)) if stream.is_subtitle_image() => output_settings
+            .video
+            .transcode
+            .size
+            .or_else(|| {
+                // with no target size, only transpose changes the frame size
+                let (width, height) = (video_stream.width?, video_stream.height?);
+                Some(if video_stream.is_quarter_turn() {
+                    FrameSize {
+                        width: height,
+                        height: width,
+                    }
+                } else {
+                    FrameSize { width, height }
+                })
+            })
+            .map(|size| SubtitleBurn::Image {
+                stream,
+                input,
+                size,
+            }),
+        (Some(stream), Some(input)) if output_settings.subtitle_mode == SubtitleMode::Burn => {
+            Some(SubtitleBurn::Text { stream, input })
+        }
+        _ => None,
+    }
+}
+
+fn copy_decisions(
+    input_settings: &InputSettings,
+    output_settings: &OutputSettings,
+    video_stream: &ProbeResultVideoStream,
+    audio_stream: &ProbeResultAudioStream,
+    subtitle_burn: Option<&SubtitleBurn>,
+) -> CopyDecisions {
+    CopyDecisions {
+        video: output_settings.video.copy.as_ref().map(|policy| {
+            video_copy_decision(
+                policy,
+                &input_settings.video_input,
+                video_stream,
+                &VideoCopyContext {
+                    caller_blockers: &input_settings.video_copy_blockers,
+                    is_still_image: input_settings.video_input.probe_result.is_still_image(),
+                    has_graphics: !input_settings.graphics_inputs.is_empty(),
+                    image_subtitle: matches!(subtitle_burn, Some(SubtitleBurn::Image { .. })),
+                    burned_subtitle: matches!(subtitle_burn, Some(SubtitleBurn::Text { .. })),
+                    target_frame_rate: output_settings.frame_rate.as_ref(),
+                },
+            )
+        }),
+        audio: output_settings
+            .audio
+            .copy
+            .as_ref()
+            .map(|policy| audio_copy_decision(policy, &input_settings.audio_input, audio_stream)),
+    }
+}
+
+/// Lets the caller prepare a copy (keyframe seek) before building the pipeline.
+pub fn predict_copy_decisions(
+    input_settings: &InputSettings,
+    output_settings: &OutputSettings,
+) -> Result<CopyDecisions, FFPipelineError> {
+    let video_stream = input_settings.select_video_stream()?;
+    let audio_stream = input_settings.select_audio_stream()?;
+    let subtitle_burn = subtitle_burn(input_settings, output_settings, video_stream);
+    Ok(copy_decisions(
+        input_settings,
+        output_settings,
+        video_stream,
+        audio_stream,
+        subtitle_burn.as_ref(),
+    ))
+}
+
+pub fn generate_pipeline(
+    ffmpeg_info: &FfmpegInfo,
+    input_settings: InputSettings,
+    output_settings: OutputSettings,
+) -> Result<Pipeline, FFPipelineError> {
+    Pipeline::full(ffmpeg_info, input_settings, output_settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_format_parses_ffmpeg_codec_names() {
+        for (codec, format) in [
+            ("av1", VideoFormat::Av1),
+            ("h264", VideoFormat::H264),
+            ("hevc", VideoFormat::Hevc),
+            ("mpeg2video", VideoFormat::Mpeg2Video),
+            ("vc1", VideoFormat::Vc1),
+            ("vp8", VideoFormat::Vp8),
+            ("vp9", VideoFormat::Vp9),
+        ] {
+            assert_eq!(codec.parse::<VideoFormat>().ok(), Some(format));
+        }
+        assert!("prores".parse::<VideoFormat>().is_err());
+    }
+
+    #[test]
+    fn device_name_returns_correct_ffmpeg_device_strings() {
+        assert_eq!(FrameSurface::Cuda.device_name(), Some("cuda"));
+        assert_eq!(FrameSurface::OpenCL.device_name(), Some("opencl"));
+        assert_eq!(FrameSurface::Qsv.device_name(), Some("qsv"));
+        assert_eq!(FrameSurface::Vaapi.device_name(), Some("vaapi"));
+        assert_eq!(FrameSurface::Vulkan.device_name(), Some("vulkan"));
+        assert_eq!(
+            FrameSurface::VideoToolbox.device_name(),
+            Some("videotoolbox")
+        );
+        assert_eq!(FrameSurface::System.device_name(), None);
+    }
+
+    fn multichannel_ac3_input(path: &str) -> InputSettings {
+        let probe_result = crate::probe::ProbeResult {
+            path: path.to_owned(),
+            streams: vec![
+                crate::probe::ProbeResultStream::Video(Box::new(
+                    crate::probe::ProbeResultVideoStream {
+                        stream_index: 0,
+                        codec: "h264".to_owned(),
+                        codec_type: crate::probe::CodecType::Video,
+                        dv_profile: None,
+                        profile: "main".to_owned(),
+                        height: Some(480),
+                        width: Some(720),
+                        frame_rate: FrameRate::parse("30000/1001"),
+                        sample_aspect_ratio: None,
+                        display_aspect_ratio: None,
+                        pix_fmt: "yuv420p".to_owned(),
+                        color_params: Default::default(),
+                        field_order: None,
+                        rotation: None,
+                    },
+                )),
+                crate::probe::ProbeResultStream::Audio(crate::probe::ProbeResultAudioStream {
+                    stream_index: 1,
+                    codec: "ac3".to_owned(),
+                    channels: 6,
+                }),
+            ],
+            duration: Some(Duration::from_secs(60)),
+            format_name: Some("matroska".to_owned()),
+        };
+
+        let probed_input = |probe_result: crate::probe::ProbeResult| crate::input::ProbedInput {
+            input_source: InputSource::Local(crate::input::LocalInputSource {
+                path: path.to_owned(),
+            }),
+            probe_result,
+            in_point: Duration::ZERO,
+            out_point: Duration::from_secs(30),
+            stream_index: None,
+        };
+
+        InputSettings {
+            start: time::OffsetDateTime::now_utc(),
+            playout_offset: Duration::ZERO,
+            audio_input: probed_input(probe_result.clone()),
+            video_input: probed_input(probe_result),
+            subtitle_input: None,
+            graphics_inputs: Vec::new(),
+            channel_number: None,
+            video_copy_seek: None,
+            video_copy_blockers: Vec::new(),
+        }
+    }
+
+    fn stereo_output() -> OutputSettings {
+        OutputSettings {
+            audio: crate::output_settings::AudioOutputSettings {
+                copy: None,
+                transcode: crate::output_settings::AudioTranscodeSettings {
+                    format: AudioFormat::Aac,
+                    bitrate: Some(Kbps(320)),
+                    buffer: Some(Kbps(640)),
+                    channels: Some(2),
+                    sample_rate: Some(Hz(48000)),
+                    loudness: None,
+                },
+            },
+            video: crate::output_settings::VideoOutputSettings {
+                copy: None,
+                transcode: crate::output_settings::VideoTranscodeSettings {
+                    format: EncodeFormat::H264,
+                    bit_depth: 8,
+                    bitrate: Some(Kbps(2000)),
+                    buffer: Some(Kbps(4000)),
+                    size: Some(FrameSize {
+                        width: 1280,
+                        height: 720,
+                    }),
+                    scaling_mode: ScalingMode::ScaleAndPad,
+                    deinterlace: true,
+                    filter_options: VideoFilterOptions::default(),
+                },
+            },
+            accel: None,
+            format: crate::output_format::OutputFormat::Hls {
+                playlist: "out.m3u8".to_owned(),
+                segment_template: "live%06d.ts".to_owned(),
+                troubleshoot: false,
+            },
+            pts_offset: None,
+            realtime: false,
+            is_live: false,
+            frame_rate: None,
+            subtitle_mode: SubtitleMode::Burn,
+            fonts_folder: None,
+            subtitle_force_style: None,
+            reports_folder: None,
+            report_id: None,
+        }
+    }
+
+    #[test]
+    fn copy_omits_encoder_options() {
+        let mut output = stereo_output();
+        output.video.copy = Some(crate::output_settings::CopyPolicy::default());
+        output.audio.copy = Some(crate::output_settings::CopyPolicy::default());
+        let mut pipeline = Pipeline::full(
+            &FfmpegInfo::default(),
+            multichannel_ac3_input("main.mkv"),
+            output,
+        )
+        .unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        for (option, value) in [("-vcodec", "copy"), ("-acodec", "copy")] {
+            let index = args.iter().rposition(|a| a == option).expect(option);
+            assert_eq!(args[index + 1], value, "{args:?}");
+        }
+        for option in [
+            "-g",
+            "-force_key_frames",
+            "-b:v",
+            "-maxrate:v",
+            "-b:a",
+            "-ac",
+            "-ar",
+        ] {
+            assert!(!args.iter().any(|a| a == option), "{option}: {args:?}");
+        }
+    }
+
+    #[test]
+    fn copy_transcodes_blocked_stream_only() {
+        let mut input = multichannel_ac3_input("main.mkv");
+        if let crate::probe::ProbeResultStream::Video(video) =
+            &mut input.video_input.probe_result.streams[0]
+        {
+            video.codec = "vc1".to_owned();
+        }
+        let mut output = stereo_output();
+        output.video.copy = Some(crate::output_settings::CopyPolicy::default());
+        output.audio.copy = Some(crate::output_settings::CopyPolicy::default());
+        let mut pipeline = Pipeline::full(&FfmpegInfo::default(), input, output).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        for (option, value) in [("-vcodec", "libx264"), ("-acodec", "copy")] {
+            let index = args.iter().rposition(|a| a == option).expect(option);
+            assert_eq!(args[index + 1], value, "{args:?}");
+        }
+        assert_eq!(
+            pipeline.copy_decisions().transcode_summary().as_deref(),
+            Some("video (vc1 is not in copy_formats)")
+        );
+    }
+
+    #[test]
+    fn image_subtitle_burns_at_rotated_source_size_without_target_size() {
+        let mut input = multichannel_ac3_input("main.mkv");
+        if let crate::probe::ProbeResultStream::Video(video) =
+            &mut input.video_input.probe_result.streams[0]
+        {
+            video.rotation = Some(90);
+        }
+        let mut subtitle = multichannel_ac3_input("main.sup").video_input;
+        subtitle.probe_result.streams.truncate(1);
+        if let crate::probe::ProbeResultStream::Video(video) = &mut subtitle.probe_result.streams[0]
+        {
+            video.codec_type = crate::probe::CodecType::Subtitle;
+            video.codec = "hdmv_pgs_subtitle".to_owned();
+        }
+        input.subtitle_input = Some(subtitle);
+        let mut output = stereo_output();
+        output.video.transcode.size = None;
+        output.video.copy = Some(crate::output_settings::CopyPolicy::default());
+        let mut pipeline = Pipeline::full(&FfmpegInfo::default(), input, output).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        let filter = args
+            .windows(2)
+            .filter(|a| a[0] == "-filter_complex")
+            .map(|a| a[1].as_ref())
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(
+            filter.contains("scale=480:720:flags=fast_bilinear:force_original_aspect_ratio"),
+            "{filter}"
+        );
+        assert_eq!(
+            pipeline.copy_decisions().transcode_summary().as_deref(),
+            Some("video (image subtitles)")
+        );
+    }
+
+    fn separate_audio_input(input_source: InputSource, seek: Duration) -> InputSettings {
+        let mut input = multichannel_ac3_input("main.mkv");
+        input.video_input.in_point = seek;
+        input.audio_input = multichannel_ac3_input("song.flac").audio_input;
+        input.audio_input.input_source = input_source;
+        input.audio_input.in_point = seek;
+        input
+    }
+
+    fn input_seeks(args: &ArgVec) -> Vec<(String, Option<String>)> {
+        args.iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "-i")
+            .map(|(i, _)| {
+                let input_args = &args[..i];
+                let start = input_args
+                    .iter()
+                    .rposition(|a| a == "-i")
+                    .map_or(0, |p| p + 2);
+                let seek = input_args[start..]
+                    .windows(2)
+                    .find(|w| w[0] == "-ss")
+                    .map(|w| w[1].to_string());
+                (args[i + 1].to_string(), seek)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn separate_audio_input_seeks_with_video() {
+        let input = separate_audio_input(
+            InputSource::Local(crate::input::LocalInputSource {
+                path: "song.flac".to_owned(),
+            }),
+            Duration::from_millis(12_345),
+        );
+        let pipeline = Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+
+        assert_eq!(
+            input_seeks(&pipeline.args()),
+            vec![
+                ("main.mkv".to_owned(), Some("12345ms".to_owned())),
+                ("song.flac".to_owned(), Some("12345ms".to_owned())),
+            ]
+        );
+    }
+
+    #[test]
+    fn separate_lavfi_audio_input_never_seeks() {
+        let input = separate_audio_input(
+            InputSource::Lavfi(crate::input::LavfiInputSource {
+                params: "anullsrc".to_owned(),
+            }),
+            Duration::from_millis(12_345),
+        );
+        let pipeline = Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+
+        assert_eq!(
+            input_seeks(&pipeline.args()),
+            vec![
+                ("main.mkv".to_owned(), Some("12345ms".to_owned())),
+                ("song.flac".to_owned(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn ac3_downmix_is_emitted_when_audio_shares_the_video_input() {
+        let path = "/tmp/shared.mkv";
+        let pipeline = Pipeline::full(
+            &FfmpegInfo::default(),
+            multichannel_ac3_input(path),
+            stereo_output(),
+        )
+        .unwrap();
+
+        let args = pipeline.args();
+        let downmix = args.iter().position(|a| a == "-downmix").expect("-downmix");
+        let input = args.iter().position(|a| a == "-i").expect("-i");
+
+        assert_eq!(args[downmix + 1], "stereo");
+        assert!(downmix < input, "-downmix must precede -i: {args:?}");
+        assert_eq!(args.iter().filter(|a| *a == "-i").count(), 1);
+    }
+
+    fn amf_encoder_only() -> HardwareAccel {
+        use crate::capabilities::amf::{AmfCapabilities, AmfEncoderCapability};
+
+        let encoder = AmfEncoderCapability {
+            bit_depths: vec![8],
+            b_frames: false,
+            max_profile: None,
+            max_level: None,
+        };
+        HardwareAccel::Amf(crate::accel::amf::Amf {
+            capabilities: AmfCapabilities {
+                supported_decoders: Default::default(),
+                supported_encoders: [
+                    (VideoFormat::H264, encoder.clone()),
+                    (VideoFormat::Hevc, encoder),
+                ]
+                .into(),
+                vpp_input_formats: Default::default(),
+                vpp_output_formats: Default::default(),
+                runtime_version: None,
+                device: None,
+                adapter: None,
+            },
+        })
+    }
+
+    fn amf_args(hdr: bool, format: EncodeFormat) -> ArgVec {
+        let mut input = multichannel_ac3_input("main.mkv");
+        if hdr {
+            for probe in [
+                &mut input.video_input.probe_result,
+                &mut input.audio_input.probe_result,
+            ] {
+                if let crate::probe::ProbeResultStream::Video(video) = &mut probe.streams[0] {
+                    video.codec = "hevc".to_owned();
+                    video.pix_fmt = "yuv420p10le".to_owned();
+                    video.color_params = crate::probe::ProbeResultColorParams {
+                        color_range: Some("tv".to_owned()),
+                        color_space: Some("bt2020nc".to_owned()),
+                        color_transfer: Some("smpte2084".to_owned()),
+                        color_primaries: Some("bt2020".to_owned()),
+                        has_hdr10_metadata: false,
+                    };
+                }
+            }
+        }
+        let mut output = OutputSettings {
+            accel: Some(amf_encoder_only()),
+            ..stereo_output()
+        };
+        output.video.transcode.format = format;
+        let ffmpeg_info = FfmpegInfo {
+            hwaccels: [crate::ffmpeg_info::KnownHardwareAccel::Amf.to_string()].into(),
+            ..FfmpegInfo::default()
+        };
+        let mut pipeline = Pipeline::full(&ffmpeg_info, input, output).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+        assert!(
+            args.iter().any(|a| a.ends_with("_amf")),
+            "amf encoder not used: {args:?}"
+        );
+        args
+    }
+
+    #[test]
+    fn amf_tonemap_writes_bt709_tags_with_bsf() {
+        for (format, bsf) in [
+            (EncodeFormat::H264, "h264_metadata"),
+            (EncodeFormat::Hevc, "hevc_metadata"),
+        ] {
+            let args = amf_args(true, format);
+            let index = args
+                .iter()
+                .position(|a| a == "-bsf:v")
+                .unwrap_or_else(|| panic!("-bsf:v missing: {args:?}"));
+            assert_eq!(
+                args[index + 1],
+                format!(
+                    "{bsf}=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1"
+                )
+            );
+            // ffmpeg ignores options after the output path
+            let output = args.iter().position(|a| a == "-f").expect("-f");
+            assert!(index < output, "-bsf:v must precede output: {args:?}");
+        }
+    }
+
+    #[test]
+    fn amf_without_tonemap_has_no_bsf() {
+        let args = amf_args(false, EncodeFormat::Hevc);
+        assert!(!args.iter().any(|a| a == "-bsf:v"), "{args:?}");
+    }
+
+    fn video_toolbox_args(format: EncodeFormat) -> ArgVec {
+        use crate::capabilities::videotoolbox::VideoToolboxCapabilities;
+
+        let accel = HardwareAccel::VideoToolbox(crate::accel::video_toolbox::VideoToolbox {
+            capabilities: VideoToolboxCapabilities {
+                supported_decoders: Default::default(),
+                supported_interlaced_decoders: Default::default(),
+                supported_encoders: [(VideoFormat::H264, 8), (VideoFormat::Hevc, 8)].into(),
+            },
+        });
+        let mut output = OutputSettings {
+            accel: Some(accel),
+            ..stereo_output()
+        };
+        output.video.transcode.format = format;
+        let ffmpeg_info = FfmpegInfo {
+            hwaccels: [crate::ffmpeg_info::KnownHardwareAccel::VideoToolbox.to_string()].into(),
+            ..FfmpegInfo::default()
+        };
+        let mut pipeline =
+            Pipeline::full(&ffmpeg_info, multichannel_ac3_input("main.mkv"), output).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+        assert!(
+            args.iter().any(|a| a.ends_with("_videotoolbox")),
+            "videotoolbox encoder not used: {args:?}"
+        );
+        args
+    }
+
+    #[test]
+    fn video_toolbox_h264_writes_sar_with_bsf() {
+        let args = video_toolbox_args(EncodeFormat::H264);
+        let bsfs: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "-bsf:v")
+            .map(|(i, _)| &args[i + 1])
+            .collect();
+        assert_eq!(bsfs, ["h264_metadata=sample_aspect_ratio=1/1"], "{args:?}");
+    }
+
+    #[test]
+    fn video_toolbox_hevc_has_no_bsf() {
+        let args = video_toolbox_args(EncodeFormat::Hevc);
+        assert!(!args.iter().any(|a| a == "-bsf:v"), "{args:?}");
+    }
+
+    #[test]
+    fn metadata_bsf_combines_fixups_into_one_filter() {
+        let bsf = MetadataBsf {
+            filter: "h264_metadata",
+            square_pixels: true,
+            bt709: true,
+        };
+        assert_eq!(
+            bsf.as_arg(),
+            [
+                "-bsf:v",
+                "h264_metadata=sample_aspect_ratio=1/1:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1",
+            ]
+        );
+    }
+
+    fn canvas_input(source: InputSource) -> GraphicsInput {
+        let mut probe = multichannel_ac3_input("canvas.nut")
+            .video_input
+            .probe_result;
+        probe.path = source.input_path().unwrap();
+        probe.format_name = Some("nut".to_owned());
+        probe
+            .streams
+            .retain(|s| matches!(s, crate::probe::ProbeResultStream::Video(_)));
+        if let crate::probe::ProbeResultStream::Video(video) = &mut probe.streams[0] {
+            video.codec = "ffv1".to_owned();
+            video.pix_fmt = "bgra".to_owned();
+            video.width = Some(1280);
+            video.height = Some(720);
+        }
+        GraphicsInput {
+            layer_index: 0,
+            input_source: source,
+            probe_result: probe,
+            stream_index: None,
+            kind: GraphicsKind::Canvas,
+            in_point: Duration::from_secs(3),
+            // Canvas must ignore native graphics placement, opacity and timing.
+            location: crate::input::GraphicsLocation::BottomRight,
+            width_percent: Some(10.0),
+            within_source_content: Some(true),
+            horizontal_margin_percent: Some(5.0),
+            vertical_margin_percent: Some(5.0),
+            opacity_percent: Some(0.0),
+            timing: Some(crate::input::GraphicsTiming::Periodic(
+                crate::input::PeriodicTiming {
+                    clock: crate::input::PeriodicClock::Content,
+                    frequency_ms: 10000,
+                    phase_offset_ms: None,
+                    disable_after_ms: None,
+                    fade_ms: Some(1000),
+                    hold_ms: 2000,
+                },
+            )),
+        }
+    }
+
+    #[test]
+    fn canvas_sized_for_another_resolution_is_scaled_instead_of_failing() {
+        let mut input = multichannel_ac3_input("main.mkv");
+        let mut graphics = canvas_input(InputSource::Local(crate::input::LocalInputSource {
+            path: "canvas.nut".to_owned(),
+        }));
+        if let crate::probe::ProbeResultStream::Video(video) = &mut graphics.probe_result.streams[0]
+        {
+            video.width = Some(1920);
+            video.height = Some(1080);
+        }
+        input.graphics_inputs.push(graphics);
+        let mut pipeline = Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+        pipeline.optimize();
+        let filter = pipeline
+            .args()
+            .windows(2)
+            .filter(|a| a[0] == "-filter_complex")
+            .map(|a| a[1].as_ref())
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(filter.contains("scale=1280:720"), "{filter}");
+        assert!(filter.contains("overlay=x=0:y=0"), "{filter}");
+    }
+
+    #[test]
+    fn canvas_local_seeks_to_schedule_offset_plus_source_in_point() {
+        for offset in [0, 44, 88] {
+            let mut input = multichannel_ac3_input("main.mkv");
+            input.playout_offset = Duration::from_secs(offset);
+            input.graphics_inputs.push(canvas_input(InputSource::Local(
+                crate::input::LocalInputSource {
+                    path: "canvas.nut".to_owned(),
+                },
+            )));
+            let mut pipeline =
+                Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+            pipeline.optimize();
+            let args = pipeline.args();
+            let canvas = args.iter().position(|a| a == "canvas.nut").unwrap();
+            assert_eq!(
+                args[canvas - 5..canvas]
+                    .iter()
+                    .map(|a| a.as_ref())
+                    .collect::<Vec<_>>(),
+                [
+                    "-ss",
+                    &format!("{}ms", (offset + 3) * 1000),
+                    "-t",
+                    "30000ms",
+                    "-i"
+                ]
+            );
+            assert!(
+                !args
+                    .iter()
+                    .any(|a| matches!(a.as_ref(), "-stream_loop" | "-ignore_loop" | "-framerate"))
+            );
+            let filter = args
+                .windows(2)
+                .filter(|a| a[0] == "-filter_complex")
+                .map(|a| a[1].as_ref())
+                .collect::<Vec<_>>()
+                .join(";");
+            assert!(filter.contains("overlay=x=0:y=0"), "{filter}");
+            assert!(
+                !filter.contains("fade=")
+                    && !filter.contains("colorchannelmixer")
+                    && !filter.contains("loop="),
+                "{filter}"
+            );
+        }
+    }
+
+    fn qsv_with_runtime(runtime_api: (u16, u16)) -> HardwareAccel {
+        HardwareAccel::Qsv(crate::accel::qsv::Qsv {
+            capabilities: crate::capabilities::qsv::QsvCapabilities {
+                supported_decoders: Default::default(),
+                supported_encoders: Default::default(),
+                upload_formats: Default::default(),
+                convert_pairs: Default::default(),
+                vpp_filters: Default::default(),
+                rotation_formats: Default::default(),
+                composite_pairs: Default::default(),
+                runtime_api: Some(runtime_api),
+            },
+        })
+    }
+
+    fn loudnorm_args(seek: Duration, canvas: bool, loudness: bool) -> ArgVec {
+        loudnorm_args_with(seek, canvas, loudness, (1, 35), true)
+    }
+
+    fn loudnorm_args_with(
+        seek: Duration,
+        canvas: bool,
+        loudness: bool,
+        runtime_api: (u16, u16),
+        overlay_qsv: bool,
+    ) -> ArgVec {
+        let mut input = multichannel_ac3_input("main.mkv");
+        input.video_input.in_point = seek;
+        input.audio_input.in_point = seek;
+        if canvas {
+            input.graphics_inputs.push(canvas_input(InputSource::Local(
+                crate::input::LocalInputSource {
+                    path: "canvas.nut".to_owned(),
+                },
+            )));
+        }
+        let mut output = stereo_output();
+        if loudness {
+            output.audio.transcode.loudness =
+                Some(crate::output_settings::AudioLoudnessSettings::default());
+        }
+        output.accel = Some(qsv_with_runtime(runtime_api));
+        let ffmpeg_info = FfmpegInfo {
+            hwaccels: [crate::ffmpeg_info::KnownHardwareAccel::Qsv.to_string()].into(),
+            video_filters: overlay_qsv
+                .then(|| crate::ffmpeg_info::KnownVideoFilter::OverlayQsv.to_string())
+                .into_iter()
+                .collect(),
+            ..FfmpegInfo::default()
+        };
+        let mut pipeline = Pipeline::full(&ffmpeg_info, input, output).unwrap();
+        pipeline.optimize();
+        pipeline.args()
+    }
+
+    #[test]
+    fn loudnorm_with_canvas_reads_audio_through_its_own_input() {
+        let args = loudnorm_args(Duration::from_millis(12_345), true, true);
+
+        assert_eq!(
+            input_seeks(&args),
+            vec![
+                ("main.mkv".to_owned(), Some("12345ms".to_owned())),
+                ("main.mkv".to_owned(), Some("12345ms".to_owned())),
+                ("canvas.nut".to_owned(), Some("3000ms".to_owned())),
+            ]
+        );
+
+        let filter = args
+            .windows(2)
+            .filter(|a| a[0] == "-filter_complex")
+            .map(|a| a[1].as_ref())
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(filter.contains("[1:1]loudnorm="), "{filter}");
+        assert!(filter.contains("[0:0]"), "{filter}");
+        assert!(filter.contains("overlay_qsv"), "{filter}");
+
+        // the downmix belongs to the audio input, not the video input that shares its file
+        let inputs: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "-i")
+            .map(|(i, _)| i)
+            .collect();
+        let downmix = args.iter().position(|a| a == "-downmix").expect("-downmix");
+        assert!(inputs[0] < downmix && downmix < inputs[1], "{args:?}");
+
+        assert_eq!(shortest_buf_duration(&args), Some("0.500"), "{args:?}");
+    }
+
+    fn shortest_buf_duration(args: &ArgVec) -> Option<&str> {
+        assert!(args.iter().any(|a| a == "-shortest"), "{args:?}");
+        args.windows(2)
+            .find(|a| a[0] == "-shortest_buf_duration")
+            .map(|a| a[1].as_ref())
+    }
+
+    #[test]
+    fn audio_shares_the_video_input_with_dynamic_qsv_pools() {
+        for runtime_api in [(2, 9), (2, 10), (2, 15)] {
+            let args = loudnorm_args_with(Duration::ZERO, true, true, runtime_api, true);
+            assert_eq!(
+                args.iter().filter(|a| *a == "main.mkv").count(),
+                1,
+                "runtime {runtime_api:?}: {args:?}"
+            );
+            assert_eq!(shortest_buf_duration(&args), None, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn audio_shares_the_video_input_with_a_software_canvas_overlay() {
+        let args = loudnorm_args_with(Duration::ZERO, true, true, (1, 35), false);
+        assert_eq!(
+            args.iter().filter(|a| *a == "main.mkv").count(),
+            1,
+            "{args:?}"
+        );
+        // encoder input is still qsv frames from a fixed pool
+        assert_eq!(shortest_buf_duration(&args), Some("0.500"), "{args:?}");
+    }
+
+    #[test]
+    fn audio_shares_the_video_input_without_loudnorm_or_canvas() {
+        for (canvas, loudness, buffer) in [
+            (false, true, Some("0.500")),
+            (true, false, None),
+            (false, false, None),
+        ] {
+            let args = loudnorm_args(Duration::ZERO, canvas, loudness);
+            assert_eq!(
+                args.iter().filter(|a| *a == "main.mkv").count(),
+                1,
+                "canvas={canvas} loudness={loudness}: {args:?}"
+            );
+            assert_eq!(shortest_buf_duration(&args), buffer, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn loudnorm_without_canvas_keeps_default_shortest_buffer_with_dynamic_qsv_pools() {
+        let args = loudnorm_args_with(Duration::ZERO, false, true, (2, 9), true);
+        assert_eq!(shortest_buf_duration(&args), None, "{args:?}");
+    }
+
+    #[test]
+    fn canvas_http_headers_use_process_context_without_seeking() {
+        use crate::input::{HttpInputOptions, HttpInputSource};
+        let source = InputSource::Http(HttpInputSource {
+            uri: "http://localhost/canvas".to_owned(),
+            options: HttpInputOptions {
+                headers: vec!["Authorization: Bearer test".to_owned()],
+                ..Default::default()
+            },
+        });
+        // Probing/extraction retain only configured headers.
+        let probe_args = source.args_for_input().join(" ");
+        assert!(probe_args.contains("Authorization: Bearer test"));
+        assert!(!probe_args.contains("x-etv-"));
+        for offset in [0, 44, 88] {
+            for override_rate in [None, Some(FrameRate::parse("25/1"))] {
+                let mut input = multichannel_ac3_input("main.mkv");
+                input.channel_number = Some("12.1".to_owned());
+                input.playout_offset = Duration::from_secs(offset);
+                input.graphics_inputs.push(canvas_input(source.clone()));
+                let mut output = stereo_output();
+                output.frame_rate = override_rate.clone();
+                let pipeline = Pipeline::full(&FfmpegInfo::default(), input, output).unwrap();
+                let args = pipeline.args();
+                let headers = args.windows(2).find(|a| a[0] == "-headers").unwrap()[1].as_ref();
+                let expected_rate = override_rate
+                    .as_ref()
+                    .map_or("30000/1001", |r| r.r_frame_rate.as_str());
+                assert_eq!(
+                    headers,
+                    format!(
+                        "Authorization: Bearer test\r\nx-etv-channel:12.1\r\nx-etv-offset-ms:{}\r\nx-etv-duration-ms:30000\r\nx-etv-frame-rate:{expected_rate}\r\n",
+                        offset * 1000
+                    )
+                );
+                assert_eq!(args.iter().filter(|a| *a == "-headers").count(), 1);
+                assert!(!args.iter().any(|a| matches!(
+                    a.as_ref(),
+                    "-ss" | "-stream_loop" | "-framerate" | "-ignore_loop"
+                )));
+                let canvas = args
+                    .iter()
+                    .position(|a| a == "http://localhost/canvas")
+                    .unwrap();
+                assert_eq!(
+                    args[canvas - 3..canvas]
+                        .iter()
+                        .map(|a| a.as_ref())
+                        .collect::<Vec<_>>(),
+                    ["-t", "30000ms", "-i"]
+                );
+            }
+        }
+    }
+    #[test]
+    fn contextual_headers_reach_only_canvas_http_inputs() {
+        use crate::input::{HttpInputOptions, HttpInputSource};
+        let http = |uri: &str| {
+            InputSource::Http(HttpInputSource {
+                uri: uri.to_owned(),
+                options: HttpInputOptions::default(),
+            })
+        };
+        let mut input = multichannel_ac3_input("http://localhost/video");
+        input.video_input.input_source = http("http://localhost/video");
+        input.audio_input.input_source = http("http://localhost/audio");
+        input.audio_input.probe_result.path = "http://localhost/audio".to_owned();
+        // Media seeks include a source in-point; headers must report schedule time only.
+        input.video_input.in_point = Duration::from_secs(54);
+        input.video_input.out_point = Duration::from_secs(98);
+        input.audio_input.in_point = Duration::from_secs(54);
+        input.audio_input.out_point = Duration::from_secs(98);
+        input.playout_offset = Duration::from_secs(44);
+        input.channel_number = Some("7".to_owned());
+        let mut subtitle = multichannel_ac3_input("http://localhost/subtitle").video_input;
+        subtitle.input_source = http("http://localhost/subtitle");
+        subtitle.probe_result.streams.truncate(1);
+        if let crate::probe::ProbeResultStream::Video(video) = &mut subtitle.probe_result.streams[0]
+        {
+            video.codec_type = crate::probe::CodecType::Subtitle;
+            video.codec = "hdmv_pgs_subtitle".to_owned();
+        }
+        input.subtitle_input = Some(subtitle);
+        input
+            .graphics_inputs
+            .push(canvas_input(http("http://localhost/canvas")));
+        let pipeline = Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+        let args = pipeline.args();
+        let mut inputs = 0;
+        for group in args.split_inclusive(|a| a.starts_with("http://localhost/")) {
+            if !group
+                .last()
+                .is_some_and(|a| a.starts_with("http://localhost/"))
+            {
+                continue;
+            }
+            inputs += 1;
+            let headers: Vec<_> = group.windows(2).filter(|a| a[0] == "-headers").collect();
+            if group.last().is_some_and(|a| a.ends_with("/canvas")) {
+                assert_eq!(headers.len(), 1, "{group:?}");
+                assert_eq!(
+                    headers[0][1],
+                    "x-etv-channel:7\r\nx-etv-offset-ms:44000\r\nx-etv-duration-ms:44000\r\nx-etv-frame-rate:30000/1001\r\n"
+                );
+            } else {
+                assert!(headers.is_empty(), "{group:?}");
+            }
+        }
+        assert_eq!(inputs, 4);
+    }
+
+    fn filter_complex(args: &ArgVec) -> String {
+        args.windows(2)
+            .filter(|a| a[0] == "-filter_complex")
+            .map(|a| a[1].as_ref())
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    fn arg_value<'a>(args: &'a ArgVec, option: &str) -> Option<&'a str> {
+        args.iter()
+            .rposition(|a| a == option)
+            .map(|i| args[i + 1].as_ref())
+    }
+
+    #[test]
+    fn target_frame_rate_converts_after_deinterlace_and_before_scale() {
+        let mut input = multichannel_ac3_input("main.mkv");
+        if let crate::probe::ProbeResultStream::Video(video) =
+            &mut input.video_input.probe_result.streams[0]
+        {
+            video.field_order = Some("tt".to_owned());
+        }
+        let mut output = stereo_output();
+        output.frame_rate = FrameRate::parse_target("25");
+        let ffmpeg_info = FfmpegInfo {
+            video_filters: [crate::ffmpeg_info::KnownVideoFilter::Yadif.to_string()].into(),
+            ..Default::default()
+        };
+        let mut pipeline = Pipeline::full(&ffmpeg_info, input, output).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        let filter = filter_complex(&args);
+        let position = |needle: &str| filter.find(needle).expect(&filter);
+        assert!(
+            position("yadif") < position("fps=25") && position("fps=25") < position("scale="),
+            "{filter}"
+        );
+        assert_eq!(arg_value(&args, "-g"), Some("50"), "{args:?}");
+        assert_eq!(arg_value(&args, "-r"), Some("25"), "{args:?}");
+        assert_eq!(arg_value(&args, "-fps_mode"), Some("cfr"), "{args:?}");
+    }
+
+    #[test]
+    fn no_target_frame_rate_keeps_source_rate() {
+        let mut pipeline = Pipeline::full(
+            &FfmpegInfo::default(),
+            multichannel_ac3_input("main.mkv"),
+            stereo_output(),
+        )
+        .unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        assert!(!filter_complex(&args).contains("fps="), "{args:?}");
+        assert_eq!(arg_value(&args, "-g"), Some("60"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "-r"), "{args:?}");
+    }
+
+    #[test]
+    fn copy_with_target_frame_rate_copies_only_matching_rates() {
+        for (target, copies) in [("30000/1001", true), ("25", false)] {
+            let mut output = stereo_output();
+            output.video.copy = Some(crate::output_settings::CopyPolicy::default());
+            output.frame_rate = FrameRate::parse_target(target);
+            let mut pipeline = Pipeline::full(
+                &FfmpegInfo::default(),
+                multichannel_ac3_input("main.mkv"),
+                output,
+            )
+            .unwrap();
+            pipeline.optimize();
+            let args = pipeline.args();
+
+            if copies {
+                assert_eq!(arg_value(&args, "-vcodec"), Some("copy"), "{args:?}");
+                assert!(!args.iter().any(|a| a == "-r"), "{args:?}");
+            } else {
+                assert_eq!(arg_value(&args, "-vcodec"), Some("libx264"), "{args:?}");
+                assert_eq!(arg_value(&args, "-r"), Some(target), "{args:?}");
+                assert!(filter_complex(&args).contains("fps=25"), "{args:?}");
+                assert_eq!(
+                    pipeline.copy_decisions().transcode_summary().as_deref(),
+                    Some("video (frame rate 30000/1001 is not 25)")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn still_image_graphics_decode_at_target_frame_rate() {
+        for (target, expected) in [(None, "30000/1001"), (Some("25"), "25")] {
+            let mut input = multichannel_ac3_input("main.mkv");
+            let mut watermark = canvas_input(InputSource::Local(crate::input::LocalInputSource {
+                path: "watermark.png".to_owned(),
+            }));
+            watermark.kind = GraphicsKind::Media;
+            watermark.timing = None;
+            watermark.probe_result.format_name = Some("image2".to_owned());
+            if let crate::probe::ProbeResultStream::Video(video) =
+                &mut watermark.probe_result.streams[0]
+            {
+                video.codec = "png".to_owned();
+                video.pix_fmt = "rgba".to_owned();
+            }
+            input.graphics_inputs.push(watermark);
+            let mut output = stereo_output();
+            output.frame_rate = target.and_then(FrameRate::parse_target);
+            let mut pipeline = Pipeline::full(&FfmpegInfo::default(), input, output).unwrap();
+            pipeline.optimize();
+            let args = pipeline.args();
+
+            assert_eq!(arg_value(&args, "-framerate"), Some(expected), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn still_image_graphics_loop_ends_with_item() {
+        let mut input = multichannel_ac3_input("main.mkv");
+        let mut watermark = canvas_input(InputSource::Local(crate::input::LocalInputSource {
+            path: "watermark.png".to_owned(),
+        }));
+        watermark.kind = GraphicsKind::Media;
+        watermark.probe_result.format_name = Some("image2".to_owned());
+        if let crate::probe::ProbeResultStream::Video(video) =
+            &mut watermark.probe_result.streams[0]
+        {
+            video.codec = "png".to_owned();
+            video.pix_fmt = "rgba".to_owned();
+        }
+        input.graphics_inputs.push(watermark);
+        let mut pipeline = Pipeline::full(&FfmpegInfo::default(), input, stereo_output()).unwrap();
+        pipeline.optimize();
+        let args = pipeline.args();
+
+        // 30 s at 30000/1001
+        assert_eq!(arg_value(&args, "-t"), Some("30000ms"), "{args:?}");
+        assert!(
+            filter_complex(&args).contains("loop=900:1,fade="),
+            "{args:?}"
+        );
+    }
+}

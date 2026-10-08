@@ -1,0 +1,343 @@
+name: Build Artifacts
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to upload assets to (may be a draft), e.g. v0.2.0 or v0.2.1-f8410286-develop'
+        required: true
+        type: string
+      publish:
+        description: 'Sign the builds and upload them to the release; false only builds and packages them, unsigned'
+        required: true
+        type: boolean
+      release_repo:
+        description: 'Repository under this owner that holds the release (e.g. next-develop-builds); defaults to this repository'
+        required: false
+        type: string
+        default: ''
+      release_app_id:
+        description: 'GitHub App that can write releases to release_repo; required with release_repo'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      apple_developer_certificate_p12_base64:
+        required: false
+      apple_developer_certificate_password:
+        required: false
+      ac_username:
+        required: false
+      ac_password:
+        required: false
+      azure_client_id:
+        required: false
+      azure_tenant_id:
+        required: false
+      azure_subscription_id:
+        required: false
+      release_app_private_key:
+        required: false
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUSTDOCFLAGS: -Dwarnings
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Show Toolchain
+        run: rustup show active-toolchain
+
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D clippy::all
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            rust_target: x86_64-pc-windows-msvc
+            exe_ext: .exe
+            archive_ext: .zip
+            should_run_tests: true
+          - os: ubuntu-22.04
+            target: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            exe_ext: ""
+            archive_ext: .tar.gz
+            should_run_tests: true
+          - os: ubuntu-latest
+            target: linux-musl-x64
+            rust_target: x86_64-unknown-linux-musl
+            exe_ext: ""
+            archive_ext: .tar.gz
+            should_run_tests: false
+          - os: ubuntu-22.04-arm
+            target: linux-arm64
+            rust_target: aarch64-unknown-linux-gnu
+            exe_ext: ""
+            archive_ext: .tar.gz
+            should_run_tests: true
+          - os: macos-15-intel
+            target: macos-x64
+            rust_target: x86_64-apple-darwin
+            exe_ext: ""
+            archive_ext: .tar.gz
+            should_run_tests: true
+          - os: macos-15
+            target: macos-arm64
+            rust_target: aarch64-apple-darwin
+            exe_ext: ""
+            archive_ext: .tar.gz
+            should_run_tests: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: rustup toolchain install
+      - name: Show Toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Must vary by runner image: rust-cache keys on os/arch only, so 22.04 and
+          # latest would share a key and restore each other's host build scripts.
+          prefix-key: v3-${{ matrix.os }}
+          # Workaround for https://github.com/Swatinem/rust-cache/issues/341:
+          # on the updated macOS runner image, cache-bin's restored cargo/rustc
+          # dispatches as rustup-init and fails with "unexpected argument".
+          cache-bin: ${{ runner.os == 'macOS' && 'false' || 'true' }}
+
+      - name: Install Cross-Compilation Tools
+        if: runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.rust_target }}
+
+      - name: Install Rust target
+        if: runner.os == 'macOS'
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Compile Tests
+        run: cargo test --locked --no-run --workspace --all-features --target ${{ matrix.rust_target }}
+
+      - name: Run Tests
+        if: matrix.should_run_tests
+        run: cargo test --locked --workspace --all-features --target ${{ matrix.rust_target }}
+
+      - name: Build
+        shell: bash
+        run: |
+          release_name="ersatztv-next-${TAG}-${{ matrix.target }}"
+          echo "RELEASE_NAME=${release_name}" >> "$GITHUB_ENV"
+
+          # semver: the target is build metadata, so a release doesn't read as a prerelease
+          export ETV_VERSION="${TAG#v}+${{ matrix.target }}"
+          cargo build --locked --release --all-features --target ${{ matrix.rust_target }}
+          mkdir "$release_name"
+          mv "target/${{ matrix.rust_target }}/release/ersatztv-playout-generator${{ matrix.exe_ext }}" "$release_name/"
+          mv "target/${{ matrix.rust_target }}/release/ersatztv-channel${{ matrix.exe_ext }}" "$release_name/"
+          mv "target/${{ matrix.rust_target }}/release/ersatztv${{ matrix.exe_ext }}" "$release_name/"
+
+      - name: Build libvpl
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # keep in sync with ErsatzTV-ffmpeg native/FFmpeg-Builds (scripts.d/50-onevpl.sh, patches/libvpl)
+          # force LF so the patch applies despite the runner's global core.autocrlf=true
+          git init -q libvpl-src
+          git -C libvpl-src config core.autocrlf false
+          git -C libvpl-src config core.eol lf
+          git -C libvpl-src fetch -q --depth 1 https://github.com/intel/libvpl.git 674d015bcb294bc39fa276e99a652ea045423e82
+          git -C libvpl-src checkout -q FETCH_HEAD
+          git -C libvpl-src apply --verbose "$GITHUB_WORKSPACE"/.github/patches/libvpl/*.patch
+          cmake -S libvpl-src -B libvpl-build -DUSE_MSVC_STATIC_RUNTIME=ON -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+          cmake --build libvpl-build --config Release --target VPL
+          cp libvpl-build/Release/libvpl.dll "$RELEASE_NAME/"
+          cp libvpl-src/LICENSE "$RELEASE_NAME/libvpl-LICENSE.txt"
+          rm -rf libvpl-src libvpl-build
+
+      # sign_windows signs and package_windows archives
+      - name: Upload Windows build
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-x64-build
+          path: ${{ env.RELEASE_NAME }}
+          retention-days: 1
+
+      - name: Import Code-Signing Certificates
+        if: runner.os == 'macOS' && inputs.publish
+        uses: Apple-Actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.apple_developer_certificate_p12_base64 }}
+          p12-password: ${{ secrets.apple_developer_certificate_password }}
+
+      - name: Sign macOS binaries
+        if: runner.os == 'macOS' && inputs.publish
+        shell: bash
+        run: |
+          for bin in ersatztv ersatztv-channel ersatztv-playout-generator; do
+            codesign --force --verbose --timestamp --options=runtime \
+              --sign "Developer ID Application" "$RELEASE_NAME/$bin"
+          done
+
+      - name: Notarize macOS binaries
+        if: runner.os == 'macOS' && inputs.publish
+        shell: bash
+        env:
+          AC_USERNAME: ${{ secrets.ac_username }}
+          AC_PASSWORD: ${{ secrets.ac_password }}
+        run: |
+          ditto -c -k --keepParent "$RELEASE_NAME" "${RELEASE_NAME}-notarize.zip"
+          xcrun notarytool submit "${RELEASE_NAME}-notarize.zip" \
+            --apple-id "$AC_USERNAME" \
+            --password "$AC_PASSWORD" \
+            --team-id 32MB98Q32R \
+            --wait
+          rm "${RELEASE_NAME}-notarize.zip"
+
+      - name: Archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tar czvf "${RELEASE_NAME}.tar.gz" "$RELEASE_NAME"
+          rm -r "$RELEASE_NAME"
+
+      - name: Upload Artifact
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.target }}
+          path: "*${{ matrix.archive_ext }}"
+
+  # own job: the signing environment only admits main and v* tags
+  sign_windows:
+    name: Sign Windows
+    runs-on: windows-latest
+    needs: build
+    if: inputs.publish
+    environment: signing
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-x64-build
+          path: windows-build
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+          enable-AzPSSession: true
+
+      - name: Sign Windows executables
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: https://eus.codesigning.azure.net/
+          signing-account-name: ArtifactSigning
+          certificate-profile-name: ErsatzTV
+          files-folder: ${{ github.workspace }}/windows-build
+          files-folder-recurse: false
+          files-folder-filter: ersatztv.exe,ersatztv-channel.exe,ersatztv-playout-generator.exe,libvpl.dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Replace Windows build with signed build
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-x64-build
+          path: windows-build
+          retention-days: 1
+          overwrite: true
+
+  package_windows:
+    name: Package Windows
+    runs-on: ubuntu-latest
+    needs: [build, sign_windows]
+    # sign_windows is skipped when unsigned
+    if: ${{ !failure() && !cancelled() }}
+    steps:
+      - name: Download Windows build
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-x64-build
+          path: ersatztv-next-${{ inputs.tag }}-windows-x64
+
+      - name: Archive
+        run: 7z a "ersatztv-next-${TAG}-windows-x64.zip" "ersatztv-next-${TAG}-windows-x64"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-x64
+          path: "*.zip"
+
+  publish:
+    name: Publish
+    needs: [lint, build, package_windows]
+    # a skipped sign_windows upstream would otherwise skip this
+    if: ${{ inputs.publish && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: windows-x64
+            archive_ext: .zip
+          - target: linux-x64
+            archive_ext: .tar.gz
+          - target: linux-musl-x64
+            archive_ext: .tar.gz
+          - target: linux-arm64
+            archive_ext: .tar.gz
+          - target: macos-x64
+            archive_ext: .tar.gz
+          - target: macos-arm64
+            archive_ext: .tar.gz
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.target }}
+
+      # github.token can't write to other repos
+      - name: Get release repository token
+        id: release-token
+        if: inputs.release_repo != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.release_app_id }}
+          private-key: ${{ secrets.release_app_private_key }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.release_repo }}
+
+      # --clobber: a rerun replaces this run's own partial upload; published releases are immutable
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token || github.token }}
+          RELEASE_REPO: ${{ inputs.release_repo && format('{0}/{1}', github.repository_owner, inputs.release_repo) || github.repository }}
+        run: gh release upload "$TAG" "ersatztv-next-${TAG}-${{ matrix.target }}${{ matrix.archive_ext }}" --clobber --repo "$RELEASE_REPO"

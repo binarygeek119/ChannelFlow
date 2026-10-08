@@ -1,0 +1,32 @@
+use std::borrow::Cow;
+
+type ArgVec = Vec<Cow<'static, str>>;
+
+#[macro_use]
+mod macros;
+pub mod accel;
+pub mod audio_codec;
+pub mod audio_decoder;
+pub mod audio_filter;
+pub mod capabilities;
+pub mod color;
+pub mod copy_decision;
+pub mod error;
+pub mod ffmpeg_info;
+pub mod filter_chain;
+pub mod frame_rate;
+pub mod frame_size;
+pub mod global_option;
+pub mod hw_accel;
+pub mod input;
+pub mod keyframe_seek;
+pub mod output_format;
+pub mod output_option;
+pub mod output_settings;
+pub mod overlay_filter;
+pub mod pipeline;
+pub mod probe;
+pub mod video_codec;
+pub mod video_decoder;
+pub mod video_filter;
+pub mod web_vtt;

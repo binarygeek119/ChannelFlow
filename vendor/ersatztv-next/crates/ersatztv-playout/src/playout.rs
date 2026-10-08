@@ -1,0 +1,558 @@
+use std::path::Path;
+
+use ersatztv_core::{SchemaVersion, VersionedSchema};
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use time::format_description::well_known::{Iso8601, iso8601};
+
+use crate::error::PlayoutError;
+
+const DATE_CONFIG: iso8601::EncodedConfig =
+    iso8601::Config::DEFAULT.set_use_separators(false).encode();
+
+pub const DATE_FORMAT: Iso8601<DATE_CONFIG> = Iso8601::<DATE_CONFIG>;
+
+pub const SUPPORTED_SCHEMA: SchemaVersion = SchemaVersion {
+    breaking: 0,
+    compatible: 5,
+};
+pub const SCHEMA: VersionedSchema =
+    VersionedSchema::new("https://ersatztv.org/playout/version/", SUPPORTED_SCHEMA);
+
+/// A playout schedule for a single time window.
+///
+/// Files should be named `{start}_{finish}.json` using compact ISO 8601
+/// (no separators), e.g. `20260413T000000.000000000-0500_20260414T002131.620000000-0500.json`,
+/// so that the channel can locate the correct file for the current time.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Playout {
+    /// URI identifying the schema version, e.g. "https://ersatztv.org/playout/version/0.0.1"
+    pub version: String,
+    pub items: Vec<PlayoutItem>,
+}
+
+impl Playout {
+    pub fn new(items: Vec<PlayoutItem>) -> Self {
+        Playout {
+            version: SCHEMA.uri(),
+            items,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PlayoutItem {
+    pub id: String,
+    /// RFC3339 formatted date/time, e.g. 2026-04-13T00:24:21.527-05:00
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: OffsetDateTime,
+    /// RFC3339 formatted date/time, e.g. 2026-04-13T00:24:21.527-05:00
+    #[serde(with = "time::serde::rfc3339")]
+    pub finish: OffsetDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<PlayoutItemSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<PlayoutItemTracks>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<Watermark>,
+    /// Ordered graphics layers, from bottom to top. The compatibility watermark,
+    /// when present, is composited below every entry in this collection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics: Vec<GraphicsLayer>,
+}
+
+impl PlayoutItem {
+    pub fn new(
+        id: String,
+        start: OffsetDateTime,
+        finish: OffsetDateTime,
+        in_point: Option<std::time::Duration>,
+        out_point: Option<std::time::Duration>,
+        path: &Path,
+    ) -> Result<PlayoutItem, PlayoutError> {
+        Ok(PlayoutItem {
+            id,
+            start,
+            finish,
+            source: Some(PlayoutItemSource::Local {
+                path: path.to_string_lossy().to_string(),
+                in_point_ms: in_point.map(|d| d.as_millis() as u64),
+                out_point_ms: out_point.map(|d| d.as_millis() as u64),
+                probe_hint: None,
+            }),
+            tracks: None,
+            watermark: None,
+            graphics: Vec::new(),
+        })
+    }
+
+    pub fn finish(&self) -> OffsetDateTime {
+        self.finish
+    }
+
+    pub fn effective_graphics(&self) -> impl Iterator<Item = &GraphicsLayer> {
+        self.watermark.iter().chain(self.graphics.iter())
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PlayoutItemTracks {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<TrackSelection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<TrackSelection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<TrackSelection>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TrackSelection {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<PlayoutItemSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_index: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GraphicsLayer {
+    pub source: PlayoutItemSource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<GraphicsLayerKind>,
+    pub location: GraphicsLocation,
+    /// Scale to this percent of primary content width (0–100).
+    /// Omitted = actual size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_percent: Option<f32>,
+    /// When `true`, position margins are measured from the edges of the source
+    /// content rather than the padded output frame, so letterbox/pillarbox bars
+    /// push the watermark inward and keep it inside the visible content. When
+    /// `false`, margins are relative to the full padded frame, so a 0% margin
+    /// can land inside the bars. Has no effect when the primary content fills
+    /// the output (crop/stretch). Omitted = `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub within_source_content: Option<bool>,
+    /// Horizontal offset from `location`, as percent of primary content width (0–100).
+    /// Omitted = 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horizontal_margin_percent: Option<f32>,
+    /// Vertical offset from `location`, as percent of primary content height (0–100).
+    /// Omitted = 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertical_margin_percent: Option<f32>,
+    /// Opacity as a percent (0–100). Omitted = fully opaque (100).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity_percent: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<GraphicsTiming>,
+}
+
+pub type Watermark = GraphicsLayer;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphicsLayerKind {
+    Media,
+    Canvas,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphicsLocation {
+    TopLeft,
+    TopCenter,
+    TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+pub type WatermarkLocation = GraphicsLocation;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "timing_type", rename_all = "snake_case")]
+pub enum GraphicsTiming {
+    Periodic {
+        clock: PeriodicClock,
+        frequency_ms: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        phase_offset_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        disable_after_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fade_ms: Option<u64>,
+        hold_ms: u64,
+    },
+}
+
+pub type WatermarkTiming = GraphicsTiming;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeriodicClock {
+    Wall,
+    Content,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(tag = "source_type", rename_all = "snake_case")]
+pub enum PlayoutItemSource {
+    Local {
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        in_point_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        out_point_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        probe_hint: Option<ProbeHint>,
+    },
+    Lavfi {
+        params: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        probe_hint: Option<ProbeHint>,
+    },
+    Http {
+        /// URI template, e.g. "https://example.com/file.mkv?token={{MY_SECRET}}"
+        uri: String,
+        /// Whether the content is live and therefore cannot seek or work
+        /// ahead (default: false)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_live: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        in_point_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        out_point_ms: Option<u64>,
+        /// Custom HTTP headers, e.g. ["Authorization: Bearer {{TOKEN}}"]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<Vec<String>>,
+        /// Custom user-agent string
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_agent: Option<String>,
+        /// Socket timeout in microseconds
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_us: Option<u64>,
+        /// Enable reconnect on failure (default: true)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reconnect: Option<bool>,
+        /// Max reconnect delay in seconds
+        /// Maps directly to the reconnect_delay_max ffmpeg option
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reconnect_delay_max: Option<u32>,
+        /// Enable persistent connections in ffmpeg (default: false)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        keep_alive: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        probe_hint: Option<ProbeHint>,
+    },
+    Rtsp {
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_us: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        probe_hint: Option<ProbeHint>,
+    },
+    Script {
+        /// Command that writes an MPEG-TS stream to its stdout
+        command: String,
+        /// Optional arguments for the command
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        /// Whether the content is live and therefore cannot work ahead (default: false)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        is_live: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        probe_hint: Option<ProbeHint>,
+    },
+    Dynamic {
+        /// URI template, e.g. "https://example.com/file.mkv?token={{MY_SECRET}}"
+        uri: String,
+        /// Custom HTTP headers, e.g. ["Authorization: Bearer {{TOKEN}}"]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<Vec<String>>,
+        /// Custom user-agent string
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_agent: Option<String>,
+        /// Socket timeout in microseconds
+        #[serde(skip_serializing_if = "Option::is_none")]
+        timeout_us: Option<u64>,
+    },
+}
+
+impl PlayoutItemSource {
+    pub fn probe_hint(&self) -> Option<&ProbeHint> {
+        match self {
+            PlayoutItemSource::Local { probe_hint, .. }
+            | PlayoutItemSource::Lavfi { probe_hint, .. }
+            | PlayoutItemSource::Http { probe_hint, .. }
+            | PlayoutItemSource::Rtsp { probe_hint, .. }
+            | PlayoutItemSource::Script { probe_hint, .. } => probe_hint.as_ref(),
+            PlayoutItemSource::Dynamic { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct ProbeHint {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub video: Vec<VideoHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio: Vec<AudioHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitle: Vec<SubtitleHint>,
+    pub format_name: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
+pub struct VideoHint {
+    pub codec: String,
+    pub width: u32,
+    pub height: u32,
+    pub pix_fmt: String,
+    pub stream_index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_rate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_order: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_aspect_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_aspect_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_range: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_space: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_transfer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_primaries: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dv_profile: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_hdr10_metadata: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<i32>,
+}
+
+impl VideoHint {
+    pub fn new(codec: String, width: u32, height: u32, pix_fmt: String) -> VideoHint {
+        VideoHint {
+            stream_index: 0,
+            codec,
+            width,
+            height,
+            pix_fmt,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct AudioHint {
+    pub codec: String,
+    pub channels: u32,
+    pub stream_index: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct SubtitleHint {
+    pub codec: String,
+    pub stream_index: u32,
+}
+
+pub struct PlayoutLoadResult {
+    pub playout: Playout,
+    // TODO: start, finish
+}
+
+pub async fn from_file(path: &str) -> Result<PlayoutLoadResult, PlayoutError> {
+    #[derive(Deserialize)]
+    struct PlayoutVersion {
+        version: String,
+    }
+
+    let contents = tokio::fs::read_to_string(path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            PlayoutError::PlayoutJsonDoesNotExist
+        } else {
+            PlayoutError::PlayoutJsonLoadError(e.to_string())
+        }
+    })?;
+
+    let version_only: PlayoutVersion = serde_json::from_str(&contents)
+        .map_err(|e| PlayoutError::PlayoutJsonLoadError(e.to_string()))?;
+
+    SCHEMA.check(&version_only.version)?;
+
+    let playout: Playout = serde_json::from_str(&contents)
+        .map_err(|e| PlayoutError::PlayoutJsonLoadError(e.to_string()))?;
+
+    Ok(PlayoutLoadResult { playout })
+}
+
+pub fn parse_playout_filename(file_stem: &str) -> Option<(OffsetDateTime, OffsetDateTime)> {
+    let split: Vec<&str> = file_stem.split("_").collect();
+    if split.len() == 2 {
+        let maybe_start = OffsetDateTime::parse(split[0], &DATE_FORMAT)
+            .ok()
+            .or_else(|| parse_unix_timestamp(split[0]));
+
+        let maybe_finish = OffsetDateTime::parse(split[1], &DATE_FORMAT)
+            .ok()
+            .or_else(|| parse_unix_timestamp(split[1]));
+
+        return match (maybe_start, maybe_finish) {
+            (Some(start), Some(finish)) => Some((start, finish)),
+            _ => None,
+        };
+    }
+
+    None
+}
+
+fn parse_unix_timestamp(timestamp: &str) -> Option<OffsetDateTime> {
+    let maybe_epoch = timestamp
+        .parse::<i64>()
+        .map(|i| if timestamp.len() > 10 { i / 1000 } else { i });
+
+    if let Ok(epoch) = maybe_epoch {
+        OffsetDateTime::from_unix_timestamp(epoch).ok()
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ersatztv_core::SchemaVersionError;
+
+    use super::*;
+
+    fn layer(path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "source": { "source_type": "local", "path": path },
+            "location": "top_left"
+        })
+    }
+
+    fn item_json() -> serde_json::Value {
+        serde_json::json!({
+            "id": "item",
+            "start": "2026-08-14T00:00:00Z",
+            "finish": "2026-08-14T00:01:00Z",
+            "source": { "source_type": "lavfi", "params": "testsrc" }
+        })
+    }
+
+    #[test]
+    fn legacy_watermark_loads_and_graphics_defaults_empty() {
+        let mut value = item_json();
+        value["watermark"] = layer("legacy.png");
+        let item: PlayoutItem = serde_json::from_value(value).unwrap();
+
+        assert!(item.watermark.is_some());
+        assert!(item.graphics.is_empty());
+        assert!(
+            !serde_json::to_value(&item)
+                .unwrap()
+                .get("graphics")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn effective_graphics_orders_legacy_watermark_below_array() {
+        let mut value = item_json();
+        value["watermark"] = layer("legacy.png");
+        value["graphics"] = serde_json::json!([layer("middle.png"), layer("top.png")]);
+        let item: PlayoutItem = serde_json::from_value(value).unwrap();
+
+        let paths: Vec<_> = item
+            .effective_graphics()
+            .map(|layer| match &layer.source {
+                PlayoutItemSource::Local { path, .. } => path.as_str(),
+                _ => panic!("expected local graphics source"),
+            })
+            .collect();
+        assert_eq!(paths, ["legacy.png", "middle.png", "top.png"]);
+    }
+    #[test]
+    fn graphics_kind_round_trips_and_absent_kind_stays_omitted() {
+        for kind in [None, Some("media"), Some("canvas")] {
+            let mut value = layer("canvas.nut");
+            if let Some(kind) = kind {
+                value["kind"] = serde_json::json!(kind);
+            }
+            let parsed: GraphicsLayer = serde_json::from_value(value.clone()).unwrap();
+            match kind {
+                None => assert!(parsed.kind.is_none()),
+                Some("media") => assert!(matches!(parsed.kind, Some(GraphicsLayerKind::Media))),
+                Some("canvas") => assert!(matches!(parsed.kind, Some(GraphicsLayerKind::Canvas))),
+                _ => unreachable!(),
+            }
+            assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+        }
+    }
+
+    #[tokio::test]
+    async fn schema_003_to_005_files_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("playout.json");
+        for version in ["0.0.3", "0.0.4", "0.0.5"] {
+            let mut item = item_json();
+            let mut graphics = layer("canvas.nut");
+            if version == "0.0.4" {
+                graphics["kind"] = serde_json::json!("canvas");
+            }
+            item["graphics"] = serde_json::json!([graphics]);
+            let value = serde_json::json!({
+                "version": format!("https://ersatztv.org/playout/version/{version}"),
+                "items": [item]
+            });
+            tokio::fs::write(&path, serde_json::to_vec(&value).unwrap())
+                .await
+                .unwrap();
+            let loaded = from_file(path.to_str().unwrap()).await.unwrap().playout;
+            assert_eq!(serde_json::to_value(loaded).unwrap(), value);
+        }
+    }
+
+    #[tokio::test]
+    async fn example_loads_at_current_version() {
+        let example =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/playout/playout.json");
+        let raw: serde_json::Value =
+            serde_json::from_str(&tokio::fs::read_to_string(&example).await.unwrap()).unwrap();
+        assert_eq!(raw["version"], SCHEMA.uri());
+
+        from_file(example.to_str().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn newer_schema_is_rejected_with_supported_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("playout.json");
+        let newer = "https://ersatztv.org/playout/version/0.0.6";
+        let value = serde_json::json!({ "version": newer, "items": [] });
+        tokio::fs::write(&path, serde_json::to_vec(&value).unwrap())
+            .await
+            .unwrap();
+
+        match from_file(path.to_str().unwrap()).await {
+            Err(PlayoutError::SchemaVersion(SchemaVersionError::Unsupported {
+                found,
+                supported,
+            })) => {
+                assert_eq!(found, newer);
+                assert_eq!(supported, "https://ersatztv.org/playout/version/0.0.5");
+            }
+            other => panic!("expected Unsupported, got {:?}", other.err()),
+        }
+    }
+}

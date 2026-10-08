@@ -5,14 +5,18 @@
 .vscode/
 .idea/
 
-## Build results
-[Dd]ebug/
-[Rr]elease/
-[Bb]in/
-[Oo]bj/
-[Oo]ut/
+## Build results. Scoped to src/ so the vendored ErsatzTV next sources
+## (crates/*/src/bin) are not caught by the .NET patterns.
+src/**/[Dd]ebug/
+src/**/[Rr]elease/
+src/**/[Bb]in/
+src/**/[Oo]bj/
+src/**/[Oo]ut/
 artifacts/
 release-artifact/
+
+## Rust build output for the vendored ErsatzTV next
+vendor/ersatztv-next/target/
 
 ## NuGet
 *.nupkg

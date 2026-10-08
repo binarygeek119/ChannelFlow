@@ -103,6 +103,13 @@ public class NextIptvController : ControllerBase
         DateTimeOffset until,
         CancellationToken cancellationToken)
     {
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
+        var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
+        var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
+        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
+        var logoSet = scope.ServiceProvider.GetRequiredService<LogoSetService>();
+
         if (item is not null
             && !item.IsVirtual
             && item.CommercialId is null
@@ -110,11 +117,6 @@ public class NextIptvController : ControllerBase
         {
             // Real media: hand the file to next with exact in/out points so next does
             // the encode (hardware accel) without ChannelFlow touching ffmpeg.
-            using var scope = HttpContext.RequestServices.CreateScope();
-            var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
-            var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
-            var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
-
             var mediaItem = libraryManager.GetItemById(item.JellyfinItemId.Value);
             var path = mediaItem is null ? null : catalog.GetMediaPath(mediaItem);
             if (!string.IsNullOrWhiteSpace(path) && System.IO.File.Exists(path))
@@ -152,6 +154,41 @@ public class NextIptvController : ControllerBase
                         },
                         Graphics = BuildBugGraphics(bugPath, channel.BugPlacement),
                     };
+                }
+            }
+        }
+
+        // Handle virtual/bundled cases with local media (off-season video, etc.)
+        if (item is not null && item.IsVirtual)
+        {
+            if (item.VirtualSource == FinTv.Domain.VirtualContentSource.BundledVideo)
+            {
+                var videoPath = LogoSetService.ResolveBinarygeek119File(HolidayChannelCalendar.OffSeasonVideoRelativePath);
+                if (!string.IsNullOrWhiteSpace(videoPath) && System.IO.File.Exists(videoPath))
+                {
+                    var finish = item.Finish > now.UtcDateTime
+                        ? item.Finish
+                        : now.UtcDateTime + TimeSpan.FromSeconds(1);
+                    if (finish > until.UtcDateTime) finish = until.UtcDateTime;
+                    var elapsed = now.UtcDateTime - item.Start;
+                    if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+                    var inPoint = item.InPoint + elapsed;
+                    var outPoint = item.OutPoint;
+                    if (outPoint > inPoint)
+                    {
+                        return new NextPlayoutItem
+                        {
+                            Id = item.Id.ToString("N"),
+                            Start = now.ToString("o", CultureInfo.InvariantCulture),
+                            Finish = finish.ToString("o", CultureInfo.InvariantCulture),
+                            Source = new NextLocalSource
+                            {
+                                Path = videoPath,
+                                InPointMs = (long)Math.Round(inPoint.TotalMilliseconds),
+                                OutPointMs = (long)Math.Round(outPoint.TotalMilliseconds),
+                            },
+                        };
+                    }
                 }
             }
         }

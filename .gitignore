@@ -1,0 +1,31 @@
+## Editors
+*.swp
+*.*~
+.DS_Store
+.vscode/
+.idea/
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+release-artifact/
+
+## NuGet
+*.nupkg
+
+## Runtime data written next to the app
+config/
+.env
+*.db
+*.db-shm
+*.db-wal
+
+## Vendored deps / scratch
+vendor/**/node_modules/
+__pycache__/
+tools/ffmpeg
+tools/ffprobe

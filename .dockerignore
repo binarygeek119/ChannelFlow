@@ -1,0 +1,12 @@
+.git
+.github
+.vscode
+.idea
+**/.DS_Store
+**/bin
+**/obj
+artifacts
+*.md
+.env
+.env.*
+config

@@ -159,7 +159,9 @@ News is a 24/7 channel: RSS feeds from the **News** page, optional TTS, FFmpeg o
 
 ## Releases
 
-To cut a Windows + Linux build, run the **Native apps** workflow (Actions → Native apps → Run workflow), type the new version, and leave *Attach the packages to a GitHub Release* checked. It publishes self-contained `linux-x64` and `win-x64` builds, uploads them as workflow artifacts (30 days), and attaches `channelflow-server-linux-x64-v<version>.tar.gz` and `channelflow-server-win-x64-v<version>.zip` to a `v<version>` release — creating the release if it does not exist yet, or replacing its assets if it does.
+To cut a release, run the **Release** workflow (Actions → Release → Run workflow), type the new version, and leave *Attach the packages to a GitHub Release* checked. One run publishes self-contained `linux-x64` and `win-x64` builds, packages them as `channelflow-server-linux-x64-v<version>.tar.gz` and `channelflow-server-win-x64-v<version>.zip`, pushes the Docker image to `ghcr.io/binarygeek119/channelflow` tagged `v<version>`, `<version>`, and `latest`, and attaches the packages to a `v<version>` GitHub release — creating it if it does not exist yet, or replacing its assets if it does.
+
+Nothing builds on push or pull request: the image and packages only change when you bump the version. The `release` job waits for both the packages and the image, so a failed image build never produces a release.
 
 ## License
 

@@ -53,16 +53,35 @@ The web UI is served at `/` and compiled into the binary via `include_str!`, so 
 ### Refreshing next
 
 ```bash
-scripts/update-next.sh                   # vendor to newest `main`, report image status
+scripts/update-next.sh                   # vendor to the lock's ref (main by default)
 scripts/update-next.sh --ref v0.2.0      # vendor a release tag instead
 scripts/update-next.sh --check           # exit 1 if the copy is behind (CI/cron friendly)
+
+scripts/check-next-release.sh            # plan: is a newer next release out?
+scripts/check-next-release.sh --apply    # act on it
 ```
 
 One command replaces `vendor/ersatztv-next/` with a fresh export of the requested ref, rewrites the commit quoted above, and records provenance in `vendor/ersatztv-next.lock` — commit, date, whether `schema/` moved, and the base image tag it was taken against.
 
+With no `--ref` it follows the ref already recorded in the lock, falling back to `main` only when there is no lock. That matters once a release has been vendored: defaulting back to `main` would make a bare `--check` report a pinned copy stale and a bare update quietly undo the pin.
+
 The part that earns its keep is the **schema diff**. `schema/` is the contract ChannelFlow's playout output has to satisfy, so if `playout.json`, `channel_config.json` or `lineup_config.json` changes upstream the script prints the diff and flags it in the lock instead of letting it land silently. A `schema_changed = "yes"` in the lock means stop and re-check the writer before trusting anything downstream.
 
 `--image-tag <tag>` also rewrites `FROM ersatztv/next:` in the Dockerfile and records it; `--pull` fetches it afterwards. The report lists upstream's published `vX.Y.Z` tags with push times, so a new release is visible the moment you run it. `--dry-run` does everything except write.
+
+### Watching for a new release
+
+`.github/workflows/check-next.yaml` runs `check-next-release.sh --apply` daily and on demand. It is deliberately narrow about what counts as "new":
+
+- Only **stable releases** are considered — drafts, prereleases and non-version tags such as `develop` are dropped.
+- The newest of those is then **compared against the vendored commit**. It only opens a PR when GitHub reports it *ahead*. A release cut from an older `main` reports *behind* and is correctly ignored, so a newer tag is never mistaken for an update just for being newer.
+- If `status` is `diverged`, the script refuses to act and exits 1 — vendoring it would drop content we have and it does not.
+
+The PR lands on `next-release-<tag>` and carries the vendored source, the matching Docker base bump when upstream has published that image tag, and the schema verdict, all in one place. Any still-open PR for an older release is closed *after* the new one exists, so a failure part way through leaves the older PR covering us rather than leaving nothing.
+
+Open PRs are recognised by their head branch name, so no label or other bookkeeping has to survive between runs.
+
+The file is committed on both `master` and `2.0.0` because GitHub only runs `schedule` from the default branch — on `2.0.0` alone it would never fire. Either way it checks out `2.0.0` explicitly, so the behaviour is the same before and after that branch becomes the default.
 
 ## WeatherStar assets
 

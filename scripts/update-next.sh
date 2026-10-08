@@ -2,7 +2,7 @@
 #
 # update-next.sh — refresh the vendored ErsatzTV/next reference copy.
 #
-#   scripts/update-next.sh                      vendor to newest `main`, report image status
+#   scripts/update-next.sh                      vendor to the lock's ref, report image status
 #   scripts/update-next.sh --ref v0.2.0         vendor to a branch, tag or commit
 #   scripts/update-next.sh --image-tag v0.2.0   also rewrite `FROM ersatztv/next:` in the Dockerfile
 #   scripts/update-next.sh --check              report only; exit 1 if the vendored copy is stale
@@ -31,6 +31,7 @@ DOCKERFILE="Dockerfile"
 DEF_REF="main"
 
 REF="$DEF_REF"
+REF_EXPLICIT=0
 IMAGE_TAG=""
 DRY=0
 CHECK=0
@@ -41,7 +42,8 @@ usage() {
   cat <<'EOF'
 update-next.sh — refresh the vendored ErsatzTV/next copy.
 
-  --ref <branch|tag|sha>   what to vendor (default: main)
+  --ref <branch|tag|sha>   what to vendor (default: the ref in the lock file,
+                           or main when there is no lock)
   --image-tag <tag>        rewrite `FROM ersatztv/next:<tag>` in the Dockerfile
   --check                  report only; exit 1 if the copy is behind, 2 on error
   --dry-run                do everything except write
@@ -87,7 +89,7 @@ resolve_target() {
 # ---------------------------------------------------------------- arguments
 while [ $# -gt 0 ]; do
   case "$1" in
-    --ref)        REF="${2:?--ref needs a value}"; shift 2 ;;
+    --ref)        REF="${2:?--ref needs a value}"; REF_EXPLICIT=1; shift 2 ;;
     --image-tag)  IMAGE_TAG="${2:?--image-tag needs a value}"; shift 2 ;;
     --dry-run)    DRY=1; shift ;;
     --check)      CHECK=1; shift ;;
@@ -105,6 +107,14 @@ cd "$ROOT"
 CURRENT=$(lock_get commit)
 CURRENT_REF=$(lock_get ref)
 CURRENT_SCHEMA=$(lock_get schema_changed)
+
+# No --ref on the command line? Follow whatever the lock already tracks rather
+# than assuming main. Once a release PR has been merged the lock records a tag
+# such as v0.3.0, and defaulting back to main would make a bare --check report
+# the copy stale and a bare update quietly undo the pin.
+if [ "$REF_EXPLICIT" -eq 0 ] && [ -n "$CURRENT_REF" ]; then
+  REF="$CURRENT_REF"
+fi
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # The base tag the lock should record, before any --image-tag rewrite below.

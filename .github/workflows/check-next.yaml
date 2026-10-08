@@ -1,0 +1,56 @@
+name: Check ErsatzTV/next release
+
+# Watches upstream for a new ErsatzTV/next release and, when one is genuinely
+# ahead of what we have vendored, opens a PR for it — closing any still-open
+# PR for an older release in favour of the newest one.
+#
+# This file is committed on BOTH `master` and `2.0.0`, identically:
+#
+#   * GitHub only runs `schedule` from the repository's default branch, which
+#     is `master`. On `2.0.0` alone this would never fire.
+#   * The work always happens on `2.0.0`, so the checkout pins `ref: 2.0.0`
+#     rather than using whatever branch the workflow file came from. When
+#     `2.0.0` becomes the default branch the copy on `master` goes dormant and
+#     this one takes over — same behaviour either way.
+#
+# It builds nothing. The PR it pushes targets `2.0.0`, and every existing
+# workflow on `master` is scoped to `branches: [master, main]`, so neither the
+# branch push nor the PR triggers any other workflow. `release.yaml` stays
+# dispatch-only, so packages and Docker still build solely on a version bump.
+
+on:
+  schedule:
+    # Daily, off the :00 mark where GitHub queues scheduled runs longest.
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write       # push the next-release-<tag> branch
+  pull-requests: write  # open the PR, close superseded ones, delete their branches
+
+# A scheduled run and a manual run must not interleave: both would push to the
+# same branch name.
+concurrency:
+  group: check-next-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # fetch-depth 0 so the branch push has full history to negotiate with,
+      # instead of pushing out of a shallow clone.
+      - name: Check out the 2.0.0 branch
+        uses: actions/checkout@v7
+        with:
+          ref: 2.0.0
+          fetch-depth: 0
+
+      # Opens the PR when there is an update, holds when there is not, and
+      # exits 1 only for states that need a person (a diverged release, or an
+      # open PR for a release newer than this run can see).
+      - name: Check for a newer ErsatzTV/next
+        run: ./scripts/check-next-release.sh --apply
+        env:
+          GH_TOKEN: ${{ github.token }}

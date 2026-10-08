@@ -124,6 +124,11 @@ public class DatabaseInitializer : IHostedService
         var runtime = scope.ServiceProvider.GetRequiredService<FinTvRuntime>();
         await runtime.LoadAsync(cancellationToken);
         FinTvRuntime.Current = runtime;
+        if (CatalogCleanupService.ResetInterruptedState())
+        {
+            _logger.LogWarning(
+                "Catalog cleanup was still flagged running from a previous process; cleared the stale state so it can run again");
+        }
         var gpu = scope.ServiceProvider.GetRequiredService<FinTv.Streaming.GpuCapabilityService>();
         await gpu.GetAsync(cancellationToken);
         var encoding = scope.ServiceProvider.GetRequiredService<FinTv.Streaming.FfmpegEncodingService>();

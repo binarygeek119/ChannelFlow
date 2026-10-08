@@ -33,6 +33,32 @@ public sealed class CatalogCleanupService
 
     public static int ClampGracePeriodDays(int days) => Math.Clamp(days, 0, 90);
 
+    /// <summary>
+    /// Clears running flags left behind by a run that died with the process. No cleanup run can
+    /// survive a restart, so a persisted flag found on boot is always stale; without this every
+    /// later run short-circuits on "already running" and the UI shows a permanent 0-of progress.
+    /// </summary>
+    /// <returns>True when an interrupted run was found and cleared.</returns>
+    public static bool ResetInterruptedState()
+    {
+        var plugin = FinTvRuntime.Current;
+        if (plugin is null)
+        {
+            return false;
+        }
+
+        var settings = plugin.Configuration.CatalogCleanup;
+        if (!settings.TaskState.IsRunning && !settings.LocalScan.IsRunning)
+        {
+            return false;
+        }
+
+        settings.TaskState.IsRunning = false;
+        settings.LocalScan.IsRunning = false;
+        plugin.SaveConfiguration();
+        return true;
+    }
+
     public async Task<CatalogCleanupStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         var settings = GetSettings();
@@ -173,10 +199,13 @@ public sealed class CatalogCleanupService
         state.LastStartedAt = DateTime.UtcNow;
         state.MarkedMissing = 0;
         state.Removed = 0;
-        plugin.SaveConfiguration();
 
+        // Everything after the flag flip lives inside the try so a failed persist still falls
+        // through to the finally below; otherwise the flag would strand as running until the
+        // next restart.
         try
         {
+            plugin.SaveConfiguration();
             var cutoff = ResolveMarkCutoff(settings);
             if (cutoff is null)
             {
@@ -215,7 +244,15 @@ public sealed class CatalogCleanupService
         finally
         {
             state.IsRunning = false;
-            plugin.SaveConfiguration();
+            try
+            {
+                plugin.SaveConfiguration();
+            }
+            catch (Exception ex)
+            {
+                // Never let a persist failure strand the in-memory flag as running.
+                _logger.LogWarning(ex, "Could not persist catalog cleanup state after the run");
+            }
         }
     }
 
@@ -237,11 +274,14 @@ public sealed class CatalogCleanupService
         scan.MarkedMissing = 0;
         scan.Restored = 0;
         scan.Skipped = 0;
-        scan.TotalItems = await _db.MediaItems.CountAsync(cancellationToken);
-        plugin.SaveConfiguration();
 
+        // Everything after the flag flip lives inside the try so a failed count or persist still
+        // falls through to the finally below; otherwise the flag would strand as running until
+        // the next restart.
         try
         {
+            scan.TotalItems = await _db.MediaItems.CountAsync(cancellationToken);
+            plugin.SaveConfiguration();
             var mappings = await _remap.GetAllAsync(cancellationToken);
             var foundIds = new List<Guid>();
             var missingIds = new List<Guid>();
@@ -331,7 +371,15 @@ public sealed class CatalogCleanupService
         finally
         {
             scan.IsRunning = false;
-            plugin.SaveConfiguration();
+            try
+            {
+                plugin.SaveConfiguration();
+            }
+            catch (Exception ex)
+            {
+                // Never let a persist failure strand the in-memory flag as running.
+                _logger.LogWarning(ex, "Could not persist local scan state after the run");
+            }
         }
     }
 

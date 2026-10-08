@@ -6939,7 +6939,14 @@
             if ($('general-local-url')) {
                 $('general-local-url').value = saved.localBaseUrl || '';
             }
-            toast('General settings saved.', 'success');
+            // next silently falls back to ChannelFlow's own encoder unless the base URLs are
+            // filled in too, so say so at save time instead of letting the user find out from
+            // stuttering playback and an empty log.
+            if (saved.nextEnabled && !(saved.nextBaseUrl && saved.nextResolverBaseUrl)) {
+                toast('next is on but its base URLs are empty, so streams still use ChannelFlow\'s encoder. Fill in both URLs and save again.', 'error');
+            } else {
+                toast('General settings saved.', 'success');
+            }
             await loadGeneral();
         } catch (err) {
             toast(err.message, 'error');

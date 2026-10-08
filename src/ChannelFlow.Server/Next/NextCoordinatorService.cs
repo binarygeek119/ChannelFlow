@@ -64,10 +64,12 @@ public sealed class NextCoordinatorService
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(next.ResolverBaseUrl) || string.IsNullOrWhiteSpace(next.ResolverToken))
+        if (string.IsNullOrWhiteSpace(next.BaseUrl)
+            || string.IsNullOrWhiteSpace(next.ResolverBaseUrl)
+            || string.IsNullOrWhiteSpace(next.ResolverToken))
         {
             _logger.LogWarning(
-                "ErsatzTV next is enabled but ResolverBaseUrl/ResolverToken are missing; skipping config write.");
+                "ErsatzTV next is enabled but BaseUrl/ResolverBaseUrl/ResolverToken are missing; skipping config write.");
             return;
         }
 

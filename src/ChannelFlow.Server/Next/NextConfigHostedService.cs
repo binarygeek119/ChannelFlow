@@ -21,6 +21,7 @@ public sealed class NextConfigHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        LogStartupState();
         await RefreshAsync(stoppingToken);
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
@@ -28,6 +29,38 @@ public sealed class NextConfigHostedService : BackgroundService
         {
             await RefreshAsync(stoppingToken);
         }
+    }
+
+    /// <summary>
+    /// next failing to engage is otherwise silent: no config folder is written, no resolver
+    /// traffic appears, and playback quietly keeps using ChannelFlow's own encoder. Say which
+    /// of the three states we are in at boot so a half-configured next is not mistaken for a
+    /// working one.
+    /// </summary>
+    private void LogStartupState()
+    {
+        var next = NextCoordinatorService.Configured;
+        if (next is not { Enabled: true })
+        {
+            _logger.LogInformation(
+                "ErsatzTV next integration is disabled; streams are encoded by ChannelFlow.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(next.BaseUrl)
+            || string.IsNullOrWhiteSpace(next.ResolverBaseUrl)
+            || string.IsNullOrWhiteSpace(next.ResolverToken))
+        {
+            _logger.LogWarning(
+                "ErsatzTV next is turned on but incomplete (BaseUrl {Base}, ResolverBaseUrl {Resolver}, token {Token}); "
+                + "no configuration was written and playback stays on ChannelFlow's encoder.",
+                string.IsNullOrWhiteSpace(next.BaseUrl) ? "missing" : "set",
+                string.IsNullOrWhiteSpace(next.ResolverBaseUrl) ? "missing" : "set",
+                string.IsNullOrWhiteSpace(next.ResolverToken) ? "missing" : "set");
+            return;
+        }
+
+        _logger.LogInformation("ErsatzTV next integration is active; serving HLS through next.");
     }
 
     private async Task RefreshAsync(CancellationToken cancellationToken)

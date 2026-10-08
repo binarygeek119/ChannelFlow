@@ -6,6 +6,7 @@ using FinTv;
 using FinTv.Auth;
 using FinTv.Data;
 using FinTv.Domain;
+using FinTv.Next;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
@@ -700,7 +701,10 @@ public class EpgService
                 .Append("\",")
                 .AppendLine(channel.Name);
 
-            var nextEnabled = FinTvRuntime.Current?.Configuration.NextTranscoding.Enabled == true;
+            // Use IsEnabled, not Enabled: the next playlist endpoints 404 unless the base URLs
+            // and token are present too. Pointing the M3U at next while it is only half
+            // configured would hand every player a dead URL instead of a working stream.
+            var nextEnabled = NextCoordinatorService.IsEnabled;
             var streamUrl = nextEnabled
                 ? PluginApiKey.AppendQuery(
                     $"{baseUrl.TrimEnd('/')}/iptv/next/channel/{ChannelNumbers.Format(channel.Number)}.m3u8",

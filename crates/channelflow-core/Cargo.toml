@@ -1,0 +1,30 @@
+[package]
+name = "channelflow-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ChannelFlow 2.0.0 — live TV channel server built on ErsatzTV next"
+
+[[bin]]
+# The binary ships as `channelflow` even though the crate is now the core,
+# so the image, the entrypoint and every existing invocation keep working.
+name = "channelflow"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum.workspace = true
+chrono.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+channelflow-plugin-api = { path = "../channelflow-plugin-api" }
+channelflow-plugin-ai = { path = "../plugins/ai" }
+reqwest.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "uuid", "chrono"] }
+tokio.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid.workspace = true

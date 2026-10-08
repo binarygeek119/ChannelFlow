@@ -1,15 +1,17 @@
 //! Connection settings for OpenAI, or anything else that speaks its API.
 //!
-//! The AI page holds a list of providers rather than one endpoint, stored at
-//! `<config>/ai.json`. Each provider is a whole OpenAI-compatible connection:
-//! a name, a priority, and the URL, key and models to use with it. There is
-//! deliberately no "OpenAI vs Venice" choice — the base URL *is* the choice,
-//! so a compatible provider or a model on your own network is reached by
-//! pointing one of these somewhere else.
+//! The AI Suite plugin's provider list. Each provider is a whole
+//! OpenAI-compatible connection: a name, a priority, and the URL, key and
+//! models to use with it. There is deliberately no "OpenAI vs Venice" choice —
+//! the base URL *is* the choice, so a compatible provider or a model on your
+//! own network is reached by pointing one of these somewhere else.
 //!
 //! Providers are tried in priority order, lowest number first, and the app
 //! moves on to the next when one cannot be reached. That is why priority is
 //! unique: two providers sharing a number would leave the order to chance.
+//!
+//! The provider list is persisted by the plugin itself through its namespaced
+//! storage; this module only models and validates it.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

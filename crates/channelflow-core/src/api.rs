@@ -1,18 +1,21 @@
-//! HTTP surface: the JSON API for channels plus the static web UI shell.
+//! HTTP surface: the JSON API for channels and plugins plus the static web UI
+//! shell. Plugins contribute their own routers, nested under `/api/plugins`.
+
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{get, put},
     Json, Router,
 };
 use serde_json::json;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::ai::{AiConfig, AiView, ProviderView};
 use crate::model::{Channel, NewChannel, UpdateChannel};
-use crate::openai;
+use crate::plugin::PluginManager;
 use crate::store::{Store, StoreError};
 use crate::transcode::{self, TranscodeConfig};
 
@@ -26,18 +29,22 @@ pub struct AboutInfo {
 }
 
 /// What handlers may reach: the channel store, the process facts above, and
-/// the one HTTP client outbound requests share. Kept as one type so the next
-/// milestone (playout state) extends this rather than adding a second state
-/// type to route around.
+/// the loaded plugins. The outbound HTTP client lives in each plugin's own
+/// state now that features are plugins.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
     pub about: AboutInfo,
-    pub http: reqwest::Client,
+    pub plugins: Arc<Mutex<PluginManager>>,
 }
 
-pub fn router(store: Store, about_info: AboutInfo, http: reqwest::Client) -> Router {
-    Router::new()
+pub fn router(
+    store: Store,
+    about_info: AboutInfo,
+    plugins: Arc<Mutex<PluginManager>>,
+    plugin_routers: Vec<(String, Router)>,
+) -> Router {
+    let mut app = Router::new()
         .route("/", get(index))
         .route("/app.css", get(css))
         .route("/app.js", get(js))
@@ -53,15 +60,9 @@ pub fn router(store: Store, about_info: AboutInfo, http: reqwest::Client) -> Rou
             "/api/channels/{id}",
             get(get_channel).put(update_channel).delete(delete_channel),
         )
-        .route("/api/ai", get(get_ai))
-        .route("/api/ai/providers", post(create_ai_provider))
-        .route(
-            "/api/ai/providers/{id}",
-            put(update_ai_provider).delete(delete_ai_provider),
-        )
-        .route("/api/ai/providers/{id}/test", post(test_ai_provider))
-        .route("/api/ai/test", post(test_ai))
-        .route("/api/ai/test-all", post(test_ai_all))
+        .route("/api/plugins", get(list_plugins))
+        .route("/api/plugins/{id}/enable", put(enable_plugin))
+        .route("/api/plugins/{id}/disable", put(disable_plugin))
         .route("/api/transcode", get(get_transcode).put(put_transcode))
         .route(
             "/api/channels/{id}/transcode",
@@ -73,8 +74,12 @@ pub fn router(store: Store, about_info: AboutInfo, http: reqwest::Client) -> Rou
         .with_state(AppState {
             store,
             about: about_info,
-            http,
-        })
+            plugins,
+        });
+    for (id, plugin_router) in plugin_routers {
+        app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
+    }
+    app
 }
 
 /// Storage errors translated into HTTP status codes.
@@ -93,8 +98,7 @@ impl IntoResponse for ApiError {
             StoreError::DuplicateNumber(_) => (StatusCode::CONFLICT, self.0.to_string()),
             StoreError::Invalid(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Transcode(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
-            StoreError::Ai(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
-            StoreError::ProviderNotFound(_) => (StatusCode::NOT_FOUND, self.0.to_string()),
+            StoreError::Plugin(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Io(_) | StoreError::Json(_) | StoreError::Database(_) => {
                 tracing::error!(error = %self.0, "storage failure");
                 (
@@ -255,85 +259,37 @@ async fn delete_channel(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The AI page's providers. A saved key is never returned — only whether one
-/// is set — and an update that omits it keeps the stored one.
-async fn get_ai(State(state): State<AppState>) -> Result<Json<AiView>, ApiError> {
-    Ok(Json(state.store.ai_config().await?.view()))
-}
-
-/// Add a provider. Its name and priority must not collide with one already
-/// saved, and the new tab is addressed afterwards by the id in the response.
-async fn create_ai_provider(
+/// The plugins page's catalog: every loaded plugin with its manifest,
+/// requested permissions, declared UI contributions, and current health.
+async fn list_plugins(
     State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<(StatusCode, Json<ProviderView>), ApiError> {
-    let mut config = state.store.ai_config().await?;
-    let provider = config.create(&body).map_err(StoreError::Ai)?;
-    state.store.save_ai_config(&config).await?;
-    Ok((StatusCode::CREATED, Json(provider.view())))
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let manager = state.plugins.lock().await;
+    Ok(Json(json!({ "plugins": manager.catalog() })))
 }
 
-async fn update_ai_provider(
+async fn enable_plugin(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<ProviderView>, ApiError> {
-    let mut config = state.store.ai_config().await?;
-    if config.find(&id).is_none() {
-        return Err(StoreError::ProviderNotFound(id).into());
-    }
-    let provider = config.update(&id, &body).map_err(StoreError::Ai)?;
-    state.store.save_ai_config(&config).await?;
-    Ok(Json(provider.view()))
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut manager = state.plugins.lock().await;
+    manager
+        .enable(&id)
+        .await
+        .map_err(|error| StoreError::Plugin(error.to_string()))?;
+    Ok(Json(json!({ "plugins": manager.catalog() })))
 }
 
-async fn delete_ai_provider(
+async fn disable_plugin(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<StatusCode, ApiError> {
-    let mut config = state.store.ai_config().await?;
-    if config.find(&id).is_none() {
-        return Err(StoreError::ProviderNotFound(id).into());
-    }
-    config.delete(&id).map_err(StoreError::Ai)?;
-    state.store.save_ai_config(&config).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// Try the values on the "New provider" tab — a provider that does not exist
-/// yet. Nothing is written, and a failed connection is a normal result: `200`
-/// with `ok` false.
-async fn test_ai(
-    State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<openai::Report>, ApiError> {
-    let provider = AiConfig::draft(&body).map_err(StoreError::Ai)?;
-    Ok(Json(openai::run(&state.http, &provider).await))
-}
-
-/// Try the values on a saved provider's tab: the stored provider with the
-/// form's changes laid over it, so an untouched key need not be retyped.
-async fn test_ai_provider(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<openai::Report>, ApiError> {
-    let config = state.store.ai_config().await?;
-    if config.find(&id).is_none() {
-        return Err(StoreError::ProviderNotFound(id).into());
-    }
-    let provider = config.resolve(&id, &body).map_err(StoreError::Ai)?;
-    Ok(Json(openai::run(&state.http, &provider).await))
-}
-
-/// Show which provider the app would use: walk them in priority order and stop
-/// at the first that answers, so a dead endpoint is visible before it matters.
-async fn test_ai_all(
-    State(state): State<AppState>,
-) -> Result<Json<openai::FailoverReport>, ApiError> {
-    let config = state.store.ai_config().await?;
-    let providers = config.ordered();
-    Ok(Json(openai::failover(&state.http, &providers).await))
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut manager = state.plugins.lock().await;
+    manager
+        .disable(&id)
+        .await
+        .map_err(|error| StoreError::Plugin(error.to_string()))?;
+    Ok(Json(json!({ "plugins": manager.catalog() })))
 }
 
 /// The streaming paths the Live TV page advertises.
@@ -503,27 +459,45 @@ async fn apple_touch_icon() -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use channelflow_plugin_api::plugin::{PluginApi, PluginLogger};
 
     /// The router is built once at startup, so a malformed path — a segment
     /// that mixes a parameter with a literal like `/live/{n}.m3u8`, say —
-    /// panics there instead of failing a request. Building it here turns that
-    /// class of mistake into a test failure rather than a server that will not
-    /// boot.
-    #[test]
-    fn the_router_builds() {
+    /// panics there instead of failing a request. Building it here, with the
+    /// AI plugin loaded and its routes nested, turns that class of mistake
+    /// into a test failure rather than a server that will not boot.
+    #[tokio::test]
+    async fn the_router_builds() {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("channelflow-router-{stamp}"));
         let store = Store::open(&dir).expect("open store");
+        let http = reqwest::Client::new();
+
+        let mut manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+        let plugin = channelflow_plugin_ai::plugin();
+        let manifest = plugin.metadata().clone();
+        let api = PluginApi {
+            id: manifest.id.clone(),
+            storage: store.plugin_storage(&manifest.id),
+            http: http.clone(),
+            base_version: env!("CARGO_PKG_VERSION").to_string(),
+            dir: store.plugin_dir(&manifest.id),
+            logger: PluginLogger::new(&manifest.id),
+        };
+        manager.add(plugin, api).await.expect("load AI plugin");
+        manager.enable(&manifest.id).await.expect("enable AI plugin");
+        let routers = manager.routers();
+        let plugins = Arc::new(Mutex::new(manager));
+
         let about = AboutInfo {
             config_folder: dir.display().to_string(),
             listen_port: 0,
             started: std::time::Instant::now(),
         };
-        let http = crate::openai::client().expect("http client");
-        let _ = router(store, about, http);
+        let _ = router(store, about, plugins, routers);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

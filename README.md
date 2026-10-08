@@ -15,24 +15,35 @@ The image is multi-arch (amd64 + arm64) and is not pinned to a platform, so the 
 ## The server
 
 ```
-Cargo.toml                    workspace, excludes vendor/ersatztv-next
-crates/channelflow/
+Cargo.toml                    workspace: core, the plugin SDK, and bundled plugins
+crates/channelflow-core/      the base system — channels, storage, plugin manager
   build.rs                    stamps GIT_SHA + RUSTC_VERSION for the About page
-  src/main.rs                 CLI, startup, config directory
+  src/main.rs                 CLI, startup, config directory, plugin loading
   src/model.rs                Channel / NewChannel / UpdateChannel
-  src/ai.rs                   the AI provider list: names, priorities, models
-  src/openai.rs               provider tests plus the priority-order failover walk
-  src/transcode.rs            next's ffmpeg + normalization settings, defaults + merge
+  src/transcode.rs            next's ffmpeg + normalization settings (core for now)
   src/store.rs                file- or Postgres-backed storage behind one Store
   src/api.rs                  axum routes, HTTP status mapping, embedded UI
+  src/plugin/                 the plugin manager: lifecycle, catalog, permissions
+crates/channelflow-plugin-api/  the SDK: Plugin trait, manifest, storage, UI contracts
+crates/plugins/ai/            the AI Provider Suite plugin (provider list, tests, failover)
+  plugin.json                 the plugin's manifest
+  src/ai.rs                   provider list: names, priorities, models
+  src/openai.rs               provider tests plus the priority-order failover walk
+  src/api.rs                  the routes the AI page calls, mounted under /api/plugins/{id}
   static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
-Storage has two backends behind one `Store`, and either holds the same settings: the channels, the instance transcode defaults, and the AI providers.
+This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features that used to be core code now live in plugins that implement the `Plugin` trait. Plugins declare who they are in a `plugin.json` manifest — their id, version range against the base, requested permissions, and UI contributions — and get namespaced storage, an HTTP client, and a logger from `PluginApi`. The manager loads, lists, enables and disables them, and mounts each plugin's routes under `/api/plugins/{id}`. The **AI page is the first feature extracted**: the shell still renders it, but every call it makes goes to the AI plugin's routes, and its provider list is persisted in the plugin's own storage. The Transcode page stays core-owned for now. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as a `ChannelFlow-Plugins` repo.
 
-**Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, plus `<config>/transcode.json` and `<config>/ai.json`. The AI file is written `0600` because it holds keys; a single-endpoint document written before providers existed is upgraded on first read. next is driven by JSON documents itself, so file storage keeps the on-disk state the same shape you would hand to the engine.
+The plugin SDK and each plugin live in workspace crates ready to lift out into their own repo: a plugin depends on `channelflow-plugin-api` and nothing else in the base, so splitting is a file move plus a dependency change.
 
-**Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in three tables created automatically at startup: `channels`, and one-row `transcode_settings` and `ai_settings` holding the same JSON documents the files held. The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
+Storage has two backends behind one `Store`, and either holds the same settings: the channels, the instance transcode defaults, and each plugin's own data.
+
+**Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, `<config>/transcode.json`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys. next is driven by JSON documents itself, so file storage keeps the on-disk state the same shape you would hand to the engine.
+
+**Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in tables created automatically at startup: `channels`, the one-row `transcode_settings`, and `plugin_kv` (namespaced per plugin). The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
+
+When the AI feature became a plugin, its old store — `<config>/ai.json` in files mode, the `ai_settings` row in Postgres — was migrated once into the AI plugin's own storage (`plugin_kv`, or `<config>/plugins/com.channelflow.ai/providers.json`) and the legacy copy is removed.
 
 Storage failures keep their own error type rather than collapsing into `anyhow`, so the API can answer `404` for a missing channel, `409` for a channel number already in use, and `400` for invalid input instead of reporting everything as `500`.
 
@@ -49,13 +60,15 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `DELETE` | `/api/channels/{id}` | `204` |
 | `GET` | `/api/transcode` | the Transcode page's field list plus the instance defaults |
 | `PUT` | `/api/transcode` | replace the defaults, `400` if next's schema would reject it |
-| `GET` | `/api/ai` | every provider, ordered by priority, plus the next free number and the new-provider defaults; keys are never returned |
-| `POST` | `/api/ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
-| `PUT` | `/api/ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
-| `DELETE` | `/api/ai/providers/{id}` | `204`; `404` if the id is unknown |
-| `POST` | `/api/ai/test` | try an unsaved provider from the "New provider" tab; always `200`, the result carries `ok` |
-| `POST` | `/api/ai/providers/{id}/test` | try a saved provider with the form's changes laid over it |
-| `POST` | `/api/ai/test-all` | walk the providers by priority and report the first that answers |
+| `GET` | `/api/plugins` | the plugin catalog: manifests, permissions, UI contributions, health |
+| `PUT` | `/api/plugins/{id}/enable` / `disable` | call the plugin's lifecycle hooks |
+| `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
+| `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
+| `PUT` | `/api/plugins/com.channelflow.ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
+| `DELETE` | `/api/plugins/com.channelflow.ai/providers/{id}` | `204`; `404` if the id is unknown |
+| `POST` | `/api/plugins/com.channelflow.ai/test` | try an unsaved provider from the "New provider" tab; always `200`, the result carries `ok` |
+| `POST` | `/api/plugins/com.channelflow.ai/providers/{id}/test` | try a saved provider with the form's changes laid over it |
+| `POST` | `/api/plugins/com.channelflow.ai/test-all` | walk the providers by priority and report the first that answers |
 | `GET` | `/api/channels/{id}/transcode` | overrides, the defaults, and the effective settings |
 | `PUT` | `/api/channels/{id}/transcode` | store that channel's override patch |
 | `DELETE` | `/api/channels/{id}/transcode` | drop every override |
@@ -65,15 +78,15 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 
 The web UI is served at `/` and compiled into the binary — the markup, CSS and JS via `include_str!`, the logo and favicons via `include_bytes!` — so the image needs no asset directory and cannot start with a half-copied web root. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
 
-The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer, all 22 menu items with their icons and group gaps, the near-black/rose palette, and the mark. Five menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the provider list below. The other 17 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer (plus one new **Plugins** item), the near-black/rose palette, and the mark. Six menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the provider list served by the AI plugin; **Plugins** lists what is loaded, what each asked permission for, and toggles them. The other 16 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
 
 ### AI settings
 
-The AI page holds a **list** of OpenAI-compatible providers shown as tabs. The first tab is always **New provider** and is what the page opens on: give it a **name**, a **priority**, an **API URL**, an **API key**, and the **chat model**, **TTS model** and **voice** to use. Saving adds the provider as its own tab, where the settings can be edited, saved, or deleted. There is no "OpenAI or Venice" switch on purpose — the URL *is* the choice, so OpenAI itself, a compatible provider, and a model on the local network are the same kind of thing configured in different ways.
+The AI page is the **AI Provider Suite plugin** — the base shell renders it, and every call it makes goes to the plugin's routes under `/api/plugins/com.channelflow.ai`. Its provider list is persisted in the plugin's own namespaced storage rather than a core file, so the page behaves exactly as before and the plugin is free to move to its own repo. The page holds a **list** of OpenAI-compatible providers shown as tabs. The first tab is always **New provider** and is what the page opens on: give it a **name**, a **priority**, an **API URL**, an **API key**, and the **chat model**, **TTS model** and **voice** to use. Saving adds the provider as its own tab, where the settings can be edited, saved, or deleted. There is no "OpenAI or Venice" switch on purpose — the URL *is* the choice, so OpenAI itself, a compatible provider, and a model on the local network are the same kind of thing configured in different ways.
 
 Providers are tried in **priority order, lowest number first**, and the app moves on to the next when one cannot be reached — the whole reason to keep more than one. The first provider is used, and the rest are only contacted when the ones above them fail. Priority must be unique, since two providers sharing a number would leave the order to chance; so must the name, because it is the tab's title. The **Failover order** list under the form shows the running order, and **Test failover** walks it for real: it tries providers from lowest priority up and stops at the first that answers, reporting any it had to skip. That walk lives in `openai::failover` and is what the playout milestone's AI calls will use to pick an endpoint.
 
-Each provider's key is treated as a secret. `GET /api/ai` returns whether a key is saved per provider but never the key itself, because this API has no authentication and the server listens on every interface by default. `ai.json` is written `0600`, and a provider's form starts its key field blank: a save that leaves it blank sends no key and keeps the stored one, while the field's **Remove** button is what clears it — so "leave it alone" and "get rid of it" stay distinguishable without either of them meaning a stray password-manager fill.
+Each provider's key is treated as a secret. The plugin never returns a key — only whether one is saved per provider — because this API has no authentication and the server listens on every interface by default. The plugin's storage is written `0600` (files) or lives in `plugin_kv` (Postgres), and a provider's form starts its key field blank: a save that leaves it blank sends no key and keeps the stored one, while the field's **Remove** button is what clears it — so "leave it alone" and "get rid of it" stay distinguishable without either of them meaning a stray password-manager fill.
 
 **Test AI** answers "does this provider actually work?" without spending a save. It posts whatever is on the form — including a key typed but not yet stored — and makes three real requests, writing nothing. The first lists models, which tells a wrong address or a rejected key apart from a working one; the second asks the chat model for a one-word reply; the third asks the endpoint to speak one short phrase. A bad key and a bad model look identical from a single failed request, so the result reports every probe with the endpoint's own message, and any HTTP status the endpoint returns is a normal `200` result rather than an error the page has to unwrap. The test passes when both the chat and speech probes answer — listing models stays informational, because a compatible server need not implement `/models` at all. This is the one place the server reaches the network, so `reqwest` with rustls — no OpenSSL — is the one dependency the settings pages added.
 
@@ -158,9 +171,11 @@ From a source checkout: `cargo run --release -p channelflow -- --config ./config
 
 ## Where this goes next
 
-1. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
-2. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.
-3. **Library sync, scheduling, EBS/off-air** — the 1.x features, rebuilt.
+1. **Extract the next feature** — move the transcode settings into a `channelflow-plugin-ersatztv` crate (the AI plugin is the pattern), then lift the plugin crates into the `ChannelFlow-Plugins` repo with the base depending on them by git.
+2. **Dynamic loading** — load plugins as shared libraries from `/config/plugins` via the manifest's `entrypoint`, with the install/update/rollback flow and the repo index feeding the catalog.
+3. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
+4. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.
+5. **Library sync, scheduling, EBS/off-air** — the 1.x features, rebuilt.
 
 ## Port
 

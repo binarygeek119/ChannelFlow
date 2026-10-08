@@ -1,17 +1,21 @@
-mod ai;
 mod api;
 mod model;
-mod openai;
+mod plugin;
 mod store;
 mod transcode;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use channelflow_plugin_api::plugin::{PluginApi, PluginLogger};
 use clap::Parser;
+use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
+use crate::plugin::PluginManager;
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
@@ -83,8 +87,45 @@ async fn main() -> Result<()> {
                 )
             })?
     };
+    // The one-time move of the pre-plugin AI settings into the AI plugin's own
+    // storage happens before the plugin loads and reads it.
+    store
+        .upgrade_legacy_ai()
+        .await
+        .context("moving legacy AI settings into plugin storage")?;
     store.seed().await?;
 
+    // ── plugins ─────────────────────────────────────────────────────────────
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("building the outbound HTTP client for plugins")?;
+
+    let mut manager = PluginManager::new(env!("CARGO_PKG_VERSION"));
+
+    let ai_plugin = channelflow_plugin_ai::plugin();
+    let ai_manifest = ai_plugin.metadata().clone();
+    let ai_api = PluginApi {
+        id: ai_manifest.id.clone(),
+        storage: store.plugin_storage(&ai_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&ai_manifest.id),
+        logger: PluginLogger::new(&ai_manifest.id),
+    };
+    manager
+        .add(ai_plugin, ai_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the AI plugin: {error}"))?;
+    manager
+        .enable(&ai_manifest.id)
+        .await
+        .map_err(|error| anyhow::anyhow!("enabling the AI plugin: {error}"))?;
+
+    let plugin_routers = manager.routers();
+    let plugins = Arc::new(Mutex::new(manager));
+
+    // ── server ───────────────────────────────────────────────────────────────
     let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
         .parse()
         .with_context(|| format!("invalid bind address {}:{}", args.bind, args.port))?;
@@ -105,22 +146,21 @@ async fn main() -> Result<()> {
         listen_port: bound.port(),
         started,
     };
-    let http = openai::client().context("building the HTTP client for AI requests")?;
-    axum::serve(listener, api::router(store, about, http)).await?;
+    axum::serve(
+        listener,
+        api::router(store, about, plugins, plugin_routers),
+    )
+    .await?;
     Ok(())
 }
 
 /// Show a connection string without its password in logs and errors.
 fn redact_url(url: &str) -> String {
-    let mut shown: String = url
-        .split('@')
-        .last()
-        .unwrap_or(url)
-        .chars()
-        .take(120)
-        .collect();
+    let host = url.split('@').last().unwrap_or(url);
+    let shown: String = host.chars().take(120).collect();
     if url.contains('@') {
-        shown = format!("<credentials>@{shown}");
+        format!("<credentials>@{shown}")
+    } else {
+        shown
     }
-    shown
 }

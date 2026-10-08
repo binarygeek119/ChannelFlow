@@ -49,6 +49,7 @@
 
       <a href="/transcode" class="nav-item" data-tab="transcode"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="8" height="7" rx="1.5"/><rect x="14" y="13" width="8" height="7" rx="1.5"/><path d="M10 7.5h2.5a3 3 0 0 1 3 3V13"/></svg><span class="nav-label">Transcode</span></a>
       <a href="/tasks" class="nav-item" data-tab="tasks"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg><span class="nav-label">Tasks</span></a>
+      <a href="/plugins" class="nav-item" data-tab="plugins"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg><span class="nav-label">Plugins</span></a>
 
       <div class="drawer-nav-gap" aria-hidden="true"></div>
 
@@ -122,6 +123,32 @@
             </div>
           </form>
           <p class="error" id="error" hidden></p>
+        </div>
+      </section>
+
+      <section id="tab-plugins" class="tab-panel" hidden>
+        <div class="card section-card">
+          <h2>Plugins</h2>
+          <p class="hint">
+            Features that used to be built into ChannelFlow now live in plugins. Each plugin lists the
+            permissions it asked for and declares what it adds to the API and the UI; nothing runs
+            until it is enabled. The AI page is served by the <strong>AI Provider Suite</strong>
+            plugin below.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Plugin</th>
+                <th>Category</th>
+                <th>Version</th>
+                <th>Permissions</th>
+                <th>Health</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody id="plugins-rows"></tbody>
+          </table>
+          <p class="empty" id="plugins-empty" hidden>No plugins loaded.</p>
         </div>
       </section>
 

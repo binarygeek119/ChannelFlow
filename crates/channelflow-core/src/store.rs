@@ -1,37 +1,46 @@
-//! Storage: channels, the instance transcode defaults, and the AI providers.
+//! Storage: channels, the instance transcode defaults, and each plugin's own
+//! namespaced key/value data.
 //!
 //! Two backends sit behind one `Store`, so how the app persists its settings
 //! does not change what the rest of it sees.
 //!
 //! * **Files** — the default, with zero setup. One JSON document per channel
-//!   under `<config>/channels/`, plus `<config>/transcode.json` and
-//!   `<config>/ai.json` (the last written `0600` because it holds keys).
+//!   under `<config>/channels/`, `<config>/transcode.json`, and one file per
+//!   plugin key under `<config>/plugins/{plugin}/{key}.json` (written `0600`
+//!   because plugin data can hold secrets).
 //! * **Postgres** — used when `DATABASE_URL` is set. The same settings live in
-//!   three tables. On first open against an empty database the config
+//!   tables created at startup: `channels`, the one-row `transcode_settings`,
+//!   and `plugin_kv`. On first open against an empty database the config
 //!   directory is read once and imported, so moving to Postgres keeps exactly
 //!   what the files had; after that Postgres is the only source of truth and
 //!   nothing is written to the directory.
 //!
-//! ErsatzTV next talks to a Postgres instance of its own. ChannelFlow needs no
-//! shared tables with it, so the schema is deliberately small and ours: a
-//! `channels` table, and one-row `transcode_settings` and `ai_settings`
-//! tables holding the same JSON documents the file backend used.
+//! The transcode defaults are core-owned, so they keep their file and table.
+//! The AI provider list moved into a plugin, so it now lives in that plugin's
+//! key/value storage; the old `ai.json` / `ai_settings` document is migrated
+//! there once by [`Store::upgrade_legacy_ai`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use async_trait::async_trait;
+use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
 use chrono::Utc;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::Json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::ai::{AiConfig, AiError};
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::transcode::{TranscodeConfig, TranscodeError};
 
 const TRANSCODE_FILE: &str = "transcode.json";
-const AI_FILE: &str = "ai.json";
+
+/// The plugin that used to be a core feature — its legacy `ai.json` document
+/// is migrated into its own storage under these names.
+const LEGACY_AI_NAMESPACE: &str = "com.channelflow.ai";
+const LEGACY_AI_KEY: &str = "providers";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -44,10 +53,9 @@ pub enum StoreError {
     /// A transcode document — the defaults, or the body of a request — that
     /// next's schema would reject.
     Transcode(TranscodeError),
-    /// An AI settings document that cannot be used as written.
-    Ai(AiError),
-    /// An AI provider id that is not in the list.
-    ProviderNotFound(String),
+    /// A plugin lifecycle call was refused: unknown id, incompatible with this
+    /// base, or the plugin's own failure.
+    Plugin(String),
     Io(std::io::Error),
     Json(serde_json::Error),
     /// A Postgres round trip failed — connection, statement, or constraint.
@@ -79,8 +87,7 @@ impl std::fmt::Display for StoreError {
             StoreError::DuplicateNumber(n) => write!(f, "channel number {n} is already in use"),
             StoreError::Invalid(msg) => write!(f, "{msg}"),
             StoreError::Transcode(error) => write!(f, "{error}"),
-            StoreError::Ai(error) => write!(f, "{error}"),
-            StoreError::ProviderNotFound(id) => write!(f, "no AI provider with id {id}"),
+            StoreError::Plugin(message) => write!(f, "{message}"),
             StoreError::Io(error) => write!(f, "storage error: {error}"),
             StoreError::Json(error) => write!(f, "channel document is not valid JSON: {error}"),
             StoreError::Database(error) => write!(f, "database error: {error}"),
@@ -105,8 +112,8 @@ enum Backend {
 }
 
 impl Store {
-    /// The file backend: `<config>/channels` plus the two settings files,
-    /// seeded on first run so they are real, hand-editable documents.
+    /// The file backend: `<config>/channels` plus the settings file, seeded on
+    /// first run so they are real, hand-editable documents.
     pub fn open(config: &Path) -> Result<Self, StoreError> {
         fs::create_dir_all(config.join("channels"))?;
         let store = Self {
@@ -114,7 +121,6 @@ impl Store {
             backend: Backend::Files,
         };
         seed_transcode_file(config)?;
-        seed_ai_file(config)?;
         Ok(store)
     }
 
@@ -128,7 +134,6 @@ impl Store {
             .await?;
         pg::ensure_schema(&pool).await?;
         pg::ensure_transcode(&pool, config).await?;
-        pg::ensure_ai(&pool, config).await?;
         pg::import_channels(&pool, config).await?;
         Ok(Self {
             root: config.to_path_buf(),
@@ -161,25 +166,6 @@ impl Store {
         match &self.backend {
             Backend::Files => file::set_channel_transcode(&self.root, id, overrides),
             Backend::Postgres(pool) => pg::set_channel_transcode(pool, id, overrides).await,
-        }
-    }
-
-    /// The AI providers the AI page edits.
-    pub async fn ai_config(&self) -> Result<AiConfig, StoreError> {
-        match &self.backend {
-            Backend::Files => file::ai_config(&self.root),
-            Backend::Postgres(pool) => pg::ai(pool).await,
-        }
-    }
-
-    /// Whether a saved key is (and where it lives) depends on the backend: the
-    /// file backend writes `ai.json` with mode `0600`; Postgres stores the
-    /// provider documents inside the database, where only its own access rules
-    /// apply.
-    pub async fn save_ai_config(&self, config: &AiConfig) -> Result<(), StoreError> {
-        match &self.backend {
-            Backend::Files => file::save_ai_config(&self.root, config),
-            Backend::Postgres(pool) => pg::save_ai(pool, config).await,
         }
     }
 
@@ -236,12 +222,125 @@ impl Store {
         tracing::info!(number = channel.number, name = %channel.name, "seeded first channel");
         Ok(Some(channel))
     }
+
+    // ── plugin key/value storage ───────────────────────────────────────────
+
+    /// Read one key of a plugin's namespaced storage.
+    pub async fn plugin_get(
+        &self,
+        namespace: &str,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        match &self.backend {
+            Backend::Files => file::plugin_get(&self.root, namespace, key),
+            Backend::Postgres(pool) => pg::plugin_get(pool, namespace, key).await,
+        }
+    }
+
+    /// Write one key of a plugin's namespaced storage.
+    pub async fn plugin_set(
+        &self,
+        namespace: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        match &self.backend {
+            Backend::Files => file::plugin_set(&self.root, namespace, key, value),
+            Backend::Postgres(pool) => pg::plugin_set(pool, namespace, key, value).await,
+        }
+    }
+
+    pub async fn plugin_delete(
+        &self,
+        namespace: &str,
+        key: &str,
+    ) -> Result<(), StoreError> {
+        match &self.backend {
+            Backend::Files => file::plugin_delete(&self.root, namespace, key),
+            Backend::Postgres(pool) => pg::plugin_delete(pool, namespace, key).await,
+        }
+    }
+
+    /// The storage handle passed to a plugin, scoped to its id.
+    pub fn plugin_storage(&self, namespace: &str) -> Arc<dyn PluginStorage> {
+        Arc::new(NamespacedStorage {
+            store: self.clone(),
+            namespace: namespace.to_string(),
+        })
+    }
+
+    /// Where a plugin's own files live: `<config>/plugins/{id}`.
+    pub fn plugin_dir(&self, namespace: &str) -> PathBuf {
+        self.root.join("plugins").join(namespace)
+    }
+
+    /// One-time move of the legacy `ai.json` (or `ai_settings` row) into the
+    /// AI plugin's own storage. Only runs when that storage is empty, and
+    /// removes the legacy copy once moved.
+    pub async fn upgrade_legacy_ai(&self) -> Result<(), StoreError> {
+        if self
+            .plugin_get(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        let legacy = match &self.backend {
+            Backend::Files => file::read_legacy_ai(&self.root)?,
+            Backend::Postgres(pool) => pg::read_legacy_ai(pool).await?,
+        };
+        let Some(value) = legacy else {
+            return Ok(());
+        };
+        self.plugin_set(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY, &value)
+            .await?;
+        tracing::info!(plugin = LEGACY_AI_NAMESPACE, "migrated legacy AI settings into plugin storage");
+        match &self.backend {
+            Backend::Files => file::remove_legacy_ai(&self.root)?,
+            Backend::Postgres(pool) => pg::remove_legacy_ai(pool).await?,
+        }
+        Ok(())
+    }
+}
+
+/// The `PluginStorage` view of a `Store`, scoped to one plugin id.
+struct NamespacedStorage {
+    store: Store,
+    namespace: String,
+}
+
+#[async_trait]
+impl PluginStorage for NamespacedStorage {
+    async fn get(&self, key: &str) -> Result<Option<serde_json::Value>, PluginStorageError> {
+        self.store
+            .plugin_get(&self.namespace, key)
+            .await
+            .map_err(|error| PluginStorageError(error.to_string()))
+    }
+
+    async fn set(&self, key: &str, value: &serde_json::Value) -> Result<(), PluginStorageError> {
+        self.store
+            .plugin_set(&self.namespace, key, value)
+            .await
+            .map_err(|error| PluginStorageError(error.to_string()))
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), PluginStorageError> {
+        self.store
+            .plugin_delete(&self.namespace, key)
+            .await
+            .map_err(|error| PluginStorageError(error.to_string()))
+    }
 }
 
 /// The file backend. Writing goes through a temp file plus rename, so a
 /// crash halfway never leaves a half-written document behind.
 mod file {
     use super::*;
+
+    fn channel_path(root: &Path, id: Uuid) -> PathBuf {
+        root.join("channels").join(format!("{id}.json"))
+    }
 
     pub fn transcode_defaults(root: &Path) -> Result<TranscodeConfig, StoreError> {
         let path = root.join(TRANSCODE_FILE);
@@ -265,34 +364,6 @@ mod file {
         let json = serde_json::to_string_pretty(config)?;
         fs::write(&tmp, json)?;
         fs::rename(&tmp, &path)?;
-        Ok(())
-    }
-
-    pub fn ai_config(root: &Path) -> Result<AiConfig, StoreError> {
-        let path = root.join(AI_FILE);
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(AiConfig::default());
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
-        // The single-endpoint document written before providers existed is
-        // upgraded here and written back right away: the migration assigns the
-        // provider its id, and rewriting on read is what keeps that id stable.
-        let upgrade = value.get("providers").is_none();
-        let config = AiConfig::parse(&value).map_err(StoreError::Ai)?;
-        if upgrade {
-            save_ai_config(root, &config)?;
-        }
-        Ok(config)
-    }
-
-    pub fn save_ai_config(root: &Path, config: &AiConfig) -> Result<(), StoreError> {
-        let path = root.join(AI_FILE);
-        let json = serde_json::to_string_pretty(config)?;
-        write_private(&path, &json)?;
         Ok(())
     }
 
@@ -333,8 +404,8 @@ mod file {
     }
 
     pub fn get(root: &Path, id: Uuid) -> Result<Channel, StoreError> {
-        let path = root.join("channels").join(format!("{id}.json"));
-        let text = fs::read_to_string(&path).map_err(|_| StoreError::NotFound(id))?;
+        let text = fs::read_to_string(channel_path(root, id))
+            .map_err(|_| StoreError::NotFound(id))?;
         serde_json::from_str(&text).map_err(|_| StoreError::NotFound(id))
     }
 
@@ -385,8 +456,7 @@ mod file {
     }
 
     pub fn delete(root: &Path, id: Uuid) -> Result<(), StoreError> {
-        fs::remove_file(root.join("channels").join(format!("{id}.json")))
-            .map_err(|_| StoreError::NotFound(id))
+        fs::remove_file(channel_path(root, id)).map_err(|_| StoreError::NotFound(id))
     }
 
     fn reserve(root: &Path, number: u32, ignore: Option<Uuid>) -> Result<(), StoreError> {
@@ -402,16 +472,78 @@ mod file {
     }
 
     fn write(root: &Path, channel: &Channel) -> Result<(), StoreError> {
-        let path = root.join("channels").join(format!("{}.json", channel.id));
+        let path = channel_path(root, channel.id);
         let tmp = path.with_extension("json.tmp");
         let json = serde_json::to_string_pretty(channel)?;
         fs::write(&tmp, json)?;
         fs::rename(&tmp, &path)?;
         Ok(())
     }
+
+    fn plugin_path(root: &Path, namespace: &str, key: &str) -> PathBuf {
+        root.join("plugins").join(namespace).join(format!("{key}.json"))
+    }
+
+    pub fn plugin_get(
+        root: &Path,
+        namespace: &str,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let path = plugin_path(root, namespace, key);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Some(serde_json::from_str(&text)?))
+    }
+
+    pub fn plugin_set(
+        root: &Path,
+        namespace: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        let path = plugin_path(root, namespace, key);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(value)?;
+        write_private(&path, &json)?;
+        Ok(())
+    }
+
+    pub fn plugin_delete(
+        root: &Path,
+        namespace: &str,
+        key: &str,
+    ) -> Result<(), StoreError> {
+        match fs::remove_file(plugin_path(root, namespace, key)) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(Into::into),
+        }
+    }
+
+    pub fn read_legacy_ai(root: &Path) -> Result<Option<serde_json::Value>, StoreError> {
+        let path = root.join("ai.json");
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        Ok(Some(serde_json::from_str(&text)?))
+    }
+
+    pub fn remove_legacy_ai(root: &Path) -> Result<(), StoreError> {
+        let path = root.join("ai.json");
+        match fs::remove_file(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(Into::into),
+        }
+    }
 }
 
-/// The Postgres backend. The three tables are invented here and owned by
+/// The Postgres backend. The tables are invented here and owned by
 /// ChannelFlow; next's own schema lives in the same server untouched.
 mod pg {
     use super::*;
@@ -432,9 +564,11 @@ mod pg {
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 config JSONB NOT NULL
             )",
-            "CREATE TABLE IF NOT EXISTS ai_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                config JSONB NOT NULL
+            "CREATE TABLE IF NOT EXISTS plugin_kv (
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value JSONB NOT NULL,
+                PRIMARY KEY (namespace, key)
             )",
         ] {
             sqlx::query(statement).execute(pool).await?;
@@ -463,30 +597,6 @@ mod pg {
         let transcode = TranscodeConfig::parse(&value).map_err(StoreError::Transcode)?;
         save_transcode(pool, &transcode).await?;
         tracing::info!(path = %config.join(TRANSCODE_FILE).display(), "migrated transcode defaults into Postgres");
-        Ok(())
-    }
-
-    pub async fn ensure_ai(pool: &PgPool, config: &Path) -> Result<(), StoreError> {
-        let present = sqlx::query("SELECT 1 FROM ai_settings WHERE id = 1")
-            .fetch_optional(pool)
-            .await?
-            .is_some();
-        if present {
-            return Ok(());
-        }
-        let text = match fs::read_to_string(config.join(AI_FILE)) {
-            Ok(text) => text,
-            Err(_) => {
-                save_ai(pool, &AiConfig::default()).await?;
-                return Ok(());
-            }
-        };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
-        // `AiConfig::parse` upgrades the pre-providers shape, so the database
-        // only ever holds the canonical provider list.
-        let ai = AiConfig::parse(&value).map_err(StoreError::Ai)?;
-        save_ai(pool, &ai).await?;
-        tracing::info!(path = %config.join(AI_FILE).display(), "migrated AI providers into Postgres");
         Ok(())
     }
 
@@ -546,31 +656,6 @@ mod pg {
         let value = serde_json::to_value(config)?;
         sqlx::query(
             "INSERT INTO transcode_settings (id, config) VALUES (1, $1)
-             ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config",
-        )
-        .bind(Json(value))
-        .execute(pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn ai(pool: &PgPool) -> Result<AiConfig, StoreError> {
-        match sqlx::query("SELECT config FROM ai_settings WHERE id = 1")
-            .fetch_optional(pool)
-            .await?
-        {
-            Some(row) => {
-                let value = row.try_get::<Json<serde_json::Value>, _>("config")?.0;
-                AiConfig::parse(&value).map_err(StoreError::Ai)
-            }
-            None => Ok(AiConfig::default()),
-        }
-    }
-
-    pub async fn save_ai(pool: &PgPool, config: &AiConfig) -> Result<(), StoreError> {
-        let value = serde_json::to_value(config)?;
-        sqlx::query(
-            "INSERT INTO ai_settings (id, config) VALUES (1, $1)
              ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config",
         )
         .bind(Json(value))
@@ -670,6 +755,81 @@ mod pg {
         channel.updated_at = Utc::now();
         update_row(pool, &channel).await?;
         Ok(channel)
+    }
+
+    pub async fn plugin_get(
+        pool: &PgPool,
+        namespace: &str,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        match sqlx::query("SELECT value FROM plugin_kv WHERE namespace = $1 AND key = $2")
+            .bind(namespace)
+            .bind(key)
+            .fetch_optional(pool)
+            .await?
+        {
+            Some(row) => Ok(Some(row.try_get::<Json<serde_json::Value>, _>("value")?.0)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn plugin_set(
+        pool: &PgPool,
+        namespace: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO plugin_kv (namespace, key, value) VALUES ($1, $2, $3)
+             ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value",
+        )
+        .bind(namespace)
+        .bind(key)
+        .bind(Json(value))
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn plugin_delete(
+        pool: &PgPool,
+        namespace: &str,
+        key: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM plugin_kv WHERE namespace = $1 AND key = $2")
+            .bind(namespace)
+            .bind(key)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The pre-plugin `ai_settings` row, if the old schema is still around.
+    pub async fn read_legacy_ai(pool: &PgPool) -> Result<Option<serde_json::Value>, StoreError> {
+        let legacy: i64 = sqlx::query(
+            "SELECT count(*) FROM information_schema.tables \
+             WHERE table_schema = 'public' AND table_name = 'ai_settings'",
+        )
+        .fetch_one(pool)
+        .await?
+        .try_get(0)?;
+        if legacy == 0 {
+            return Ok(None);
+        }
+        match sqlx::query("SELECT config FROM ai_settings WHERE id = 1")
+            .fetch_optional(pool)
+            .await?
+        {
+            Some(row) => Ok(Some(row.try_get::<Json<serde_json::Value>, _>("config")?.0)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn remove_legacy_ai(pool: &PgPool) -> Result<(), StoreError> {
+        sqlx::query("DROP TABLE IF EXISTS ai_settings")
+            .execute(pool)
+            .await?;
+        Ok(())
     }
 
     fn channel_columns() -> &'static str {
@@ -776,16 +936,24 @@ fn seed_transcode_file(config: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Write `ai.json` on first run for the same reason as `transcode.json`: the
-/// page starts from a real file naming the OpenAI defaults.
-fn seed_ai_file(config: &Path) -> Result<(), StoreError> {
-    let path = config.join(AI_FILE);
-    if path.exists() {
-        return Ok(());
+/// Write a file that may hold secrets, as the `ai.json` did. Plugin storage
+/// files get mode `0600`, like the old AI file: never world-readable even for
+/// the instant between temp file and rename.
+fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let tmp = path.with_extension("json.tmp");
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    file::save_ai_config(config, &AiConfig::default())?;
-    tracing::info!(path = %path.display(), "wrote default AI settings");
-    Ok(())
+    let mut file = options.open(&tmp)?;
+    file.write_all(contents.as_bytes())?;
+    drop(file);
+    fs::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -794,9 +962,95 @@ mod tests {
     use crate::model::NewChannel;
     use serde_json::json;
 
+    /// Plugin key/value storage survives a round trip on the file backend,
+    /// and can be deleted.
+    #[tokio::test]
+    async fn file_backend_plugin_storage_round_trip() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-kv-{stamp}"));
+        let store = Store::open(&dir).expect("open file store");
+
+        let value = json!({ "providers": [{ "id": "p1", "name": "One", "priority": 1 }] });
+        store
+            .plugin_set("com.channelflow.ai", "providers", &value)
+            .await
+            .expect("set");
+        assert_eq!(
+            store
+                .plugin_get("com.channelflow.ai", "providers")
+                .await
+                .expect("get"),
+            Some(value)
+        );
+
+        // A different namespace never sees this key.
+        assert_eq!(
+            store
+                .plugin_get("com.channelflow.ersatztv", "providers")
+                .await
+                .expect("get other"),
+            None
+        );
+
+        store
+            .plugin_delete("com.channelflow.ai", "providers")
+            .await
+            .expect("delete");
+        assert!(store
+            .plugin_get("com.channelflow.ai", "providers")
+            .await
+            .expect("get after delete")
+            .is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A legacy `ai.json` is moved into the AI plugin's own storage exactly
+    /// once, and the file is removed.
+    #[tokio::test]
+    async fn legacy_ai_migrates_into_plugin_storage() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-ai-migrate-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let legacy = json!({
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-secret",
+            "chat_model": "gpt-4o-mini",
+            "tts_model": "tts-1",
+            "voice": "nova"
+        });
+        std::fs::write(dir.join("ai.json"), serde_json::to_string(&legacy).unwrap()).unwrap();
+
+        let store = Store::open(&dir).expect("open file store");
+        store.upgrade_legacy_ai().await.expect("migrate");
+        let migrated = store
+            .plugin_get("com.channelflow.ai", "providers")
+            .await
+            .expect("get");
+        assert_eq!(migrated, Some(legacy), "document carried over whole");
+        assert!(
+            !dir.join("ai.json").exists(),
+            "legacy file is removed after the move"
+        );
+
+        // Nothing to do a second time.
+        store.upgrade_legacy_ai().await.expect("second migrate");
+        store
+            .plugin_delete("com.channelflow.ai", "providers")
+            .await
+            .expect("cleanup");
+        std::fs::remove_file(dir.join("ai.json")).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The Postgres backend end to end. Skipped unless `TEST_DATABASE_URL` is
-    /// set, so `cargo test` needs no database by default; point it at a
-    /// scratch database when you do want the SQL layer exercised.
+    /// set, so `cargo test` needs no database by default.
     #[tokio::test]
     async fn postgres_backend_round_trip() {
         let url = match std::env::var("TEST_DATABASE_URL") {
@@ -816,7 +1070,6 @@ mod tests {
             .await
             .expect("open postgres store");
 
-        // Channels: create, list, update, unique number, delete, missing.
         let created = store
             .create(NewChannel {
                 number: 1,
@@ -865,39 +1118,24 @@ mod tests {
         store.delete(created.id).await.expect("delete");
         assert!(store.get(created.id).await.is_err(), "deleted channel is gone");
 
-        // Settings: the singleton rows round-trip their JSON documents.
-        let mut ai = AiConfig::default();
-        ai.create(&json!({
-            "name": "DB", "priority": 1, "base_url": "https://example.test/v1",
-            "api_key": "sk-secret", "chat_model": "gpt-4o-mini", "tts_model": "tts-1", "voice": "nova"
-        }))
-        .expect("provider");
-        store.save_ai_config(&ai).await.expect("save ai");
-        let reloaded = store.ai_config().await.expect("reload ai");
-        assert_eq!(reloaded.providers.len(), 1);
-        assert_eq!(reloaded.providers[0].name, "DB");
-        assert_eq!(reloaded.providers[0].api_key, "sk-secret");
+        // Plugin storage also round-trips.
+        let provider = json!({ "providers": [{ "id": "p1", "name": "One", "priority": 1 }] });
+        store
+            .plugin_set("com.channelflow.ai", "providers", &provider)
+            .await
+            .expect("set");
+        assert_eq!(
+            store
+                .plugin_get("com.channelflow.ai", "providers")
+                .await
+                .expect("get"),
+            Some(provider)
+        );
+        store
+            .plugin_delete("com.channelflow.ai", "providers")
+            .await
+            .expect("delete");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// Write a file that holds a secret. The temporary file is created with mode
-/// `0600` rather than written and then chmodded, so the key is never on disk
-/// world-readable for even the instant between the two.
-fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let tmp = path.with_extension("json.tmp");
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(&tmp)?;
-    file.write_all(contents.as_bytes())?;
-    drop(file);
-    fs::rename(&tmp, path)
 }

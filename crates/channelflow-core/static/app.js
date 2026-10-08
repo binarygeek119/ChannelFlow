@@ -24,6 +24,9 @@ const els = {
   tabAi: $("tab-ai"),
   tabTranscode: $("tab-transcode"),
   tabLiveTv: $("tab-live-tv"),
+  tabPlugins: $("tab-plugins"),
+  pluginsRows: $("plugins-rows"),
+  pluginsEmpty: $("plugins-empty"),
   tabPlaceholder: $("tab-placeholder"),
   placeholderTitle: $("placeholder-title"),
   aboutApp: $("about-app"),
@@ -253,6 +256,7 @@ const MENU = {
   ai: ["AI", "OpenAI-compatible endpoints, tried in priority order."],
   transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
+  plugins: ["Plugins", "Loaded plugins and what each is allowed to do."],
   about: ["About", "Version, build, and where this install keeps its data."],
   credits: ["Credits", "Who built ChannelFlow, and what it's built on."],
 };
@@ -265,6 +269,7 @@ const PANEL_FOR = {
   ai: "tab-ai",
   transcode: "tab-transcode",
   livetv: "tab-live-tv",
+  plugins: "tab-plugins",
 };
 
 // Render rows as `<div class="about-row">` pairs. Rows with no value are
@@ -331,6 +336,9 @@ async function loadAbout() {
 // that works is the one the app uses.
 
 let aiProviders = [];
+// The AI feature is a plugin now; the shell talks to it at its own route
+// namespace instead of a core `/api/ai`.
+const AI_API = "/api/plugins/com.channelflow.ai";
 let aiNextPriority = 1;
 let aiDefaults = { base_url: "", chat_model: "", tts_model: "", voice: "" };
 let aiActiveId = null; // null is the "New provider" tab
@@ -432,7 +440,7 @@ function selectAiTab(id) {
 
 async function loadAi(selectId) {
   try {
-    const data = await request("/api/ai");
+    const data = await request(AI_API);
     aiProviders = data.providers;
     aiNextPriority = data.next_priority;
     aiDefaults = data.defaults;
@@ -477,13 +485,13 @@ async function saveAi() {
     let saved;
     let message;
     if (aiActiveId === null) {
-      saved = await request("/api/ai/providers", {
+      saved = await request(`${AI_API}/providers`, {
         method: "POST",
         body: JSON.stringify(aiBody()),
       });
       message = `Added ${saved.name}.`;
     } else {
-      saved = await request(`/api/ai/providers/${encodeURIComponent(aiActiveId)}`, {
+      saved = await request(`${AI_API}/providers/${encodeURIComponent(aiActiveId)}`, {
         method: "PUT",
         body: JSON.stringify(aiBody()),
       });
@@ -501,7 +509,7 @@ async function deleteAi() {
   if (!provider) return;
   if (!window.confirm(`Delete the "${provider.name}" provider?`)) return;
   try {
-    await request(`/api/ai/providers/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
+    await request(`${AI_API}/providers/${encodeURIComponent(provider.id)}`, { method: "DELETE" });
     await loadAi(null);
     setAiNote(`Deleted ${provider.name}.`);
   } catch (error) {
@@ -524,8 +532,8 @@ async function testAi() {
   try {
     const path =
       aiActiveId === null
-        ? "/api/ai/test"
-        : `/api/ai/providers/${encodeURIComponent(aiActiveId)}/test`;
+        ? `${AI_API}/test`
+        : `${AI_API}/providers/${encodeURIComponent(aiActiveId)}/test`;
     renderAiTest(await request(path, { method: "POST", body: JSON.stringify(aiBody()) }));
   } catch (error) {
     setAiNote(error.message || "Could not run the test.", true);
@@ -560,7 +568,7 @@ async function testAiAll() {
   els.aiTestAll.textContent = "Testing…";
   els.aiFailoverResult.hidden = true;
   try {
-    renderFailover(await request("/api/ai/test-all", { method: "POST" }));
+    renderFailover(await request(`${AI_API}/test-all`, { method: "POST" }));
   } catch (error) {
     els.aiFailoverResult.className = "test-result bad";
     els.aiFailoverResult.innerHTML = `<p class="test-head">${escapeHtml(
@@ -607,7 +615,7 @@ els.aiTestAll.addEventListener("click", testAiAll);
 els.aiKeyClear.addEventListener("click", async () => {
   if (aiActiveId === null) return;
   try {
-    await request(`/api/ai/providers/${encodeURIComponent(aiActiveId)}`, {
+    await request(`${AI_API}/providers/${encodeURIComponent(aiActiveId)}`, {
       method: "PUT",
       body: JSON.stringify({ api_key: "" }),
     });
@@ -1052,6 +1060,67 @@ async function loadLiveTv() {
   }
 }
 
+// --- Plugins ---------------------------------------------------------------
+// The plugin manager's catalog: what is loaded, what each plugin asked for,
+// whether it is compatible with this base, and its health. Enable/disable
+// calls the plugin's lifecycle hooks.
+
+async function loadPlugins() {
+  try {
+    renderPlugins((await request("/api/plugins")).plugins);
+  } catch (error) {
+    els.pluginsRows.innerHTML = "";
+    els.pluginsEmpty.hidden = false;
+    els.pluginsEmpty.textContent = error.message || "Could not load plugins.";
+  }
+}
+
+function renderPlugins(plugins) {
+  els.pluginsEmpty.hidden = plugins.length > 0;
+  els.pluginsRows.innerHTML = plugins
+    .map((plugin) => {
+      const status = plugin.enabled
+        ? '<span class="pill on">ENABLED</span>'
+        : '<span class="pill off">DISABLED</span>';
+      const compatible = plugin.compatible
+        ? ""
+        : '<span class="muted"> (needs a newer base)</span>';
+      const health = plugin.health
+        ? `${plugin.health.ok ? "ok" : "down"} — ${escapeHtml(plugin.health.detail)}`
+        : "";
+      const action = plugin.enabled
+        ? `<button type="button" class="ghost" data-plugin="${escapeHtml(plugin.id)}" data-act="disable">Disable</button>`
+        : `<button type="button" class="ghost" data-plugin="${escapeHtml(plugin.id)}" data-act="enable">Enable</button>`;
+      return `<tr>
+        <td><span class="channel-name">${escapeHtml(plugin.name)}</span>
+            <div class="channel-desc">${escapeHtml(plugin.id)}${compatible}</div></td>
+        <td>${escapeHtml(plugin.category || "—")}</td>
+        <td>${escapeHtml(plugin.version)}</td>
+        <td>${plugin.permissions.length}</td>
+        <td class="${plugin.health && plugin.health.ok ? "ok" : ""}">${escapeHtml(health)}</td>
+        <td class="actions">${action}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+els.pluginsRows.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-plugin]");
+  if (!button) return;
+  const action = button.dataset.act;
+  try {
+    const data = await request(
+      `/api/plugins/${encodeURIComponent(button.dataset.plugin)}/${action}`,
+      { method: "PUT" }
+    );
+    renderPlugins(data.plugins);
+  } catch (error) {
+    renderPlugins([]);
+    els.pluginsEmpty.hidden = false;
+    els.pluginsEmpty.textContent = error.message || "Could not toggle the plugin.";
+  }
+});
+
 function renderLive(list) {
   const count = list.length;
   els.liveCount.textContent = count ? `${count} channel${count === 1 ? "" : "s"}` : "";
@@ -1184,6 +1253,7 @@ function showTab(key) {
   if (key === "ai") loadAi();
   if (key === "transcode") loadTranscode();
   if (key === "livetv") loadLiveTv();
+  if (key === "plugins") loadPlugins();
 }
 
 document.querySelectorAll(".drawer-nav a").forEach((link) => {

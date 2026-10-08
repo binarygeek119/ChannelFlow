@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/channelflow"]
+members = [
+    "crates/channelflow-core",
+    "crates/channelflow-plugin-api",
+    "crates/plugins/ai",
+]
 # next's own workspace lives in the vendored copy; keep cargo out of it.
 exclude = ["vendor/ersatztv-next"]
 
@@ -8,6 +12,17 @@ exclude = ["vendor/ersatztv-next"]
 version = "2.0.0"
 edition = "2021"
 license = "MIT"
+
+[workspace.dependencies]
+axum = { version = "0.8", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "charset", "json"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [profile.release]
 lto = "thin"

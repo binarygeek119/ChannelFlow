@@ -13,7 +13,7 @@
 //! Kept apart from `ai.rs`, which is pure settings and stays testable without
 //! a network. This is the only module that needs an HTTP client.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::Serialize;
 
@@ -22,10 +22,6 @@ use crate::ai::AiProvider;
 /// Short enough to be free on a metered API and still long enough to exercise
 /// the model and the voice.
 const TEST_PHRASE: &str = "ChannelFlow is checking this voice.";
-
-/// One ceiling for every probe. A local model can be slow on a cold start, so
-/// this is generous; a wrong address fails long before it.
-const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// One line of the test's output.
 #[derive(Debug, Serialize)]
@@ -72,12 +68,6 @@ pub struct FailoverReport {
     pub chosen: Option<String>,
     /// The providers tried, in order, up to and including the one that worked.
     pub attempts: Vec<Attempt>,
-}
-
-/// Build the one client the server reuses, so repeated tests share a
-/// connection pool and a single timeout.
-pub fn client() -> reqwest::Result<reqwest::Client> {
-    reqwest::Client::builder().timeout(TIMEOUT).build()
 }
 
 pub async fn run(http: &reqwest::Client, provider: &AiProvider) -> Report {

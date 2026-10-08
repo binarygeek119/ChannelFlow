@@ -162,6 +162,7 @@ mod tests {
             base_version: "2.0.0".to_string(),
             dir: std::env::temp_dir(),
             logger: PluginLogger::new(id),
+            core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
         }
     }
 

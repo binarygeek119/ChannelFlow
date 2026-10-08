@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
 use chrono::Utc;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -274,6 +275,14 @@ impl Store {
         self.root.join("plugins").join(namespace)
     }
 
+    /// The read-only core-data handle handed to plugins that hold
+    /// `api:core:read`.
+    pub fn core_data(&self) -> StoreCoreData {
+        StoreCoreData {
+            store: self.clone(),
+        }
+    }
+
     /// One-time move of the legacy `ai.json` (or `ai_settings` row) into the
     /// AI plugin's own storage. Only runs when that storage is empty, and
     /// removes the legacy copy once moved.
@@ -300,6 +309,32 @@ impl Store {
             Backend::Postgres(pool) => pg::remove_legacy_ai(pool).await?,
         }
         Ok(())
+    }
+}
+
+/// The read-only view of channels handed to plugins that hold `api:core:read`.
+#[derive(Clone)]
+pub struct StoreCoreData {
+    store: Store,
+}
+
+#[async_trait]
+impl CoreData for StoreCoreData {
+    async fn channels(&self) -> Result<Vec<CoreChannel>, CoreDataError> {
+        let channels = self
+            .store
+            .list()
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        Ok(channels
+            .into_iter()
+            .map(|channel| CoreChannel {
+                id: channel.id.to_string(),
+                number: channel.number,
+                name: channel.name,
+                enabled: channel.enabled,
+            })
+            .collect())
     }
 }
 

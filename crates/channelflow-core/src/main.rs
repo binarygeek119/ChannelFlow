@@ -112,6 +112,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&ai_manifest.id),
         logger: PluginLogger::new(&ai_manifest.id),
+        core: Arc::new(store.core_data()),
     };
     manager
         .add(ai_plugin, ai_api)

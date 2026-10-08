@@ -486,6 +486,7 @@ mod tests {
             base_version: env!("CARGO_PKG_VERSION").to_string(),
             dir: store.plugin_dir(&manifest.id),
             logger: PluginLogger::new(&manifest.id),
+            core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
         };
         manager.add(plugin, api).await.expect("load AI plugin");
         manager.enable(&manifest.id).await.expect("enable AI plugin");

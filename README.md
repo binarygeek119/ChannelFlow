@@ -157,6 +157,10 @@ WeatherStar graphics are vendored from [ws4kp](https://github.com/netbymatt/ws4k
 
 News is a 24/7 channel: RSS feeds from the **News** page, optional TTS, FFmpeg overlay, and bed music.
 
+## Releases
+
+To cut a Windows + Linux build, run the **Native apps** workflow (Actions → Native apps → Run workflow), type the new version, and leave *Attach the packages to a GitHub Release* checked. It publishes self-contained `linux-x64` and `win-x64` builds, uploads them as workflow artifacts (30 days), and attaches `channelflow-server-linux-x64-v<version>.tar.gz` and `channelflow-server-win-x64-v<version>.zip` to a `v<version>` release — creating the release if it does not exist yet, or replacing its assets if it does.
+
 ## License
 
 ChannelFlow-Server code follows this repository's license. WeatherStar vendors keep their upstream MIT licenses.

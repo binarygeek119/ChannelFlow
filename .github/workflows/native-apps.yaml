@@ -1,9 +1,17 @@
 name: Native apps
 
-# Self-contained Windows and Linux builds. Manual only — not on push.
+# Self-contained Windows and Linux builds.
+# Manual: run this workflow, type the new version, and it publishes
+# channelflow-server-linux-x64 and channelflow-server-win-x64,
+# uploads them as workflow artifacts, and attaches them to a
+# GitHub Release tagged v<version>.
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: Version to build (bump version, e.g. 0.0.2.96)
+        required: true
+        type: string
       rid:
         description: Runtime to publish
         type: choice
@@ -12,6 +20,13 @@ on:
           - linux-x64
           - win-x64
         default: all
+      release:
+        description: Attach the packages to a GitHub Release for v<version>
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   publish:
@@ -19,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rid: ${{ github.event.inputs.rid == 'all' && fromJSON('["linux-x64","win-x64"]') || fromJSON(format('["{0}"]', github.event.inputs.rid)) }}
+        rid: ${{ inputs.rid == 'all' && fromJSON('["linux-x64","win-x64"]') || fromJSON(format('["{0}"]', inputs.rid)) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,14 +46,63 @@ jobs:
 
       - name: Publish ${{ matrix.rid }}
         env:
-          CHANNELFLOW_VERSION: 1.0.0
+          CHANNELFLOW_VERSION: ${{ inputs.version }}
           CHANNELFLOW_REVISION: ${{ github.sha }}
         run: bash scripts/publish-native.sh ${{ matrix.rid }}
+
+      - name: Package ${{ matrix.rid }}
+        env:
+          VERSION: ${{ inputs.version }}
+          RID: ${{ matrix.rid }}
+        run: |
+          set -euo pipefail
+          packages="$GITHUB_WORKSPACE/artifacts/packages"
+          mkdir -p "$packages"
+          cd "$GITHUB_WORKSPACE/artifacts/native"
+          if [ "$RID" = "win-x64" ]; then
+            out="$packages/channelflow-server-$RID-v$VERSION.zip"
+            (cd "$RID" && zip -qr "$out" .)
+          else
+            out="$packages/channelflow-server-$RID-v$VERSION.tar.gz"
+            tar -czf "$out" -C "$RID" .
+          fi
+          ls -lh "$packages"
 
       - name: Upload ${{ matrix.rid }}
         uses: actions/upload-artifact@v7
         with:
           name: channelflow-server-${{ matrix.rid }}
-          path: artifacts/native/${{ matrix.rid }}
+          path: artifacts/packages/*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
+
+  release:
+    needs: publish
+    if: ${{ inputs.release }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v7
+        with:
+          pattern: channelflow-server-*
+          path: packages
+          merge-multiple: true
+
+      - name: Attach packages to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          ls -lh packages
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" packages/* --clobber
+          else
+            gh release create "$tag" packages/* \
+              --title "$tag" \
+              --generate-notes
+          fi
+          gh release view "$tag" --json assets --jq '.assets[].name'

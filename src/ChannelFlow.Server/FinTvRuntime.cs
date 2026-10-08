@@ -119,29 +119,47 @@ public sealed class FinTvRuntime
     /// ChannelFlow's own MPEG-TS encode. Both base URLs are loopback because both processes
     /// run in this container.
     ///
-    /// Applied only when both URLs are still unset — an untouched config. An explicit
-    /// choice (a URL set, or next deliberately switched off on a box where it is installed)
-    /// is left alone. Skipped entirely when no next binary is present, so a native
-    /// <c>dotnet run</c> dev box keeps pointing at ChannelFlow's own encoder.
+    /// Empty URLs are filled individually, so a half-configured block (enabled, but one URL
+    /// never saved — the state that previously left next dark with no warning) is repaired
+    /// rather than skipped. The toggle is only forced on when both were empty, so an install
+    /// that was configured and then deliberately switched off stays off. Everything is
+    /// skipped when no next binary is present, so a native <c>dotnet run</c> dev box keeps
+    /// pointing at ChannelFlow's own encoder.
     /// </summary>
     private void EnsureNextDefaults()
     {
-        var next = _configuration.NextTranscoding;
-        if (!string.IsNullOrWhiteSpace(next.BaseUrl)
-            || !string.IsNullOrWhiteSpace(next.ResolverBaseUrl))
-        {
-            return;
-        }
-
         if (!FinTv.Next.NextCoordinatorService.IsBundled)
         {
             return;
         }
 
-        next.Enabled = true;
-        next.BaseUrl = "http://127.0.0.1:8409";
-        next.ResolverBaseUrl = $"http://127.0.0.1:{HttpListenerPort()}";
-        SaveConfiguration();
+        var next = _configuration.NextTranscoding;
+        var pristine = string.IsNullOrWhiteSpace(next.BaseUrl)
+            && string.IsNullOrWhiteSpace(next.ResolverBaseUrl);
+        var dirty = false;
+
+        if (string.IsNullOrWhiteSpace(next.BaseUrl))
+        {
+            next.BaseUrl = "http://127.0.0.1:8409";
+            dirty = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(next.ResolverBaseUrl))
+        {
+            next.ResolverBaseUrl = $"http://127.0.0.1:{HttpListenerPort()}";
+            dirty = true;
+        }
+
+        if (pristine && !next.Enabled)
+        {
+            next.Enabled = true;
+            dirty = true;
+        }
+
+        if (dirty)
+        {
+            SaveConfiguration();
+        }
     }
 
     /// <summary>The port ChannelFlow itself listens on (loopback base URL for the resolver).</summary>

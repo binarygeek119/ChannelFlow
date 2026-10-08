@@ -77,6 +77,17 @@ stop_next() {
 # Start next when there is something for it to serve. Returns 0 when it started,
 # 1 when it is still waiting, so the caller can back off.
 maybe_start_next() {
+    if [ ! -x "$NEXT_BIN" ]; then
+        # ERSATZTV_PATH pointed at nothing: the operator is running next elsewhere
+        # (or deliberately suppressed it). ChannelFlow treats that the same way and
+        # does not enable the integration, so just stay idle rather than spin.
+        if [ "$WAITING_FOR_CHANNELS" -eq 0 ]; then
+            WAITING_FOR_CHANNELS=1
+            log "no executable next binary at $NEXT_BIN; leaving it to run elsewhere"
+        fi
+        return 1
+    fi
+
     if ! has_channels; then
         if [ -f "$LINEUP" ] && [ "$WAITING_FOR_CHANNELS" -eq 0 ]; then
             WAITING_FOR_CHANNELS=1

@@ -127,7 +127,7 @@ The Docker image is built **on top of [`ersatztv/next:develop`](https://github.c
 
 `scripts/container-entrypoint.sh` supervises both. If ChannelFlow exits, next is stopped and the container exits so your restart policy brings the pair back together. If next exits, it is restarted with capped backoff.
 
-No configuration is required on a fresh install — **General → ErsatzTV next (transcoding)** arrives pre-filled with `http://127.0.0.1:8409` and `http://127.0.0.1:8097` and enabled, because both processes share this container's loopback. The defaults are only applied while both URLs are still empty, so an explicitly configured or deliberately disabled integration is left alone, and they are skipped entirely when no next binary is present (a native `dotnet run` dev box).
+No configuration is required on a fresh install — **General → ErsatzTV next (transcoding)** arrives pre-filled with `http://127.0.0.1:8409` and `http://127.0.0.1:8097` and enabled, because both processes share this container's loopback. Empty URLs are filled individually, so a half-configured block (enabled but one URL never saved — the state that used to leave next dark with no warning) is repaired instead of skipped; the toggle is only forced on when both were empty, and everything is skipped when no next binary is present (a native `dotnet run` dev box).
 
 How playout flows:
 
@@ -148,7 +148,7 @@ Requirements/notes:
 
 - Mount the media share at the **same path** ChannelFlow and Jellyfin use so file paths in playouts resolve.
 - `TZ` (and **General → schedule time zone**) decide where the playout windows fall; the image defaults to `America/Chicago`.
-- Publish only `8097`. If you *do* run next as a separate container instead, point **Next server URL** at its `8409` and **ChannelFlow URL (from inside next)** at ChannelFlow's LAN address, and override `ERSATZTV_PATH` to keep the bundled process from starting.
+- Publish only `8097`. To run next as a separate container instead, point **Next server URL** at its `8409` and **ChannelFlow URL (from inside next)** at ChannelFlow's LAN address, then set `ERSATZTV_PATH` to a path that does not exist so the bundled process stays stopped and the loopback defaults are not forced on.
 - **There is no automatic fallback.** If streams go dark, look for `[entrypoint]` and `ersatztv` lines in the container log — the entrypoint logs every next start, stop, crash retry, and config-driven restart.
 
 ## Weather and news

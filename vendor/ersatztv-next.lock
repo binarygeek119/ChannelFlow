@@ -1,0 +1,11 @@
+# Written by scripts/update-next.sh. Do not edit by hand.
+# Provenance for the vendored copy in vendor/ersatztv-next/.
+
+repo = "https://github.com/ErsatzTV/next.git"
+ref = "main"
+commit = "46796e9afd05c78ffcad333271e55f327d185806"
+commit_date = "2026-10-08T09:01:45-05:00"
+commit_subject = "refactor: minimize select macros to enable formatting (#314)"
+schema_changed = "no"
+updated = "2026-10-08T18:27:28Z"
+image_tag = "develop"

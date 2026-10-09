@@ -1807,17 +1807,52 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
   }
 });
 
+// One place for the UI build label; the boot tag prints it so a screenshot can
+// always identify the page's build without the console.
+const UI_BUILD = "16";
+
 function tagBoot(branch, state) {
   const el = document.getElementById("ui-build");
   if (!el) return;
   const extra = state && state.setup_done !== undefined ? ` · setup_done:${state.setup_done}` : "";
-  el.textContent = `UI build 13 · ${branch}${extra}`;
+  el.textContent = `UI build ${UI_BUILD} · ${branch}${extra}`;
+}
+
+// The login screen exists for nothing but logging in after setup is complete.
+// If the API can't be reached we therefore have no business showing a login
+// form on an install that may never have created a user - show the walkthrough
+// with the error instead so 'setup first, login later' holds on every path.
+function showSetupUnreachable(error) {
+  hideScreens();
+  document.getElementById("onboarding-screen").hidden = false;
+  obIndex = 0;
+  obCompleted = {};
+  renderOnboarding();
+  setObNote(
+    `Could not reach the ChannelFlow server — is it running? (${error.message || "network error"})`,
+    true
+  );
+}
+
+// A server restart can take a moment; don't let a transient miss decide what
+// the page shows. Try the state check a few times before giving up.
+async function fetchStateWithRetry() {
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await request("/api/auth/state");
+    } catch (error) {
+      lastError = error;
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  }
+  throw lastError;
 }
 
 async function boot() {
-  console.info("[channelflow] ui build v13");
+  console.info(`[channelflow] ui build v${UI_BUILD}`);
   try {
-    const state = await request("/api/auth/state");
+    const state = await fetchStateWithRetry();
     if (!state.setup_done) {
       tagBoot("setup", state);
       startOnboarding();
@@ -1832,7 +1867,7 @@ async function boot() {
     showApp();
   } catch (error) {
     tagBoot("error");
-    showLogin("Could not reach ChannelFlow.");
+    showSetupUnreachable(error);
   }
 }
 

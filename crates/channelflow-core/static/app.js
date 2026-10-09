@@ -1588,7 +1588,7 @@ function renderOnboarding() {
   document.getElementById("ob-back").hidden = obIndex === 0;
   const $next = document.getElementById("ob-next");
   $next.textContent = obIndex === OB.length - 1 ? "Log in" : "Next";
-  $next.hidden = obIndex === OB.length - 1;
+  $next.hidden = false;
   refreshObNext();
   if (step.after) step.after();
 }
@@ -1806,6 +1806,7 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
 });
 
 async function boot() {
+  console.info("[channelflow] ui build v10");
   try {
     const state = await request("/api/auth/state");
     if (!state.setup_done) {

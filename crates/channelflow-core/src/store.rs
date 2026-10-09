@@ -505,6 +505,30 @@ impl Store {
         self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await
     }
 
+    /// A file in the config directory that says the walkthrough has already
+    /// been finished. It outlives a backend switch, so a completed install can
+    /// never be shown the walkthrough again just because the database was
+    /// briefly unreachable.
+    pub fn setup_marker_path(&self) -> PathBuf {
+        self.root.join("setup-complete")
+    }
+
+    pub fn has_setup_marker(&self) -> bool {
+        self.setup_marker_path().is_file()
+    }
+
+    pub fn write_setup_marker(&self) -> Result<(), StoreError> {
+        fs::write(self.setup_marker_path(), "done\n").map_err(StoreError::Io)
+    }
+
+    pub fn clear_setup_marker(&self) -> Result<(), StoreError> {
+        match fs::remove_file(self.setup_marker_path()) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(StoreError::Io(error)),
+        }
+    }
+
     /// Forget the account, session, and installed-plugin registry — the
     /// "reset to first-run setup" that puts an instance back on the
     /// walkthrough. Plugin data and media connections are left alone.

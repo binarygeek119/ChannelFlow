@@ -97,21 +97,92 @@ pub fn router(
         .route("/api/connections", get(list_connections).post(create_connection))
         .route("/api/connections/{id}", put(update_connection).delete(delete_connection))
         .route("/live/{asset}", get(live_pending))
+        .fallback(spa_fallback)
         .with_state(state.clone());
     for (id, plugin_router) in plugin_routers {
         app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
     }
-    app.layer(middleware::from_fn_with_state(state, require_auth))
+    app.layer(middleware::from_fn_with_state(state.clone(), gate_setup))
+        .layer(middleware::from_fn_with_state(state, require_auth))
         .layer(middleware::from_fn(no_store))
-        .fallback(spa_fallback)
+}
+
+/// The walkthrough runs once. After that the server itself refuses to serve
+/// it: `/` and `/first-time/*` redirect to `/webui/guide`. Before setup, the
+/// app URLs redirect to `/first-time`. The page must not make this choice —
+/// a stale script doing it is what looped people back to the walkthrough.
+async fn gate_setup(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_string();
+    if let Some(response) = setup_redirect(&state, &path).await {
+        return response;
+    }
+    next.run(request).await
+}
+
+/// Where this path belongs, if it doesn't belong where it was requested.
+/// `None` means serve the page. Setup complete never serves the walkthrough;
+/// setup incomplete never serves the app.
+async fn setup_redirect(state: &AppState, path: &str) -> Option<Response> {
+    if path.starts_with("/api/") || is_static_asset(path) {
+        return None;
+    }
+    let setup_done = setup_is_done(state).await;
+    let walkthrough = path == "/first-time" || path.starts_with("/first-time/");
+    let app = path == "/webui" || path.starts_with("/webui/");
+    if setup_done && (walkthrough || path == "/" || path == "/webui" || path == "/webui/") {
+        return Some(redirect_to("/webui/guide"));
+    }
+    if !setup_done && (app || path == "/") {
+        return Some(redirect_to("/first-time"));
+    }
+    None
+}
+
+async fn setup_is_done(state: &AppState) -> bool {
+    if state.store.has_setup_marker() {
+        return true;
+    }
+    match state.store.auth_record().await {
+        Ok(Some(record)) if record.setup_complete => {
+            let _ = state.store.write_setup_marker();
+            true
+        }
+        _ => false,
+    }
+}
+
+fn is_static_asset(path: &str) -> bool {
+    matches!(
+        path,
+        "/app.css"
+            | "/app.js"
+            | "/logo.png"
+            | "/favicon.ico"
+            | "/favicon-32x32.png"
+            | "/favicon-16x16.png"
+            | "/apple-touch-icon.png"
+    ) || path.starts_with("/live/")
+}
+
+fn redirect_to(path: &str) -> Response {
+    let mut response = axum::response::Redirect::temporary(path).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// SPA fallback: any path that isn't the JSON API serves the UI document, so
-/// every app tab and every walkthrough step is deep-linkable at its own URL
-/// (e.g. `/guide`, `/first-time/database`). Unknown API paths still 404.
-async fn spa_fallback(uri: Uri) -> Response {
-    if uri.path().starts_with("/api/") {
+/// every app tab and every walkthrough step is deep-linkable. This is also
+/// where `/first-time/welcome` and `/webui/guide` are decided — the layer
+/// above does not run for the fallback.
+async fn spa_fallback(State(state): State<AppState>, uri: Uri) -> Response {
+    let path = uri.path();
+    if path.starts_with("/api/") {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
+    }
+    if let Some(response) = setup_redirect(&state, path).await {
+        return response;
     }
     index().await
 }
@@ -272,6 +343,7 @@ async fn logout(State(state): State<AppState>) -> Result<Json<serde_json::Value>
 async fn reset_setup(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     state.store.reset_setup().await?;
     state.store.clear_session().await?;
+    state.store.clear_setup_marker()?;
     tracing::info!("reset setup — instance will run first-boot again");
     Ok(Json(json!({ "ok": true })))
 }
@@ -303,6 +375,9 @@ async fn setup(
         setup_complete: true,
     };
     state.store.save_auth_record(&record).await?;
+    // The walkthrough is a one-time thing. This file is what later page loads
+    // check first, so a completed install is never sent back through setup.
+    state.store.write_setup_marker()?;
     Ok(Json(json!({ "ok": true })))
 }
 

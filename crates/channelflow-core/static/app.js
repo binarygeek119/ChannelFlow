@@ -1772,7 +1772,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "23";
+const UI_BUILD = "24";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1805,31 +1805,23 @@ async function fetchStateWithRetry() {
 
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
-  // The setup walkthrough lives under /first-time (each step at its own path).
-  // Until setup completes, any other URL funnels there; once it does the
-  // server auto-authenticates and the app opens directly - no login screen.
-  const atFirstTime =
-    location.pathname === "/first-time" || location.pathname.startsWith("/first-time/");
+  // The server already chose this page. A /webui URL is the app and must
+  // never be sent back to the walkthrough; a /first-time URL is the
+  // walkthrough. Second-guessing that from a state fetch is what looped the
+  // walkthrough after setup.
+  const path = location.pathname;
+  if (path === "/webui" || path.startsWith("/webui/")) {
+    showApp();
+    return;
+  }
+  if (path === "/first-time" || path.startsWith("/first-time/")) {
+    startOnboarding();
+    return;
+  }
   try {
     const state = await fetchStateWithRetry();
-    if (!state.setup_done) {
-      if (!atFirstTime) {
-        location.replace("/first-time");
-        return;
-      }
-      startOnboarding();
-      return;
-    }
-    if (atFirstTime || location.pathname === "/") {
-      location.assign("/webui/guide");
-      return;
-    }
-    showApp();
+    location.assign(state.setup_done ? "/webui/guide" : "/first-time");
   } catch (error) {
-    if (!atFirstTime) {
-      location.replace("/first-time");
-      return;
-    }
     showSetupUnreachable(error);
   }
 }

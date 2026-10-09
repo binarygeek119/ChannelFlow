@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=10">
+<link rel="stylesheet" href="/app.css?v=11">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -297,7 +297,7 @@
             next when one cannot be reached. <strong>New provider</strong> adds another.
           </p>
           <nav class="inner-tabs" id="ai-tabs" role="tablist" aria-label="AI providers"></nav>
-          <div class="settings-group" id="ai-form">
+          <form class="settings-group" onsubmit="return false">
             <div class="field">
               <label class="field-label" for="ai-name">Name</label>
               <input id="ai-name" type="text" autocomplete="off" spellcheck="false" placeholder="OpenAI">
@@ -337,7 +337,7 @@
               <input id="ai-voice" type="text" autocomplete="off" spellcheck="false" placeholder="nova">
               <small class="field-hint">The voice id to speak with.</small>
             </div>
-          </div>
+          </form>
           <div class="actions">
             <button type="button" id="ai-save" class="primary">Add provider</button>
             <button type="button" id="ai-test" class="ghost">Test AI</button>
@@ -484,12 +484,14 @@
       </p>
       <button type="button" id="forgot-generate" class="primary">Generate reset pin</button>
       <p class="hint" id="forgot-info"></p>
-      <label class="field-label" for="reset-pin">Reset pin</label>
-      <input id="reset-pin" type="text" autocomplete="off" spellcheck="false">
-      <label class="field-label" for="reset-pass">New password</label>
-      <input id="reset-pass" type="password" autocomplete="new-password">
-      <label class="field-label" for="reset-pass2">Confirm new password</label>
-      <input id="reset-pass2" type="password" autocomplete="new-password">
+      <form onsubmit="return false">
+        <label class="field-label" for="reset-pin">Reset pin</label>
+        <input id="reset-pin" type="text" autocomplete="off" spellcheck="false">
+        <label class="field-label" for="reset-pass">New password</label>
+        <input id="reset-pass" type="password" autocomplete="new-password">
+        <label class="field-label" for="reset-pass2">Confirm new password</label>
+        <input id="reset-pass2" type="password" autocomplete="new-password">
+      </form>
       <button type="button" id="reset-submit" class="primary">Set new password</button>
       <button type="button" id="reset-back" class="link">Back to login</button>
       <p class="hint bad" id="reset-note" hidden></p>
@@ -497,6 +499,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=10"></script>
+<script src="/app.js?v=11"></script>
 </body>
 </html>

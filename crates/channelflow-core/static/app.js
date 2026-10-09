@@ -1565,13 +1565,15 @@ const OB = [
   {
     next: () => !!obCompleted["account"],
     body: () =>
-      `<label class="field-label" for="ob-user">Username</label>
-       <input id="ob-user" type="text" autocomplete="username" spellcheck="false">
-       <label class="field-label" for="ob-pass">Password</label>
-       <input id="ob-pass" type="password" autocomplete="new-password">
-       <label class="field-label" for="ob-pass2">Confirm password</label>
-       <input id="ob-pass2" type="password" autocomplete="new-password">
-       <div class="ob-action"><button type="button" class="primary" id="ob-do">Create account</button></div>`,
+      `<form onsubmit="return false">
+        <label class="field-label" for="ob-user">Username</label>
+        <input id="ob-user" type="text" autocomplete="username" spellcheck="false">
+        <label class="field-label" for="ob-pass">Password</label>
+        <input id="ob-pass" type="password" autocomplete="new-password">
+        <label class="field-label" for="ob-pass2">Confirm password</label>
+        <input id="ob-pass2" type="password" autocomplete="new-password">
+        <div class="ob-action"><button type="button" class="primary" id="ob-do">Create account</button></div>
+      </form>`,
     after: () => attachObAccount(),
   },
   {
@@ -1806,7 +1808,7 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
 });
 
 async function boot() {
-  console.info("[channelflow] ui build v10");
+  console.info("[channelflow] ui build v11");
   try {
     const state = await request("/api/auth/state");
     if (!state.setup_done) {

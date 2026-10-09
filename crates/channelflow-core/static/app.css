@@ -30,6 +30,14 @@
 * {
     box-sizing: border-box;
 }
+
+/* The `hidden` attribute must always win. An author rule like
+   .auth-screen { display: flex } would otherwise keep the first-boot
+   walkthrough card painted on top of every page even when the attribute is
+   present - exactly the "always stuck on Welcome" everyone kept seeing. */
+[hidden] {
+    display: none !important;
+}
 html {
     color-scheme: dark;
 }

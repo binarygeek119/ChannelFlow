@@ -1773,7 +1773,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "25";
+const UI_BUILD = "26";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

@@ -43,6 +43,8 @@ curl -X POST http://localhost:8097/api/plugins/install \
   -d '{"url":"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json","id":"com.channelflow.ai"}'
 ```
 
+**Media sources** are plugins that implement the SDK's `MediaSource` contract on top of the usual `Plugin` lifecycle. The first is **Jellyfin**: a `jellyfin` connection form, library sync into its own tables (dedup by title:year:type), per-version file selection, posters under `<config>/Images/posters/…`, and `channelflow_plugin_v1` as its ABI entrypoint. The core registers these sources (so `POST /api/connections` only accepts known kinds), stores the connections, and drives sync in a later milestone.
+
 Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 
 **Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys.
@@ -83,6 +85,11 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/plugins/install` | download, verify, and stage a plugin version from a repository |
 | `GET` | `/api/plugins/installed` | the installs on disk, one record per plugin id |
 | `DELETE` | `/api/plugins/installed/{id}` | remove a plugin; `?drop_database=true` also erases its tables and key/value storage |
+| `GET` | `/api/mediasources` | the registered media-source plugins (type ids, connection fields, supported media) |
+| `GET` | `/api/connections` | the media-source connections |
+| `POST` | `/api/connections` | add a connection for a media source; `400` if the kind is not registered |
+| `PUT` | `/api/connections/{id}` | update a connection's config |
+| `DELETE` | `/api/connections/{id}` | remove a connection; a media source's rows cascade and its orphan posters are swept |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
 | `PUT` | `/api/plugins/com.channelflow.ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |

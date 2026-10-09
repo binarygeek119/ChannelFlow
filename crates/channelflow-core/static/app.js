@@ -1380,6 +1380,7 @@ function showTab(key) {
     els.tabAi,
     els.tabTranscode,
     els.tabLiveTv,
+    els.tabPlugins,
     els.tabPlaceholder,
   ].forEach((element) => {
     element.hidden = element.id !== panel;

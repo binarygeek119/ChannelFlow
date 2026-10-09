@@ -1,9 +1,8 @@
-//! How the core loads, lists, and drives plugins.
+//! How the core loads, lists, drives, and installs plugins.
 
 pub mod manager;
 pub mod registry;
-pub mod store_client;
+pub mod repo;
 
 pub use manager::PluginManager;
 pub use registry::PluginRegistry;
-pub use store_client::StoreClient;

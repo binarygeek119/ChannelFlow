@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::Deserialize;
@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::model::{Channel, NewChannel, UpdateChannel};
-use crate::plugin::{PluginManager, StoreClient};
+use crate::plugin::{repo, PluginManager};
 use crate::store::{Store, StoreError};
 
 /// Facts about the running process that only `main` can know: where the config
@@ -28,23 +28,23 @@ pub struct AboutInfo {
     pub started: std::time::Instant,
 }
 
-/// What handlers may reach: the channel store, the process facts above, and
-/// the loaded plugins. The outbound HTTP client lives in each plugin's own
-/// state now that features are plugins.
+/// What handlers may reach: the channel store, the process facts above, the
+/// loaded plugins, and the outbound HTTP client repository installs use. The
+/// same client is what each plugin's own state holds.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
     pub about: AboutInfo,
     pub plugins: Arc<Mutex<PluginManager>>,
-    pub store_client: Arc<StoreClient>,
+    pub http: reqwest::Client,
 }
 
 pub fn router(
     store: Store,
     about_info: AboutInfo,
     plugins: Arc<Mutex<PluginManager>>,
+    http: reqwest::Client,
     plugin_routers: Vec<(String, Router)>,
-    store_client: Arc<StoreClient>,
 ) -> Router {
     let mut app = Router::new()
         .route("/", get(index))
@@ -63,20 +63,21 @@ pub fn router(
             get(get_channel).put(update_channel).delete(delete_channel),
         )
         .route("/api/plugins", get(list_plugins))
-        .route("/api/plugins/store", get(store_plugins))
-        .route(
-            "/api/plugins/{id}/install",
-            put(install_plugin).delete(remove_plugin),
-        )
         .route("/api/plugins/{id}/update", put(update_plugin))
         .route("/api/plugins/{id}/enable", put(enable_plugin))
         .route("/api/plugins/{id}/disable", put(disable_plugin))
+        .route("/api/plugins/repositories", get(list_repositories).post(add_repository))
+        .route("/api/plugins/repositories/{id}", delete(remove_repository))
+        .route("/api/plugins/catalog", get(plugin_catalog))
+        .route("/api/plugins/install", post(install_plugin))
+        .route("/api/plugins/installed", get(list_installed))
+        .route("/api/plugins/installed/{id}", delete(uninstall_plugin))
         .route("/live/{asset}", get(live_pending))
         .with_state(AppState {
             store,
             about: about_info,
             plugins,
-            store_client,
+            http,
         });
     for (id, plugin_router) in plugin_routers {
         app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
@@ -101,7 +102,6 @@ impl IntoResponse for ApiError {
             StoreError::Invalid(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Plugin(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::PluginNotFound(_) => (StatusCode::NOT_FOUND, self.0.to_string()),
-            StoreError::Upstream(_) => (StatusCode::BAD_GATEWAY, self.0.to_string()),
             StoreError::Io(_) | StoreError::Json(_) | StoreError::Database(_) => {
                 tracing::error!(error = %self.0, "storage failure");
                 (
@@ -270,161 +270,103 @@ async fn list_plugins(
     Ok(Json(installed_view(&state).await?))
 }
 
-/// The Store tab: the repository's catalog, each plugin marked installed or
-/// not, bundled-in-this-build or not, with update status.
-async fn store_plugins(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let remote = state
-        .store_client
-        .fetch()
-        .await
-        .map_err(StoreError::Upstream)?;
-    let registry = state.store.plugin_registry().await?;
-    let base = env!("CARGO_PKG_VERSION");
-    let bundled = {
-        let manager = state.plugins.lock().await;
-        manager.catalog()
-    };
-
-    let plugins: Vec<serde_json::Value> = remote
-        .iter()
-        .map(|plugin| {
-            let latest = plugin.latest();
-            let latest_version = latest.map(|v| v.version.clone()).unwrap_or_default();
-            let compatible = latest
-                .map(|v| {
-                    channelflow_plugin_api::compatible(
-                        base,
-                        &v.min_base_version,
-                        &v.max_base_version,
-                    )
-                })
-                .unwrap_or(false);
-            let installed = registry.get(&plugin.id);
-            let update_available = installed
-                .map(|entry| version_is_newer(&latest_version, &entry.version))
-                .unwrap_or(false);
-            json!({
-                "id": plugin.id,
-                "name": plugin.name,
-                "description": plugin.description,
-                "owner": plugin.owner,
-                "category": plugin.category,
-                "homepage": plugin.homepage,
-                "image_url": plugin.image_url,
-                "latest_version": latest_version,
-                "compatible": compatible,
-                "installed": installed.is_some(),
-                "bundled": bundled.iter().any(|entry| entry["id"] == json!(plugin.id)),
-                "installed_version": installed.map(|entry| entry.version.clone()),
-                "update_available": update_available,
-            })
-        })
-        .collect();
-
-    Ok(Json(json!({
-        "source": state.store_client.url(),
-        "plugins": plugins,
-    })))
-}
-
-async fn install_plugin(
+/// Update an installed plugin to the newest version a repository offers.
+/// Compiled-in plugins update with ChannelFlow itself; a staged plugin is
+/// re-downloaded at the newer version.
+async fn update_plugin(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Only plugins compiled into this build can be installed today; the store
-    // still shows the rest. Dynamic loading is the milestone that lifts this.
-    let version = {
+    let bundled = {
         let manager = state.plugins.lock().await;
         manager
             .catalog()
             .into_iter()
             .find(|entry| entry["id"] == json!(id))
             .and_then(|entry| entry["version"].as_str().map(str::to_string))
+    };
+    let registry = state.store.plugin_registry().await?;
+    let current = registry
+        .get(&id)
+        .map(|entry| entry.version.clone())
+        .or(bundled.clone());
+    let Some(current) = current else {
+        return Err(StoreError::PluginNotFound(id).into());
+    };
+    let Some(latest) = newest_version(&state, &id).await? else {
+        return Ok(Json(json!({ "message": format!("no repository offers {id}") })));
+    };
+    if !version_is_newer(&latest, &current) {
+        return Ok(Json(json!({ "message": "already up to date" })));
     }
-    .ok_or_else(|| {
-        StoreError::Plugin(format!(
-            "{id} is not part of this build — dynamic plugin loading is not enabled yet"
+    if bundled.is_some() {
+        return Err(StoreError::Plugin(format!(
+            "plugins are compiled into ChannelFlow, so {id} updates with ChannelFlow, not on its own (latest is {latest})"
         ))
-    })?;
-
-    let mut registry = state.store.plugin_registry().await?;
-    registry.install(&id, &version);
-    state.store.save_plugin_registry(&registry).await?;
-    {
-        let mut manager = state.plugins.lock().await;
-        manager
-            .enable(&id)
-            .await
-            .map_err(|error| StoreError::Plugin(error.to_string()))?;
+        .into());
     }
+    let url = repository_for(&state, &id).await?;
+    let rid = repo::current_rid();
+    repo::install(
+        &state.http,
+        &state.store,
+        &url,
+        &id,
+        Some(&latest),
+        &rid,
+        env!("CARGO_PKG_VERSION"),
+    )
+    .await?;
     Ok(Json(installed_view(&state).await?))
 }
 
-async fn update_plugin(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let remote = state
-        .store_client
-        .fetch()
-        .await
-        .map_err(StoreError::Upstream)?;
-    let latest = remote
-        .iter()
-        .find(|plugin| plugin.id == id)
-        .and_then(|plugin| plugin.latest())
-        .map(|version| version.version.clone());
-    let registry = state.store.plugin_registry().await?;
-    let installed = registry
-        .get(&id)
-        .ok_or_else(|| StoreError::PluginNotFound(id.clone()))?;
-    match latest {
-        Some(latest) if version_is_newer(&latest, &installed.version) => {
-            Err(StoreError::Plugin(format!(
-                "plugins are compiled into ChannelFlow, so {id} cannot update itself from {}. Update ChannelFlow to get {latest}.",
-                installed.version
-            ))
-            .into())
+/// The newest version any registered repository offers for a plugin.
+async fn newest_version(state: &AppState, id: &str) -> Result<Option<String>, ApiError> {
+    let mut newest: Option<String> = None;
+    for url in repository_urls(state).await? {
+        let Ok(entries) = repo::fetch_catalog(&state.http, &url).await else {
+            continue;
+        };
+        if let Some(entry) = entries.iter().find(|entry| entry.id == id) {
+            for version in &entry.versions {
+                if newest
+                    .as_deref()
+                    .map_or(true, |current| version_is_newer(&version.version, current))
+                {
+                    newest = Some(version.version.clone());
+                }
+            }
         }
-        _ => Ok(Json(json!({ "message": "already up to date" }))),
     }
+    Ok(newest)
+}
+
+/// The repository a plugin comes from, for a reinstall.
+async fn repository_for(state: &AppState, id: &str) -> Result<String, ApiError> {
+    for url in repository_urls(state).await? {
+        if let Ok(entries) = repo::fetch_catalog(&state.http, &url).await {
+            if entries.iter().any(|entry| entry.id == id) {
+                return Ok(url);
+            }
+        }
+    }
+    Err(StoreError::Plugin(format!("no repository offers {id}")).into())
+}
+
+async fn repository_urls(state: &AppState) -> Result<Vec<String>, ApiError> {
+    Ok(state
+        .store
+        .repo_list()
+        .await?
+        .iter()
+        .filter_map(|repo| repo["url"].as_str().map(str::to_string))
+        .collect())
 }
 
 #[derive(Deserialize)]
 struct RemoveQuery {
     #[serde(default)]
     drop_database: bool,
-}
-
-async fn remove_plugin(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Query(query): Query<RemoveQuery>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let mut registry = state.store.plugin_registry().await?;
-    if !registry.remove(&id) {
-        return Err(StoreError::PluginNotFound(id).into());
-    }
-    state.store.save_plugin_registry(&registry).await?;
-    {
-        let mut manager = state.plugins.lock().await;
-        let _ = manager.disable(&id).await;
-    }
-    // Dropping is the destructive choice: it erases the plugin's tables and
-    // key/value storage. Keeping leaves them for a reinstall.
-    let dropped = if query.drop_database {
-        state.store.drop_plugin_data(&id).await?
-    } else {
-        0
-    };
-    Ok(Json(json!({
-        "removed": id,
-        "dropped": dropped,
-        "kept": !query.drop_database,
-        "plugins": installed_view(&state).await?["plugins"],
-    })))
 }
 
 async fn enable_plugin(
@@ -463,12 +405,17 @@ async fn disable_plugin(
     Ok(Json(installed_view(&state).await?))
 }
 
-/// The installed plugins, each joined with the manager's view of it.
+/// The installed plugins: everything in the registry (the compiled-in set,
+/// enabled or not) plus any staged install a repository delivered that is not
+/// in the registry, tagged so the UI can tell them apart.
 async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError> {
     let registry = state.store.plugin_registry().await?;
-    let manager = state.plugins.lock().await;
-    let catalog = manager.catalog();
-    let plugins: Vec<serde_json::Value> = registry
+    let staged = state.store.installed_list().await?;
+    let catalog = {
+        let manager = state.plugins.lock().await;
+        manager.catalog()
+    };
+    let mut plugins: Vec<serde_json::Value> = registry
         .installed
         .iter()
         .map(|installed| {
@@ -479,6 +426,7 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "version": installed.version,
                     "enabled": installed.enabled,
                     "bundled": true,
+                    "staged": false,
                     "name": entry["name"],
                     "category": entry["category"],
                     "description": entry["description"],
@@ -491,6 +439,7 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "version": installed.version,
                     "enabled": installed.enabled,
                     "bundled": false,
+                    "staged": false,
                     "name": installed.id,
                     "category": "",
                     "description": "This plugin is not part of this build.",
@@ -501,6 +450,29 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
             }
         })
         .collect();
+
+    // Staged downloads a repository delivered and the registry does not know
+    // about yet — they run once the dynamic loader arrives.
+    for record in &staged {
+        let Some(id) = record["id"].as_str() else { continue };
+        if registry.get(id).is_some() {
+            continue;
+        }
+        plugins.push(json!({
+            "id": id,
+            "version": record["version"],
+            "enabled": false,
+            "bundled": false,
+            "staged": true,
+            "name": id,
+            "category": record["category"].as_str().unwrap_or(""),
+            "description": "Downloaded and staged; it starts once dynamic loading lands.",
+            "health": serde_json::Value::Null,
+            "permissions": [],
+            "ui_contributions": [],
+        }));
+    }
+
     Ok(json!({ "plugins": plugins }))
 }
 
@@ -513,6 +485,199 @@ fn version_is_newer(candidate: &str, current: &str) -> bool {
         (Ok(candidate), Ok(current)) => candidate > current,
         _ => false,
     }
+}
+
+// ── plugin repositories and the install catalog ─────────────────────────
+
+/// The registered plugin-repository URLs, the Jellyfin-style install source.
+async fn list_repositories(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let repositories = state.store.repo_list().await?;
+    Ok(Json(json!({ "repositories": repositories })))
+}
+
+#[derive(serde::Deserialize)]
+struct AddRepository {
+    url: String,
+}
+
+/// Register a repository. The manifest is fetched once before the URL is
+/// accepted, so a plain wrong URL cannot be saved.
+async fn add_repository(
+    State(state): State<AppState>,
+    Json(input): Json<AddRepository>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let url = input.url.trim().to_string();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(StoreError::Plugin(
+            "repository URL must start with http:// or https://".to_string(),
+        )
+        .into());
+    }
+    repo::fetch_catalog(&state.http, &url).await?;
+    let repositories = state.store.repo_add(&url).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "repositories": repositories }))))
+}
+
+/// Forget a repository by its record id.
+async fn remove_repository(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let repositories = state.store.repo_remove(&id).await?;
+    Ok(Json(json!({ "repositories": repositories })))
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogQuery {
+    url: Option<String>,
+}
+
+/// Everything installable across the registered repositories (or one
+/// repository when `?url=` is given): each plugin with its versions, the rids
+/// each version ships, and whether any version runs on this base. A
+/// repository that cannot be fetched is reported in `errors`, not fatal.
+async fn plugin_catalog(
+    State(state): State<AppState>,
+    Query(query): Query<CatalogQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let base = env!("CARGO_PKG_VERSION");
+    let urls: Vec<String> = match query.url {
+        Some(url) => vec![url],
+        None => state
+            .store
+            .repo_list()
+            .await?
+            .iter()
+            .filter_map(|repo| repo["url"].as_str().map(str::to_string))
+            .collect(),
+    };
+    let mut plugins = Vec::new();
+    let mut errors = Vec::new();
+    for url in urls {
+        match repo::fetch_catalog(&state.http, &url).await {
+            Ok(entries) => {
+                let view = repo::catalog_view(&url, &entries, base);
+                if let Some(list) = view["plugins"].as_array() {
+                    plugins.extend(list.iter().cloned());
+                }
+            }
+            Err(error) => {
+                tracing::warn!(repository = %url, error = %error, "repository catalog fetch failed");
+                errors.push(json!({ "repository": url, "error": error.to_string() }));
+            }
+        }
+    }
+    Ok(Json(json!({ "plugins": plugins, "errors": errors })))
+}
+
+#[derive(serde::Deserialize)]
+struct InstallRequest {
+    /// The repository URL the plugin comes from.
+    url: String,
+    /// The manifest's plugin id, e.g. `com.channelflow.ai`.
+    id: String,
+    /// Pin a version; when absent the newest compatible version is installed.
+    version: Option<String>,
+    /// Override the host's platform rid, for custom staging.
+    rid: Option<String>,
+}
+
+/// Install a plugin. A plugin that is part of this build is enabled in place
+/// (nothing to download); one that is not is fetched from the repository,
+/// verified, and staged — the dynamic loader runs it once that lands.
+async fn install_plugin(
+    State(state): State<AppState>,
+    Json(input): Json<InstallRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let bundled = {
+        let manager = state.plugins.lock().await;
+        manager
+            .catalog()
+            .into_iter()
+            .find(|entry| entry["id"] == json!(input.id))
+            .and_then(|entry| entry["version"].as_str().map(str::to_string))
+    };
+
+    if let Some(version) = bundled {
+        let mut registry = state.store.plugin_registry().await?;
+        registry.install(&input.id, &version);
+        state.store.save_plugin_registry(&registry).await?;
+        {
+            let mut manager = state.plugins.lock().await;
+            manager
+                .enable(&input.id)
+                .await
+                .map_err(|error| StoreError::Plugin(error.to_string()))?;
+        }
+        return Ok(Json(installed_view(&state).await?));
+    }
+
+    let rid = input.rid.unwrap_or_else(repo::current_rid);
+    let installed = repo::install(
+        &state.http,
+        &state.store,
+        &input.url,
+        &input.id,
+        input.version.as_deref(),
+        &rid,
+        env!("CARGO_PKG_VERSION"),
+    )
+    .await?;
+    Ok(Json(json!({ "installed": installed, "rid": rid })))
+}
+
+/// The installs on disk, one record per plugin id.
+async fn list_installed(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let installed = state.store.installed_list().await?;
+    Ok(Json(json!({ "installed": installed })))
+}
+
+/// Remove a plugin: take it out of the registry and disable it if it is part
+/// of this build, drop any staged install, and — when `?drop_database=true` —
+/// erase the plugin's tables and key/value storage too.
+async fn uninstall_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<RemoveQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut removed_registry = false;
+    {
+        let mut registry = state.store.plugin_registry().await?;
+        if registry.get(&id).is_some() {
+            registry.remove(&id);
+            state.store.save_plugin_registry(&registry).await?;
+            removed_registry = true;
+            let mut manager = state.plugins.lock().await;
+            let _ = manager.disable(&id).await;
+        }
+    }
+    let staged = state
+        .store
+        .installed_list()
+        .await?
+        .iter()
+        .any(|record| record["id"].as_str() == Some(id.as_str()));
+    if staged {
+        let _ = repo::uninstall(&state.store, &id).await;
+    }
+    if !removed_registry && !staged {
+        return Err(StoreError::PluginNotFound(id).into());
+    }
+    let dropped = if query.drop_database {
+        state.store.drop_plugin_data(&id).await?
+    } else {
+        0
+    };
+    Ok(Json(json!({
+        "removed": id,
+        "dropped": dropped,
+        "kept": !query.drop_database,
+        "plugins": installed_view(&state).await?["plugins"],
+    })))
 }
 
 /// The streaming paths the Live TV page advertises.
@@ -648,8 +813,7 @@ mod tests {
             listen_port: 0,
             started: std::time::Instant::now(),
         };
-        let store_client = Arc::new(StoreClient::new(http.clone(), "http://localhost/manifest.json".to_string()));
-        let _ = router(store, about, plugins, routers, store_client);
+        let _ = router(store, about, plugins, http, routers);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

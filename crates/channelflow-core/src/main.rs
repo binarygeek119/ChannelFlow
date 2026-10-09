@@ -14,7 +14,7 @@ use clap::Parser;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
-use crate::plugin::{PluginManager, PluginRegistry, StoreClient};
+use crate::plugin::{PluginManager, PluginRegistry};
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
@@ -168,12 +168,18 @@ async fn main() -> Result<()> {
     let plugin_routers = manager.routers();
     let plugins = Arc::new(Mutex::new(manager));
 
-    // The plugin store: the ChannelFlow-Plugins repository's manifest.json.
-    let store_url = std::env::var("CHANNELFLOW_PLUGIN_STORE").unwrap_or_else(|_| {
-        "https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json"
-            .to_string()
-    });
-    let store_client = Arc::new(StoreClient::new(http.clone(), store_url));
+    // The plugin store: seed the ChannelFlow-Plugins repository so the Store
+    // tab has something to show, unless the operator points it elsewhere.
+    if store.repo_list().await?.is_empty() {
+        let url = std::env::var("CHANNELFLOW_PLUGIN_STORE").unwrap_or_else(|_| {
+            "https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json"
+                .to_string()
+        });
+        match store.repo_add(&url).await {
+            Ok(_) => tracing::info!(repository = %url, "registered the default plugin repository"),
+            Err(error) => tracing::warn!(repository = %url, %error, "could not register the default plugin repository"),
+        }
+    }
 
     // ── server ───────────────────────────────────────────────────────────────
     let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
@@ -198,7 +204,7 @@ async fn main() -> Result<()> {
     };
     axum::serve(
         listener,
-        api::router(store, about, plugins, plugin_routers, store_client),
+        api::router(store, about, plugins, http, plugin_routers),
     )
     .await?;
     Ok(())

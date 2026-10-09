@@ -1136,8 +1136,11 @@ function renderInstalled(plugins) {
 async function loadPluginStore() {
   els.pluginsStoreNote.textContent = "Loading the plugin store…";
   try {
-    const data = await request("/api/plugins/store");
-    renderStore(data);
+    const [catalog, installed] = await Promise.all([
+      request("/api/plugins/catalog"),
+      request("/api/plugins"),
+    ]);
+    renderStore(catalog, installed.plugins);
   } catch (error) {
     els.pluginsStoreGrid.innerHTML = "";
     els.pluginsStoreNote.textContent = "";
@@ -1146,9 +1149,13 @@ async function loadPluginStore() {
   }
 }
 
-function renderStore(data) {
-  els.pluginsStoreNote.textContent = `Source: ${data.source}`;
-  const available = data.plugins.filter((plugin) => !plugin.installed);
+function renderStore(catalog, installed) {
+  const installedIds = new Set(installed.map((plugin) => plugin.id));
+  const available = catalog.plugins.filter((plugin) => !installedIds.has(plugin.id));
+  const errors = catalog.errors || [];
+  els.pluginsStoreNote.textContent = errors.length
+    ? `Some repositories could not be reached: ${errors.map((e) => e.repository).join(", ")}`
+    : "";
   els.pluginsStoreEmpty.hidden = available.length > 0;
   els.pluginsStoreEmpty.textContent = available.length
     ? ""
@@ -1158,14 +1165,16 @@ function renderStore(data) {
       const banner = plugin.image_url
         ? `<img class="plugin-banner" src="${escapeHtml(plugin.image_url)}" alt="">`
         : `<div class="plugin-banner plugin-banner-empty"></div>`;
-      const install = plugin.bundled && plugin.compatible
-        ? `<button type="button" class="primary" data-store="${escapeHtml(plugin.id)}">Install</button>`
-        : `<button type="button" class="ghost" disabled title="Not available in this build yet">Unavailable</button>`;
+      const versions = plugin.versions || [];
+      const latest = versions.length ? versions[versions.length - 1].version : "";
+      const install = plugin.compatible
+        ? `<button type="button" class="primary" data-store="${escapeHtml(plugin.id)}" data-url="${escapeHtml(plugin.repository)}" data-version="${escapeHtml(latest)}">Install</button>`
+        : `<button type="button" class="ghost" disabled title="No version runs on this base">Incompatible</button>`;
       return `<article class="plugin-card">
         ${banner}
         <div class="plugin-card-body">
           <h4>${escapeHtml(plugin.name)}</h4>
-          <p class="plugin-card-meta">${escapeHtml(plugin.category || "plugin")} · v${escapeHtml(plugin.latest_version)} · ${escapeHtml(plugin.owner || "")}</p>
+          <p class="plugin-card-meta">${escapeHtml(plugin.category || "plugin")} · v${escapeHtml(latest)} · ${escapeHtml(plugin.owner || "")}</p>
           <p class="channel-desc">${escapeHtml(plugin.description)}</p>
           <div class="plugin-card-actions">${install}</div>
         </div>
@@ -1188,7 +1197,7 @@ async function removePlugin(dropDatabase) {
   const id = pluginRemoveId;
   els.pluginRemoveNote.textContent = "Removing…";
   try {
-    await request(`/api/plugins/${encodeURIComponent(id)}/install?drop_database=${dropDatabase}`, {
+    await request(`/api/plugins/installed/${encodeURIComponent(id)}?drop_database=${dropDatabase}`, {
       method: "DELETE",
     });
     els.pluginRemove.close();
@@ -1199,10 +1208,14 @@ async function removePlugin(dropDatabase) {
   }
 }
 
-async function installPlugin(id) {
+async function installPlugin(id, url, version) {
   try {
-    await request(`/api/plugins/${encodeURIComponent(id)}/install`, { method: "PUT" });
+    await request("/api/plugins/install", {
+      method: "POST",
+      body: JSON.stringify({ id, url, version: version || undefined }),
+    });
     loadPluginStore();
+    loadInstalledPlugins();
   } catch (error) {
     els.pluginsStoreEmpty.hidden = false;
     els.pluginsStoreEmpty.textContent = error.message || "Could not install the plugin.";
@@ -1239,7 +1252,7 @@ els.pluginsRows.addEventListener("click", (event) => {
 
 els.pluginsStoreGrid.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-store]");
-  if (button) installPlugin(button.dataset.store);
+  if (button) installPlugin(button.dataset.store, button.dataset.url, button.dataset.version);
 });
 
 els.pluginRemoveDrop.addEventListener("click", () => removePlugin(true));

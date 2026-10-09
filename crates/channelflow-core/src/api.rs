@@ -201,50 +201,71 @@ async fn no_store(request: Request, next: Next) -> Response {
     response
 }
 
-/// Gate every `/api/*` request behind the session once setup has completed.
-/// Until then the walkthrough needs the API open; the auth endpoints and the
-/// health check stay public either way, as do the static assets.
+/// One session-create at a time, so the first burst of API calls after a page
+/// load all receive the same cookie instead of overwriting each other.
+static SESSION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn ensure_session(store: &Store) -> Result<String, StoreError> {
+    let _guard = SESSION_LOCK.lock().await;
+    if let Some(token) = store.session_token().await? {
+        return Ok(token);
+    }
+    let token = auth::new_secret();
+    store.save_session(&token).await?;
+    Ok(token)
+}
+
+fn session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookie| {
+            cookie.split(';').find_map(|part| {
+                part.trim()
+                    .strip_prefix("channelflow_session=")
+                    .map(str::to_string)
+            })
+        })
+}
+
+/// Until setup finishes the API stays open so the walkthrough can connect the
+/// database and install plugins. After that there is no login screen: a
+/// request without a session is given one and allowed through, never rejected
+/// with "log in to use the web UI".
 async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
     if !path.starts_with("/api/")
         || path.starts_with("/api/auth/")
         || path == "/api/health"
+        || path.starts_with("/api/setup/")
     {
         return next.run(request).await;
     }
-    let setup_done = match state.store.auth_record().await {
-        Ok(Some(record)) => record.setup_complete,
-        _ => false,
-    };
-    if !setup_done {
+    if !setup_is_done(&state).await {
         return next.run(request).await;
     }
-    let token = request
-        .headers()
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookie| {
-            cookie
-                .split(';')
-                .find_map(|part| {
-                    part.trim()
-                        .strip_prefix("channelflow_session=")
-                        .map(str::to_string)
-                })
-        });
-    let valid = match (token, state.store.session_token().await) {
+    let cookie = session_cookie(request.headers());
+    let valid = match (cookie, state.store.session_token().await) {
         (Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
         _ => false,
     };
     if valid {
-        next.run(request).await
-    } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "log in to use the web UI" })),
-        )
-            .into_response()
+        return next.run(request).await;
     }
+    let token = match ensure_session(&state.store).await {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::warn!(%error, "could not establish a session; allowing the request");
+            return next.run(request).await;
+        }
+    };
+    let mut response = next.run(request).await;
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax"
+    )) {
+        response.headers_mut().insert(header::SET_COOKIE, value);
+    }
+    response
 }
 
 // ── web UI auth ────────────────────────────────────────────────────────────

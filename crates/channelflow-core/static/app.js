@@ -100,6 +100,13 @@ function escapeHtml(value) {
 }
 
 async function request(path, options = {}) {
+  // Cache-bust every GET so a stale cached answer can never decide what the
+  // page shows — not least `/api/auth/state`, which chooses the walkthrough
+  // vs the login screen. Queries other code builds are left alone.
+  const method = String(options.method || "GET").toUpperCase();
+  if (method === "GET" && !String(path).includes("?")) {
+    path = `${path}?_=${Date.now()}`;
+  }
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,

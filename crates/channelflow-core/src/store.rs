@@ -646,7 +646,9 @@ impl PluginDatabase for PgPluginDatabase {
     }
 
     async fn fetch(&self, sql: &str) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
-        let wrapped = format!("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t");
+        // A data-modifying CTE (`WITH t AS (INSERT … RETURNING …)`) lets the
+        // same wrapper serve SELECTs and RETURNING statements alike.
+        let wrapped = format!("WITH t AS ({sql}) SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM t");
         let row = sqlx::query(&wrapped)
             .fetch_one(&self.pool)
             .await
@@ -666,7 +668,7 @@ impl PluginDatabase for PgPluginDatabase {
         sql: &str,
         params: &[serde_json::Value],
     ) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
-        let wrapped = format!("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t");
+        let wrapped = format!("WITH t AS ({sql}) SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM t");
         let mut query = sqlx::query(&wrapped);
         for param in params {
             query = bind_param(query, param);

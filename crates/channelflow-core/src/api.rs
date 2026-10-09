@@ -130,7 +130,10 @@ async fn setup_redirect(state: &AppState, path: &str) -> Option<Response> {
     let walkthrough = path == "/first-time" || path.starts_with("/first-time/");
     let app = path == "/webui" || path.starts_with("/webui/");
     if setup_done && (walkthrough || path == "/" || path == "/webui" || path == "/webui/") {
-        return Some(redirect_to("/webui/guide"));
+        // ?ready=1 is a different cache key from /webui/guide. A browser that
+        // cached the old "not set up yet" redirect of /webui/guide must not
+        // be able to bounce a finished install back into the walkthrough.
+        return Some(redirect_to("/webui/guide?ready=1"));
     }
     if !setup_done && (app || path == "/") {
         return Some(redirect_to("/first-time"));
@@ -165,11 +168,20 @@ fn is_static_asset(path: &str) -> bool {
 }
 
 fn redirect_to(path: &str) -> Response {
-    let mut response = axum::response::Redirect::temporary(path).into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
+    // 302, not 307. A 307 can be cached, and a cached "go to the walkthrough"
+    // redirect is exactly the loop that kept sending finished installs back
+    // to /first-time/welcome.
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, path)
+        .header(
+            header::CACHE_CONTROL,
+            "no-store, no-cache, must-revalidate, max-age=0",
+        )
+        .header(header::PRAGMA, "no-cache")
+        .header(header::EXPIRES, "0")
+        .body(axum::body::Body::empty())
+        .unwrap_or_else(|_| StatusCode::FOUND.into_response())
 }
 
 /// SPA fallback: any path that isn't the JSON API serves the UI document, so

@@ -1745,7 +1745,7 @@ document.getElementById("ob-next").addEventListener("click", () => {
     // Final step: a real navigation to /. boot() sees setup complete and
     // opens the app. (pushState would leave the address bar on /first-time,
     // and the next load would bounce back into the walkthrough.)
-    location.assign("/webui/guide");
+    location.assign("/webui/guide?ready=1");
   }
 });
 
@@ -1764,6 +1764,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   btn.textContent = "Starting over…";
   try {
     await request("/api/auth/reset-setup", { method: "POST" });
+    try { localStorage.removeItem("cf_setup_done"); } catch (e) {}
     location.replace("/first-time");
   } catch (error) {
     startOverArmed = false;
@@ -1772,7 +1773,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "24";
+const UI_BUILD = "25";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1803,27 +1804,49 @@ async function fetchStateWithRetry() {
   throw lastError;
 }
 
+const APP_HOME = "/webui/guide?ready=1";
+
+function rememberSetup(done) {
+  try {
+    if (done) localStorage.setItem("cf_setup_done", "1");
+    return localStorage.getItem("cf_setup_done") === "1";
+  } catch (error) {
+    return !!done;
+  }
+}
+
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
-  // The server already chose this page. A /webui URL is the app and must
-  // never be sent back to the walkthrough; a /first-time URL is the
-  // walkthrough. Second-guessing that from a state fetch is what looped the
-  // walkthrough after setup.
   const path = location.pathname;
-  if (path === "/webui" || path.startsWith("/webui/")) {
+  const onApp = path === "/webui" || path.startsWith("/webui/");
+  let state = null;
+  try {
+    state = await fetchStateWithRetry();
+  } catch (error) {
+    state = null;
+  }
+  const done = (state && state.setup_done) || (state === null && rememberSetup(false));
+  if (state && state.setup_done) rememberSetup(true);
+  // A finished install never renders the walkthrough, whatever URL we landed
+  // on. Leaving via a query the browser has not cached a redirect for is what
+  // breaks the /webui/guide ↔ /first-time loop.
+  if (done) {
+    if (!onApp || path === "/webui" || path === "/webui/") {
+      location.replace(APP_HOME);
+      return;
+    }
     showApp();
     return;
   }
-  if (path === "/first-time" || path.startsWith("/first-time/")) {
-    startOnboarding();
+  if (onApp && state && state.setup_done === false) {
+    location.replace("/first-time");
     return;
   }
-  try {
-    const state = await fetchStateWithRetry();
-    location.assign(state.setup_done ? "/webui/guide" : "/first-time");
-  } catch (error) {
-    showSetupUnreachable(error);
+  if (onApp) {
+    showApp();
+    return;
   }
+  startOnboarding();
 }
 
 boot();

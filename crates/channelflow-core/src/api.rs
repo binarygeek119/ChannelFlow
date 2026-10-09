@@ -154,11 +154,28 @@ async fn require_auth(State(state): State<AppState>, request: Request, next: Nex
 /// app accordingly.
 async fn auth_state(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let record = state.store.auth_record().await?;
-    let session = state.store.session_token().await?;
     let setup_done = record.as_ref().map(|r| r.setup_complete).unwrap_or(false);
-    let authenticated = setup_done && session.is_some();
+    let authenticated = setup_done && {
+        let cookie = headers
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|cookie| {
+                cookie
+                    .split(';')
+                    .find_map(|part| {
+                        part.trim()
+                            .strip_prefix("channelflow_session=")
+                            .map(str::to_string)
+                    })
+            });
+        match (cookie, state.store.session_token().await) {
+            (Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
+            _ => false,
+        }
+    };
     Ok(Json(json!({
         "setup_done": setup_done,
         "authenticated": authenticated,

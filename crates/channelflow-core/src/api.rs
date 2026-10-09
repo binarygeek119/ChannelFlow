@@ -440,11 +440,10 @@ async fn setup_database(
         )
         .into());
     }
-    state
-        .store
-        .connect_database(&url)
-        .await
-        .map_err(|error| StoreError::Plugin(format!("Postgres: {error}")))?;
+    if let Err(error) = state.store.connect_database(&url).await {
+        tracing::warn!(%error, "the database step could not connect");
+        return Err(StoreError::Plugin(format!("Postgres: {error}")).into());
+    }
     state.store.save_database_url(&url).await?;
     Ok(Json(json!({ "ok": true, "database": "postgres" })))
 }

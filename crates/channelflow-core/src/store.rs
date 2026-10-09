@@ -505,6 +505,15 @@ impl Store {
         self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await
     }
 
+    /// Forget the account, session, and installed-plugin registry — the
+    /// "reset to first-run setup" that puts an instance back on the
+    /// walkthrough. Plugin data and media connections are left alone.
+    pub async fn reset_setup(&self) -> Result<(), StoreError> {
+        self.plugin_delete(CORE_NAMESPACE, AUTH_KEY).await?;
+        self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await?;
+        self.plugin_delete(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY).await
+    }
+
     /// The active password-reset pin, issued by `forgot`.
     pub async fn reset_pin(&self) -> Result<Option<ResetPin>, StoreError> {
         match self.plugin_get(CORE_NAMESPACE, RESET_KEY).await? {

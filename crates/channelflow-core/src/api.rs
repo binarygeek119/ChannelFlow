@@ -77,6 +77,7 @@ pub fn router(
         .route("/api/auth/setup", post(setup))
         .route("/api/auth/forgot", post(forgot))
         .route("/api/auth/reset", post(reset_password))
+        .route("/api/auth/reset-setup", post(reset_setup))
         .route("/api/setup/database", post(setup_database))
         .route("/api/channels", get(list_channels).post(create_channel))
         .route(
@@ -236,6 +237,16 @@ async fn login(
 
 async fn logout(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     state.store.clear_session().await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// Forget the account (and session and install registry) so the instance runs
+/// the first-boot walkthrough again. Meant for the login screen's "first
+/// time?" reset; plugin data and connections are kept.
+async fn reset_setup(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    state.store.reset_setup().await?;
+    state.store.clear_session().await?;
+    tracing::info!("reset setup — instance will run first-boot again");
     Ok(Json(json!({ "ok": true })))
 }
 

@@ -68,6 +68,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/auth/setup` | create the Web UI admin account and finish setup |
 | `POST` | `/api/auth/forgot` | write a random reset pin to `<config>/reset-<timestamp>.txt`; one per 10 minutes |
 | `POST` | `/api/auth/reset` | match the pin from that file and set a new password |
+| `POST` | `/api/auth/reset-setup` | forget the account, session, and install registry so the first-boot walkthrough runs again |
 | `POST` | `/api/setup/database` | connect to Postgres, import the config directory, and switch the running store to it |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |

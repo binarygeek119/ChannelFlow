@@ -1747,6 +1747,20 @@ function showLoginView() {
 document.getElementById("forgot-link").addEventListener("click", showForgot);
 document.getElementById("reset-back").addEventListener("click", showLoginView);
 
+document.getElementById("reset-setup-link").addEventListener("click", async () => {
+  const confirmed = window.confirm(
+    "Reset ChannelFlow back to the first-run setup? Your account, session and the installed-plugins list will be cleared (channels and plugin data are kept). You will run the setup walkthrough again."
+  );
+  if (!confirmed) return;
+  setLoginNote("");
+  try {
+    await request("/api/auth/reset-setup", { method: "POST" });
+    location.reload();
+  } catch (error) {
+    setLoginNote(error.message || "Could not reset the instance.", true);
+  }
+});
+
 document.getElementById("forgot-generate").addEventListener("click", async () => {
   document.getElementById("forgot-generate").disabled = true;
   document.getElementById("forgot-info").textContent = "Writing a reset pin…";

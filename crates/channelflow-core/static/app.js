@@ -14,7 +14,6 @@ const els = {
   save: $("save"),
   cancel: $("cancel"),
   error: $("error"),
-  status: $("status"),
   pageTitle: $("page-title"),
   pageSubtitle: $("page-subtitle"),
   tabChannels: $("tab-channels"),
@@ -82,6 +81,7 @@ const els = {
 let channels = [];
 
 function setStatus(text, kind) {
+  if (!els.status) return;
   els.status.textContent = text;
   els.status.className = "status" + (kind ? " " + kind : "");
 }
@@ -1857,7 +1857,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "29";
+const UI_BUILD = "30";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

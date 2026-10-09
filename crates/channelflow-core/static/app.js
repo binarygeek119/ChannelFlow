@@ -264,7 +264,6 @@ const MENU = {
   weather: ["Weather", "Forecasts, alerts, and the crawl that runs over programming."],
   news: ["News", "News bumps, tickers, and insert clips."],
   emergency: ["Emergency Broadcast System", "The EBS slate, header, and attention tones."],
-  ai: ["AI", "OpenAI-compatible endpoints, tried in priority order."],
   transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
   plugins: ["Plugins", "Loaded plugins and what each is allowed to do."],
@@ -277,11 +276,60 @@ const PANEL_FOR = {
   channels: "tab-channels",
   about: "tab-about",
   credits: "tab-credits",
-  ai: "tab-ai",
   transcode: "tab-transcode",
   livetv: "tab-live-tv",
   plugins: "tab-plugins",
 };
+
+// Plugin page components this shell knows how to render, mapped to the panel
+// id that hosts them. A plugin declares a `page` contribution in its
+// manifest; the tab appears only while that plugin is installed, and lands on
+// the panel for its component or on the generic placeholder.
+const PLUGIN_PANELS = {
+  AiPage: "tab-ai",
+};
+
+// Plugin-declared pages add their own drawer entries. The catalog only lists
+// installed plugins, so an AI plugin that is not installed leaves no AI tab —
+// exactly the same rule that governs the connection types.
+async function loadPluginPages() {
+  let plugins;
+  try {
+    plugins = (await request("/api/plugins")).plugins || [];
+  } catch (error) {
+    return;
+  }
+  const nav = document.getElementById("drawer-nav");
+  if (!nav) return;
+  plugins.forEach((plugin) => {
+    (plugin.ui_contributions || []).forEach((contribution) => {
+      if (!contribution || contribution.type !== "page") return;
+      const key = contribution.id;
+      if (!key) return;
+      if (MENU[key]) return; // a core page keeps precedence
+      MENU[key] = [contribution.title || key, plugin.description || ""];
+      PANEL_FOR[key] = PLUGIN_PANELS[contribution.component] || "tab-placeholder";
+      const link = document.createElement("a");
+      link.className = "nav-item";
+      link.dataset.tab = key;
+      link.href = contribution.path || `/${key}`;
+      const icon =
+        '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" ' +
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>';
+      const label = document.createElement("span");
+      label.className = "nav-label";
+      label.textContent = contribution.title || key;
+      link.innerHTML = icon;
+      link.appendChild(label);
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        showTab(key);
+      });
+      nav.appendChild(link);
+    });
+  });
+}
 
 // Render rows as `<div class="about-row">` pairs. Rows with no value are
 // dropped rather than shown blank, so fields the server cannot answer on this
@@ -1405,5 +1453,9 @@ document.querySelectorAll(".drawer-nav a").forEach((link) => {
     link.scrollIntoView({ block: "nearest", inline: "nearest" });
   });
 });
+
+// Plugin-declared pages (the AI tab) appear only when their plugin is
+// installed; the initial nav links were wired above, these are added on boot.
+loadPluginPages();
 
 load();

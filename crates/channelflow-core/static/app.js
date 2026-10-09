@@ -1685,7 +1685,11 @@ document.getElementById("ob-next").addEventListener("click", () => {
     obIndex++;
     renderOnboarding();
   } else {
-    location.replace("/");
+    // Final step: drop straight into the app in this same document. No reload
+    // and no boot() round-trip, so setup can never feel like it bounces back
+    // to the walkthrough.
+    history.pushState(null, "", "/");
+    showApp();
   }
 });
 
@@ -1712,7 +1716,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "19";
+const UI_BUILD = "20";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

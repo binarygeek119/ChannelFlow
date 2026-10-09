@@ -412,6 +412,7 @@ mod tests {
             dir: store.plugin_dir(&manifest.id),
             logger: PluginLogger::new(&manifest.id),
             core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
+            database: std::sync::Arc::new(channelflow_plugin_api::database::NoPluginDatabase::default()),
         };
         manager.add(plugin, api).await.expect("load AI plugin");
         manager.enable(&manifest.id).await.expect("enable AI plugin");

@@ -23,19 +23,21 @@ crates/channelflow-core/      the base system — channels, storage, plugin mana
   src/store.rs                file- or Postgres-backed storage behind one Store
   src/api.rs                  axum routes, HTTP status mapping, embedded UI
   src/plugin/                 the plugin manager: lifecycle, catalog, permissions
-crates/channelflow-plugin-api/  the SDK: Plugin trait, manifest, storage, core-data, UI
+crates/channelflow-plugin-api/  the SDK: Plugin trait, manifest, storage, core-data, database, UI
   static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
 Plugins live in their own repo, [`ChannelFlow-Plugins`](https://github.com/binarygeek119/ChannelFlow-Plugins), fetched by git dependency: `com.channelflow.ai` (the AI Provider Suite) and `com.channelflow.ersatztv` (the ErsatzTV Transcoding Engine). Each implements the `Plugin` trait against the SDK, names itself in a `plugin.json`, and is loaded, enabled, and route-mounted by the core's plugin manager under `/api/plugins/{id}`.
 
-This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins. Plugins declare their id, version range against the base, requested permissions, and UI contributions, and get namespaced storage, an HTTP client, a logger, and (with `api:core:read`) a read-only view of the channels from `PluginApi`. The **AI page** and the **Transcode page** are both plugins now: the shell still renders them, but every call they make goes to the plugin's routes, and their settings live in the plugin's own storage. The schema-driven Transcode form is mirrored from next's own `channel_config.json`, vendored beside the plugin so the contract tests still walk it. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
+This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins. Plugins declare their id, version range against the base, requested permissions, and UI contributions, and get namespaced storage, an HTTP client, a logger, a read-only view of the channels (`api:core:read`), and — with `storage:database` — their own tables in the base's Postgres from `PluginApi`. The **AI page** and the **Transcode page** are both plugins now: the shell still renders them, but every call they make goes to the plugin's routes, and their settings live in the plugin's own storage. The schema-driven Transcode form is mirrored from next's own `channel_config.json`, vendored beside the plugin so the contract tests still walk it. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
 
 Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 
 **Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys.
 
 **Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in tables created automatically at startup: `channels` and `plugin_kv` (namespaced per plugin). The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
+
+A plugin that asks for the `storage:database` permission can also create and query **its own** tables in that Postgres. Names are prefixed with the plugin's id (`create_table("audit", …)` becomes `cf_com_channelflow_ersatztv_audit`), so no plugin can collide with the core or another plugin; the ErsatzTV plugin keeps a change history this way. On the file backend there is no database, so the handle says so and the plugin falls back to key/value storage.
 
 When features became plugins, their settings moved into plugin storage with a one-time migration: the AI provider list (from `<config>/ai.json` / the `ai_settings` row) and the transcode defaults plus per-channel overrides (from `<config>/transcode.json` / the `transcode_settings` row, plus each channel's own patch). The legacy copies are removed once moved.
 
@@ -58,6 +60,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `GET` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | overrides, the defaults, and the effective settings |
 | `PUT` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | store that channel's override patch |
 | `DELETE` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | drop every override |
+| `GET` | `/api/plugins/com.channelflow.ersatztv/channels/{id}/changes` | change history from the plugin's own Postgres table |
 | `GET` | `/api/plugins` | the plugin catalog: manifests, permissions, UI contributions, health |
 | `PUT` | `/api/plugins/{id}/enable` / `disable` | call the plugin's lifecycle hooks |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |

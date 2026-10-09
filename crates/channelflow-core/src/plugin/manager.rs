@@ -163,6 +163,7 @@ mod tests {
             dir: std::env::temp_dir(),
             logger: PluginLogger::new(id),
             core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
+            database: std::sync::Arc::new(channelflow_plugin_api::database::NoPluginDatabase::default()),
         }
     }
 

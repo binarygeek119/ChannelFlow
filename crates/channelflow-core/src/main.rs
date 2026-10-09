@@ -116,6 +116,7 @@ async fn main() -> Result<()> {
         dir: store.plugin_dir(&ai_manifest.id),
         logger: PluginLogger::new(&ai_manifest.id),
         core: Arc::new(store.core_data()),
+        database: store.plugin_database(&ai_manifest.id),
     };
     manager
         .add(ai_plugin, ai_api)
@@ -138,6 +139,7 @@ async fn main() -> Result<()> {
         dir: store.plugin_dir(&ersatztv_manifest.id),
         logger: PluginLogger::new(&ersatztv_manifest.id),
         core: Arc::new(store.core_data()),
+        database: store.plugin_database(&ersatztv_manifest.id),
     };
     manager
         .add(ersatztv_plugin, ersatztv_api)

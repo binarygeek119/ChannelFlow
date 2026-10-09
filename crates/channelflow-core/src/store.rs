@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError};
+use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
 use chrono::Utc;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -265,6 +266,19 @@ impl Store {
         }
     }
 
+    /// A plugin's own Postgres tables (`storage:database`). On the file
+    /// backend this is the no-database double, so a plugin can tell there is
+    /// no Postgres and fall back to key/value storage.
+    pub fn plugin_database(&self, namespace: &str) -> Arc<dyn PluginDatabase> {
+        match &self.backend {
+            Backend::Files => Arc::new(NoPluginDatabase::default()),
+            Backend::Postgres(pool) => Arc::new(PgPluginDatabase {
+                pool: pool.clone(),
+                prefix: sanitise_table_prefix(namespace),
+            }),
+        }
+    }
+
     /// One-time move of the legacy `ai.json` (or `ai_settings` row) into the
     /// AI plugin's own storage. Only runs when that storage is empty, and
     /// removes the legacy copy once moved.
@@ -382,6 +396,86 @@ impl CoreData for StoreCoreData {
             })
             .collect())
     }
+}
+
+/// A plugin's own tables, prefixed with its id so no two namespaces can
+/// collide. `create_table("audit", …)` runs as
+/// `CREATE TABLE IF NOT EXISTS cf_com_channelflow_ai_audit (…)` for the AI
+/// plugin.
+pub struct PgPluginDatabase {
+    pool: PgPool,
+    prefix: String,
+}
+
+#[async_trait]
+impl PluginDatabase for PgPluginDatabase {
+    fn table_of(&self, name: &str) -> Option<String> {
+        if is_identifier(name) {
+            Some(format!("{}_{}", self.prefix, name))
+        } else {
+            None
+        }
+    }
+
+    async fn create_table(&self, name: &str, columns: &str) -> Result<(), PluginDatabaseError> {
+        let table = self
+            .table_of(name)
+            .ok_or_else(|| PluginDatabaseError(format!("\"{name}\" is not a table name")))?;
+        let sql = format!("CREATE TABLE IF NOT EXISTS {table} ({columns})");
+        self.execute(&sql).await.map(|_| ())
+    }
+
+    async fn execute(&self, sql: &str) -> Result<u64, PluginDatabaseError> {
+        sqlx::query(sql)
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(database_error)
+    }
+
+    async fn fetch(&self, sql: &str) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
+        let wrapped = format!("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t");
+        let row = sqlx::query(&wrapped)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(database_error)?;
+        let value: serde_json::Value = row
+            .try_get::<Json<serde_json::Value>, _>(0)
+            .map_err(database_error)?
+            .0;
+        match value {
+            serde_json::Value::Array(rows) => Ok(rows),
+            _ => Ok(Vec::new()),
+        }
+    }
+}
+
+fn database_error(error: sqlx::Error) -> PluginDatabaseError {
+    PluginDatabaseError(error.to_string())
+}
+
+/// A plugin id becomes a safe table prefix: `com.channelflow.ai` ->
+/// `cf_com_channelflow_ai`. Anything that is not alphanumeric becomes a single
+/// underscore, so distinct ids keep distinct names.
+fn sanitise_table_prefix(namespace: &str) -> String {
+    let mut prefix = String::from("cf_");
+    for character in namespace.chars() {
+        if character.is_ascii_alphanumeric() {
+            prefix.push(character.to_ascii_lowercase());
+        } else if !prefix.ends_with('_') {
+            prefix.push('_');
+        }
+    }
+    prefix.trim_end_matches('_').to_string()
+}
+
+/// Only plain SQL identifiers are allowed as plugin table names, so a name
+/// can never smuggle arbitrary DDL into the prefix.
+fn is_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// The `PluginStorage` view of a `Store`, scoped to one plugin id.
@@ -1000,8 +1094,21 @@ mod tests {
     use crate::model::NewChannel;
     use serde_json::json;
 
-    /// Plugin key/value storage survives a round trip on the file backend,
-    /// and can be deleted.
+    /// A plugin id becomes a dotted name with underscores, and only plain
+    /// identifiers are allowed as the plugin's own table name.
+    #[test]
+    fn plugin_table_names_are_namespaced_and_safe() {
+        assert_eq!(
+            sanitise_table_prefix("com.channelflow.ersatztv"),
+            "cf_com_channelflow_ersatztv"
+        );
+        assert!(is_identifier("audit"));
+        assert!(is_identifier("channel_overrides_2"));
+        assert!(!is_identifier("audit; drop table channels"));
+        assert!(!is_identifier(""));
+    }
+
+    /// The file backend keeps the round trip, and can be deleted.
     #[tokio::test]
     async fn file_backend_plugin_storage_round_trip() {
         let stamp = std::time::SystemTime::now()

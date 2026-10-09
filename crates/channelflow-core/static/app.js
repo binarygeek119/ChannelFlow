@@ -1461,13 +1461,12 @@ document.querySelectorAll(".drawer-nav a").forEach((link) => {
   });
 });
 
-// --- First boot: the walkthrough and the login screen -----------------------
-// boot() runs once on load. No setup yet → the walkthrough; setup done but no
-// session → log in; otherwise the app. The API is open while setup is not
-// complete, so this works before any account exists.
+// --- First boot: the walkthrough (and after that, the app itself) -----------
+// boot() runs once on load. No setup yet → the walkthrough at /first-time;
+// once setup completes the server auto-authenticates so the app opens
+// directly — there is no login screen.
 
 function hideScreens() {
-  document.getElementById("login-screen").hidden = true;
   document.getElementById("onboarding-screen").hidden = true;
   document.getElementById("app-shell").hidden = true;
 }
@@ -1477,19 +1476,6 @@ function showApp() {
   document.getElementById("app-shell").hidden = false;
   load();
   loadPluginPages();
-}
-
-function showLogin(note) {
-  hideScreens();
-  document.getElementById("login-screen").hidden = false;
-  if (note) setLoginNote(note, true);
-}
-
-function setLoginNote(message, bad) {
-  const note = document.getElementById("login-note");
-  note.hidden = !message;
-  note.textContent = message || "";
-  note.classList.toggle("bad", !!bad);
 }
 
 const OB_STEPS = [
@@ -1579,7 +1565,7 @@ const OB = [
   {
     next: () => true,
     body: () =>
-      `<p>That's it — the ErsatzTV engine and the Jellyfin media source are installed, and your account is ready. Log in to start using ChannelFlow.</p>`,
+      `<p>That's it — the ErsatzTV engine and the Jellyfin media source are installed, and your account is ready. Open ChannelFlow to get started — no login needed.</p>`,
   },
 ];
 
@@ -1589,7 +1575,7 @@ function renderOnboarding() {
   document.getElementById("ob-body").innerHTML = step.body();
   document.getElementById("ob-back").hidden = obIndex === 0;
   const $next = document.getElementById("ob-next");
-  $next.textContent = obIndex === OB.length - 1 ? "Log in" : "Next";
+  $next.textContent = obIndex === OB.length - 1 ? "Open ChannelFlow" : "Next";
   $next.hidden = false;
   refreshObNext();
   if (step.after) step.after();
@@ -1703,114 +1689,32 @@ document.getElementById("ob-next").addEventListener("click", () => {
   }
 });
 
-document.getElementById("login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const username = document.getElementById("login-username").value.trim();
-  const password = document.getElementById("login-password").value;
-  setLoginNote("");
-  try {
-    await request("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    });
-    location.reload();
-  } catch (error) {
-    setLoginNote(error.message || "Wrong username or password.", true);
-  }
-});
+// ── start over ───────────────────────────────────────────────────────────────-
+// There is no login screen anymore, so the only account action left is wiping
+// setup and running /first-time again. Two clicks to confirm.
 
-// ── forgotten password ──────────────────────────────────────────────────────
-// The reset pin is written to a file only in the server's config directory, so
-// nothing sensitive travels through this page. Resets are on a 10-minute
-// cooldown.
-
-function setResetNote(message, bad) {
-  const note = document.getElementById("reset-note");
-  note.hidden = !message;
-  note.textContent = message || "";
-  note.classList.toggle("bad", !!bad);
-}
-
-function showForgot() {
-  document.getElementById("login-view").hidden = true;
-  document.getElementById("reset-view").hidden = false;
-  setResetNote("");
-  document.getElementById("forgot-info").textContent = "";
-}
-
-function showLoginView() {
-  document.getElementById("reset-view").hidden = true;
-  document.getElementById("login-view").hidden = false;
-  document.getElementById("reset-pin").value = "";
-  document.getElementById("reset-pass").value = "";
-  document.getElementById("reset-pass2").value = "";
-}
-
-document.getElementById("forgot-link").addEventListener("click", showForgot);
-document.getElementById("reset-back").addEventListener("click", showLoginView);
-
-document.getElementById("reset-setup-link").addEventListener("click", async () => {
-  const link = document.getElementById("reset-setup-link");
-  // First click arms it — no window.confirm to get blocked by the browser —
-  // the second click resets and drops this page straight into the walkthrough.
-  if (!link.dataset.armed) {
-    link.dataset.armed = "1";
-    link.textContent = "Click again to confirm — this clears the account and starts setup over";
-    setLoginNote("");
+let startOverArmed = false;
+document.getElementById("start-over").addEventListener("click", async () => {
+  const btn = document.getElementById("start-over");
+  if (!startOverArmed) {
+    startOverArmed = true;
+    btn.textContent = "Click again to start setup over";
     return;
   }
-  setLoginNote("");
+  btn.textContent = "Starting over…";
   try {
     await request("/api/auth/reset-setup", { method: "POST" });
-    // Back to the walkthrough at its own address; a fresh boot picks out
-    // /first-time and renders setup with no stale view left behind.
     location.replace("/first-time");
   } catch (error) {
-    link.dataset.armed = "";
-    link.textContent = "First time here? Reset this instance to run setup again";
-    setLoginNote(error.message || "Could not reset the instance.", true);
-  }
-});
-
-document.getElementById("forgot-generate").addEventListener("click", async () => {
-  document.getElementById("forgot-generate").disabled = true;
-  document.getElementById("forgot-info").textContent = "Writing a reset pin…";
-  setResetNote("");
-  try {
-    const data = await request("/api/auth/forgot", { method: "POST" });
-    document.getElementById("forgot-info").textContent =
-      `Reset pin written to config/${data.file}. Open that file to read it.`;
-  } catch (error) {
-    document.getElementById("forgot-info").textContent = "";
-    setResetNote(error.message || "Could not generate a reset pin.", true);
-  } finally {
-    document.getElementById("forgot-generate").disabled = false;
-  }
-});
-
-document.getElementById("reset-submit").addEventListener("click", async () => {
-  const pin = document.getElementById("reset-pin").value.trim();
-  const password = document.getElementById("reset-pass").value;
-  const confirm = document.getElementById("reset-pass2").value;
-  if (!pin) return setResetNote("Enter the pin from the reset file.", true);
-  if (password.length < 4) return setResetNote("Password must be at least 4 characters.", true);
-  if (password !== confirm) return setResetNote("Passwords do not match.", true);
-  setResetNote("");
-  try {
-    await request("/api/auth/reset", {
-      method: "POST",
-      body: JSON.stringify({ pin, password }),
-    });
-    showLoginView();
-    setLoginNote("Password changed — log in with the new one.", false);
-  } catch (error) {
-    setResetNote(error.message || "Could not reset the password.", true);
+    startOverArmed = false;
+    btn.textContent = "Start over";
+    setStatus(error.message || "Could not reset the instance.", "bad");
   }
 });
 
 // One place for the UI build label; the boot tag prints it so a screenshot can
 // always identify the page's build without the console.
-const UI_BUILD = "17";
+const UI_BUILD = "18";
 
 function tagBoot(branch, state) {
   const el = document.getElementById("ui-build");
@@ -1819,10 +1723,8 @@ function tagBoot(branch, state) {
   el.textContent = `UI build ${UI_BUILD} · ${branch}${extra}`;
 }
 
-// The login screen exists for nothing but logging in after setup is complete.
-// If the API can't be reached we therefore have no business showing a login
-// form on an install that may never have created a user - show the walkthrough
-// with the error instead so 'setup first, login later' holds on every path.
+// There is no login screen: an unreachable server never has a reason to show a
+// password form, so the walkthrough appears with the error instead.
 function showSetupUnreachable(error) {
   hideScreens();
   document.getElementById("onboarding-screen").hidden = false;
@@ -1852,9 +1754,9 @@ async function fetchStateWithRetry() {
 
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
-  // The setup walkthrough lives at /first-time. Until an account exists,
-  // any other URL funnels there; once setup is done /first-time sends the
-  // user to / where login (or the app) belongs.
+  // The setup walkthrough lives at /first-time. Until setup completes, any
+  // other URL funnels there; once it does the server auto-authenticates and
+  // the app opens directly - there is no login screen.
   const atFirstTime = location.pathname === "/first-time";
   try {
     const state = await fetchStateWithRetry();
@@ -1869,11 +1771,6 @@ async function boot() {
     }
     if (atFirstTime) {
       location.replace("/");
-      return;
-    }
-    if (!state.authenticated) {
-      tagBoot("login", state);
-      showLogin();
       return;
     }
     tagBoot("app", state);

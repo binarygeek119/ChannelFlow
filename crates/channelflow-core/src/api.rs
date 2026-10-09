@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State},
-    http::{header, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
@@ -102,6 +102,21 @@ pub fn router(
         app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
     }
     app.layer(middleware::from_fn_with_state(state, require_auth))
+        .layer(middleware::from_fn(no_store))
+}
+
+/// API answers must never be cached: a stale `/api/auth/state` (say, from
+/// before the database was reset) would otherwise keep a browser on the wrong
+/// screen — login instead of the first-boot walkthrough.
+async fn no_store(request: Request, next: Next) -> Response {
+    let is_api = request.uri().path().starts_with("/api/");
+    let mut response = next.run(request).await;
+    if is_api {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
 }
 
 /// Gate every `/api/*` request behind the session once setup has completed.

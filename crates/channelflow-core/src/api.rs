@@ -690,10 +690,15 @@ async fn uninstall_plugin(
 
 // ── media sources and their connections ──────────────────────────────────
 
-/// The registered media-source plugins: identity, connection fields, and
-/// supported media, for the connection pickers.
-async fn list_media_sources(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({ "sources": state.media.catalog() }))
+/// The media sources whose plugin is installed: identity, connection fields,
+/// and supported media, for the connection pickers. A source whose plugin was
+/// uninstalled stays out, so the tab only ever shows what is installed.
+async fn list_media_sources(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let registry = state.store.plugin_registry().await?;
+    let installed = |id: &str| registry.get(id).is_some();
+    Ok(Json(json!({ "sources": state.media.catalog(&installed) })))
 }
 
 async fn list_connections(
@@ -715,9 +720,11 @@ async fn create_connection(
     State(state): State<AppState>,
     Json(input): Json<NewConnection>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    if state.media.find(&input.kind).is_none() {
+    let registry = state.store.plugin_registry().await?;
+    let installed = |id: &str| registry.get(id).is_some();
+    if state.media.find_installed(&input.kind, &installed).is_none() {
         return Err(StoreError::Plugin(format!(
-            "no media source registered as {:?}",
+            "no media source {:?} is installed",
             input.kind
         ))
         .into());

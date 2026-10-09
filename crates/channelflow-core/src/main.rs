@@ -191,7 +191,10 @@ async fn main() -> Result<()> {
     // The media sources: plugins that implement the MediaSource contract
     // register their connection forms and sync drives here.
     let mut media_sources = media::MediaSources::new();
-    media_sources.register(channelflow_plugin_jellyfin::media_source());
+    media_sources.register(
+        "com.channelflow.jellyfin",
+        channelflow_plugin_jellyfin::media_source(),
+    );
 
     // The plugin store: seed the ChannelFlow-Plugins repository so the Store
     // tab has something to show, unless the operator points it elsewhere.

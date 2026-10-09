@@ -202,7 +202,7 @@ docker build -t channelflow:2.0.0 .
 docker run --rm -p 8097:8097 -v "$PWD/config:/config" channelflow:2.0.0
 ```
 
-Then open `http://127.0.0.1:8097/`. Every page is its own URL too: the tabs live at `/channels`, `/guide`, `/livetv`, `/plugins`, `/about`, and the rest (one per drawer entry), so any screen can be bookmarked or opened directly.
+Then open `http://127.0.0.1:8097/`. After setup the app opens on the Guide at `/webui/guide`. Every tab is its own URL under `/webui` — `/webui/channels`, `/webui/guide`, `/webui/live`, `/webui/plugins`, `/webui/about`, and the rest (one per drawer entry) — so any screen can be bookmarked or opened directly.
 
 The container runs as **uid 1000 (`ersatztv`)**, inherited from the next base, so the mounted `config` directory must be writable by that user — `chmod 777 config` for a quick test, or `chown 1000:1000 config` for a real setup. The server says exactly this if the directory is not writable.
 

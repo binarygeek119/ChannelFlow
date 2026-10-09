@@ -319,7 +319,7 @@ async function loadPluginPages() {
       const link = document.createElement("a");
       link.className = "nav-item";
       link.dataset.tab = key;
-      link.href = contribution.path || `/${key}`;
+      link.href = contribution.path || `/webui/${key}`;
       const icon =
         '<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" ' +
         'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -331,7 +331,7 @@ async function loadPluginPages() {
       link.appendChild(label);
       link.addEventListener("click", (event) => {
         event.preventDefault();
-        history.pushState(null, "", contribution.path || `/${key}`);
+        history.pushState(null, "", contribution.path || `/webui/${key}`);
         showTab(key);
       });
       nav.appendChild(link);
@@ -1460,9 +1460,9 @@ function showTab(key) {
 
 function pathForTab(key) {
   for (const link of document.querySelectorAll(".drawer-nav a[data-tab]")) {
-    if (link.dataset.tab === key) return link.getAttribute("href") || `/${key}`;
+    if (link.dataset.tab === key) return link.getAttribute("href") || `/webui/${key}`;
   }
-  return `/${key}`;
+  return `/webui/${key}`;
 }
 
 function tabForPath(path) {
@@ -1481,7 +1481,7 @@ document.querySelectorAll(".drawer-nav a").forEach((link) => {
     // the address bar on /first-time, and boot() bounces straight back.
     if (!link.dataset.tab) return;
     event.preventDefault();
-    history.pushState(null, "", link.getAttribute("href") || `/${link.dataset.tab}`);
+    history.pushState(null, "", link.getAttribute("href") || `/webui/${link.dataset.tab}`);
     showTab(link.dataset.tab);
     link.scrollIntoView({ block: "nearest", inline: "nearest" });
   });
@@ -1509,7 +1509,7 @@ function showApp() {
   document.getElementById("app-shell").hidden = false;
   load();
   loadPluginPages();
-  showTab(tabForPath(location.pathname) || "channels");
+  showTab(tabForPath(location.pathname) || "guide");
 }
 
 const OB_STEPS = [
@@ -1745,7 +1745,7 @@ document.getElementById("ob-next").addEventListener("click", () => {
     // Final step: a real navigation to /. boot() sees setup complete and
     // opens the app. (pushState would leave the address bar on /first-time,
     // and the next load would bounce back into the walkthrough.)
-    location.assign("/");
+    location.assign("/webui/guide");
   }
 });
 
@@ -1772,7 +1772,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "22";
+const UI_BUILD = "23";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1820,8 +1820,8 @@ async function boot() {
       startOnboarding();
       return;
     }
-    if (atFirstTime) {
-      location.replace("/");
+    if (atFirstTime || location.pathname === "/") {
+      location.assign("/webui/guide");
       return;
     }
     showApp();

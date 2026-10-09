@@ -30,6 +30,8 @@ pub struct CatalogEntry {
     pub name: String,
     #[serde(default)]
     pub guid: String,
+    #[serde(default, rename = "imageUrl")]
+    pub image_url: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -164,6 +166,7 @@ pub fn catalog_view(
                 "repository": repository_url,
                 "id": entry.id,
                 "guid": entry.guid,
+                "image_url": entry.image_url,
                 "name": name,
                 "description": entry.description,
                 "owner": entry.owner,
@@ -473,6 +476,7 @@ mod tests {
             "id": "com.channelflow.ai",
             "name": "AI Provider Suite",
             "guid": "com.channelflow.ai",
+            "imageUrl": "https://example.invalid/ai.png",
             "description": "AI",
             "owner": "ChannelFlow Team",
             "category": "ai",
@@ -515,6 +519,7 @@ mod tests {
         let entries = parse_catalog(MANIFEST).expect("parses");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "com.channelflow.ai");
+        assert_eq!(entries[0].image_url, "https://example.invalid/ai.png");
 
         assert!(parse_catalog("not json").is_err());
         assert!(parse_catalog("[]").is_err());

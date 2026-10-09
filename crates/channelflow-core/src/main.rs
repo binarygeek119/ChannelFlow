@@ -176,7 +176,7 @@ async fn main() -> Result<()> {
     };
     axum::serve(
         listener,
-        api::router(store, about, plugins, plugin_routers),
+        api::router(store, about, plugins, http, plugin_routers),
     )
     .await?;
     Ok(())

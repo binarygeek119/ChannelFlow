@@ -4,10 +4,10 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde_json::json;
@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::model::{Channel, NewChannel, UpdateChannel};
-use crate::plugin::PluginManager;
+use crate::plugin::{repo, PluginManager};
 use crate::store::{Store, StoreError};
 
 /// Facts about the running process that only `main` can know: where the config
@@ -27,20 +27,22 @@ pub struct AboutInfo {
     pub started: std::time::Instant,
 }
 
-/// What handlers may reach: the channel store, the process facts above, and
-/// the loaded plugins. The outbound HTTP client lives in each plugin's own
-/// state now that features are plugins.
+/// What handlers may reach: the channel store, the process facts above, the
+/// loaded plugins, and the outbound HTTP client repository installs use. The
+/// same client is what each plugin's own state holds.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
     pub about: AboutInfo,
     pub plugins: Arc<Mutex<PluginManager>>,
+    pub http: reqwest::Client,
 }
 
 pub fn router(
     store: Store,
     about_info: AboutInfo,
     plugins: Arc<Mutex<PluginManager>>,
+    http: reqwest::Client,
     plugin_routers: Vec<(String, Router)>,
 ) -> Router {
     let mut app = Router::new()
@@ -62,11 +64,18 @@ pub fn router(
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/{id}/enable", put(enable_plugin))
         .route("/api/plugins/{id}/disable", put(disable_plugin))
+        .route("/api/plugins/repositories", get(list_repositories).post(add_repository))
+        .route("/api/plugins/repositories/{id}", delete(remove_repository))
+        .route("/api/plugins/catalog", get(plugin_catalog))
+        .route("/api/plugins/install", post(install_plugin))
+        .route("/api/plugins/installed", get(list_installed))
+        .route("/api/plugins/installed/{id}", delete(uninstall_plugin))
         .route("/live/{asset}", get(live_pending))
         .with_state(AppState {
             store,
             about: about_info,
             plugins,
+            http,
         });
     for (id, plugin_router) in plugin_routers {
         app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
@@ -283,6 +292,141 @@ async fn disable_plugin(
     Ok(Json(json!({ "plugins": manager.catalog() })))
 }
 
+// ── plugin repositories and the install catalog ─────────────────────────
+
+/// The registered plugin-repository URLs, the Jellyfin-style install source.
+async fn list_repositories(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let repositories = state.store.repo_list().await?;
+    Ok(Json(json!({ "repositories": repositories })))
+}
+
+#[derive(serde::Deserialize)]
+struct AddRepository {
+    url: String,
+}
+
+/// Register a repository. The manifest is fetched once before the URL is
+/// accepted, so a plain wrong URL cannot be saved.
+async fn add_repository(
+    State(state): State<AppState>,
+    Json(input): Json<AddRepository>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let url = input.url.trim().to_string();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(StoreError::Plugin(
+            "repository URL must start with http:// or https://".to_string(),
+        )
+        .into());
+    }
+    repo::fetch_catalog(&state.http, &url).await?;
+    let repositories = state.store.repo_add(&url).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "repositories": repositories }))))
+}
+
+/// Forget a repository by its record id.
+async fn remove_repository(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let repositories = state.store.repo_remove(&id).await?;
+    Ok(Json(json!({ "repositories": repositories })))
+}
+
+#[derive(serde::Deserialize)]
+struct CatalogQuery {
+    url: Option<String>,
+}
+
+/// Everything installable across the registered repositories (or one
+/// repository when `?url=` is given): each plugin with its versions, the rids
+/// each version ships, and whether any version runs on this base. A
+/// repository that cannot be fetched is reported in `errors`, not fatal.
+async fn plugin_catalog(
+    State(state): State<AppState>,
+    Query(query): Query<CatalogQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let base = env!("CARGO_PKG_VERSION");
+    let urls: Vec<String> = match query.url {
+        Some(url) => vec![url],
+        None => state
+            .store
+            .repo_list()
+            .await?
+            .iter()
+            .filter_map(|repo| repo["url"].as_str().map(str::to_string))
+            .collect(),
+    };
+    let mut plugins = Vec::new();
+    let mut errors = Vec::new();
+    for url in urls {
+        match repo::fetch_catalog(&state.http, &url).await {
+            Ok(entries) => {
+                let view = repo::catalog_view(&url, &entries, base);
+                if let Some(list) = view["plugins"].as_array() {
+                    plugins.extend(list.iter().cloned());
+                }
+            }
+            Err(error) => {
+                tracing::warn!(repository = %url, error = %error, "repository catalog fetch failed");
+                errors.push(json!({ "repository": url, "error": error.to_string() }));
+            }
+        }
+    }
+    Ok(Json(json!({ "plugins": plugins, "errors": errors })))
+}
+
+#[derive(serde::Deserialize)]
+struct InstallRequest {
+    /// The repository URL the plugin comes from.
+    url: String,
+    /// The manifest's plugin id, e.g. `com.channelflow.ai`.
+    id: String,
+    /// Pin a version; when absent the newest compatible version is installed.
+    version: Option<String>,
+    /// Override the host's platform rid, for custom staging.
+    rid: Option<String>,
+}
+
+/// Download, verify, and stage one plugin from a repository. The library is
+/// not loaded — that is the dynamic loader's job once the SDK defines its ABI.
+async fn install_plugin(
+    State(state): State<AppState>,
+    Json(input): Json<InstallRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rid = input.rid.unwrap_or_else(repo::current_rid);
+    let installed = repo::install(
+        &state.http,
+        &state.store,
+        &input.url,
+        &input.id,
+        input.version.as_deref(),
+        &rid,
+        env!("CARGO_PKG_VERSION"),
+    )
+    .await?;
+    Ok(Json(json!({ "installed": installed, "rid": rid })))
+}
+
+/// The installs on disk, one record per plugin id.
+async fn list_installed(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let installed = state.store.installed_list().await?;
+    Ok(Json(json!({ "installed": installed })))
+}
+
+/// Remove an installed plugin (its directory and record). Compiled-in plugins
+/// keep working either way.
+async fn uninstall_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let removed = repo::uninstall(&state.store, &id).await?;
+    Ok(Json(json!({ "removed": removed })))
+}
+
 /// The streaming paths the Live TV page advertises.
 ///
 /// Only port `8097` is published and the encoder listens inside the container
@@ -424,7 +568,7 @@ mod tests {
             listen_port: 0,
             started: std::time::Instant::now(),
         };
-        let _ = router(store, about, plugins, routers);
+        let _ = router(store, about, plugins, http, routers);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

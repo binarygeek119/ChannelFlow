@@ -31,6 +31,18 @@ Plugins live in their own repo, [`ChannelFlow-Plugins`](https://github.com/binar
 
 This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins. Plugins declare their id, version range against the base, requested permissions, and UI contributions, and get namespaced storage, an HTTP client, a logger, a read-only view of the channels (`api:core:read`), and — with `storage:database` — their own tables in the base's Postgres from `PluginApi`. The **AI page** and the **Transcode page** are both plugins now: the shell still renders them, but every call they make goes to the plugin's routes, and their settings live in the plugin's own storage. The schema-driven Transcode form is mirrored from next's own `channel_config.json`, vendored beside the plugin so the contract tests still walk it. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
 
+**Plugin repositories** give the same install story Jellyfin has: the plugin repo serves a `manifest.json` (one entry per plugin, each with a `versions[]` list), and a ChannelFlow instance registers that URL and installs from it. Each released version's zip is downloaded for the host's `rid`, its sha256 checked against the manifest, and extracted into `<config>/plugins/.installed/{id}` — deliberately separate from `<config>/plugins/{id}`, which stays the plugin's runtime data. Install does not load the library: the manifest's `entrypoint` records which shared library a loaded plugin will reach for once the dynamic loader and the SDK's ABI entrypoint exist. The bundled plugins are registered repositories themselves:
+
+```bash
+curl -X POST http://localhost:8097/api/plugins/repositories \
+  -H 'content-type: application/json' \
+  -d '{"url":"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json"}'
+curl http://localhost:8097/api/plugins/catalog
+curl -X POST http://localhost:8097/api/plugins/install \
+  -H 'content-type: application/json' \
+  -d '{"url":"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json","id":"com.channelflow.ai"}'
+```
+
 Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 
 **Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys.
@@ -63,6 +75,13 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `GET` | `/api/plugins/com.channelflow.ersatztv/channels/{id}/changes` | change history from the plugin's own Postgres table |
 | `GET` | `/api/plugins` | the plugin catalog: manifests, permissions, UI contributions, health |
 | `PUT` | `/api/plugins/{id}/enable` / `disable` | call the plugin's lifecycle hooks |
+| `GET` | `/api/plugins/repositories` | the registered plugin-repository URLs |
+| `POST` | `/api/plugins/repositories` | register a repository (`201`); the URL is validated by fetching its manifest first |
+| `DELETE` | `/api/plugins/repositories/{id}` | forget a registered repository |
+| `GET` | `/api/plugins/catalog` | what is installable across the registered repositories (or pass `?url=` to browse one) |
+| `POST` | `/api/plugins/install` | download, verify, and stage a plugin version from a repository |
+| `GET` | `/api/plugins/installed` | the installs on disk, one record per plugin id |
+| `DELETE` | `/api/plugins/installed/{id}` | remove an installed plugin (its directory and record) |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
 | `PUT` | `/api/plugins/com.channelflow.ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |
@@ -169,7 +188,7 @@ From a source checkout: `cargo run --release -p channelflow -- --config ./config
 
 ## Where this goes next
 
-1. **Dynamic loading** — load plugins as shared libraries from `/config/plugins` via the manifest's `entrypoint`, with the install/update/rollback flow and the repo index feeding the catalog.
+1. **Dynamic loading** — load plugins as shared libraries from `/config/plugins/.installed/{id}` via the manifest's `entrypoint`. The install side already exists (repository URL, catalog, checked downloads, extraction and staging); what is left is the ABI entrypoint in the SDK and the loader that calls it.
 2. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
 3. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.
 4. **Library sync, scheduling, EBS/off-air** — the 1.x features, rebuilt.

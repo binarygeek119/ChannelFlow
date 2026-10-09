@@ -29,8 +29,10 @@ reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "json", "uuid", "chrono"] }
 tokio.workspace = true
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid.workspace = true
+zip = "2"

@@ -46,6 +46,13 @@ const LEGACY_TRANSCODE_NAMESPACE: &str = "com.channelflow.ersatztv";
 const LEGACY_TRANSCODE_DEFAULTS_KEY: &str = "defaults";
 const LEGACY_TRANSCODE_OVERRIDES_KEY: &str = "overrides";
 
+/// The core reserves this namespace for its own settings, so the plugin
+/// repository list and the installed-plugin records persist through the same
+/// per-plugin key/value store on both backends.
+const CORE_NAMESPACE: &str = "com.channelflow.core";
+const REPOSITORIES_KEY: &str = "repositories";
+const INSTALLED_KEY: &str = "installed";
+
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
 /// instead of reporting all of them as 500.
@@ -256,6 +263,105 @@ impl Store {
     /// Where a plugin's own files live: `<config>/plugins/{id}`.
     pub fn plugin_dir(&self, namespace: &str) -> PathBuf {
         self.root.join("plugins").join(namespace)
+    }
+
+    // ── plugin repository and install records ─────────────────────────────
+
+    /// Where an installed plugin's extracted files live:
+    /// `<config>/plugins/.installed/{id}`. Kept apart from `plugin_dir` (the
+    /// plugin's *runtime data* dir) so replacing a version never touches a
+    /// loaded plugin's own storage.
+    pub fn installed_dir(&self, id: &str) -> PathBuf {
+        self.root.join("plugins").join(".installed").join(id)
+    }
+
+    /// Scratch space for downloaded archives: `<config>/plugins/.cache`.
+    pub fn cache_dir(&self) -> PathBuf {
+        self.root.join("plugins").join(".cache")
+    }
+
+    /// The configured plugin-repository URLs, newest first.
+    pub async fn repo_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        let value = self.plugin_get(CORE_NAMESPACE, REPOSITORIES_KEY).await?;
+        Ok(value
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default())
+    }
+
+    /// Register a repository URL. Refuses duplicates.
+    pub async fn repo_add(&self, url: &str) -> Result<Vec<serde_json::Value>, StoreError> {
+        let mut repos = self.repo_list().await?;
+        if repos.iter().any(|repo| repo["url"] == url) {
+            return Err(StoreError::Plugin(
+                "that repository is already registered".to_string(),
+            ));
+        }
+        repos.push(serde_json::json!({ "id": Uuid::new_v4().to_string(), "url": url }));
+        self.plugin_set(
+            CORE_NAMESPACE,
+            REPOSITORIES_KEY,
+            &serde_json::Value::Array(repos.clone()),
+        )
+        .await?;
+        Ok(repos)
+    }
+
+    /// Forget one registered repository, by its record id.
+    pub async fn repo_remove(&self, id: &str) -> Result<Vec<serde_json::Value>, StoreError> {
+        let mut repos = self.repo_list().await?;
+        let before = repos.len();
+        repos.retain(|repo| repo["id"].as_str() != Some(id));
+        if repos.len() == before {
+            return Err(StoreError::Plugin("no repository with that id".to_string()));
+        }
+        self.plugin_set(
+            CORE_NAMESPACE,
+            REPOSITORIES_KEY,
+            &serde_json::Value::Array(repos.clone()),
+        )
+        .await?;
+        Ok(repos)
+    }
+
+    /// The installed plugins: one record per plugin id with `version`, `rid`,
+    /// `repo`, `installed_at`, and `dir`.
+    pub async fn installed_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        let value = self.plugin_get(CORE_NAMESPACE, INSTALLED_KEY).await?;
+        Ok(value
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default())
+    }
+
+    /// Record a finished install, replacing any earlier record for the id.
+    pub async fn record_installed(
+        &self,
+        entry: serde_json::Value,
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        let id = entry["id"].as_str().unwrap_or_default().to_string();
+        let mut installed = self.installed_list().await?;
+        installed.retain(|record| record["id"].as_str() != Some(id.as_str()));
+        installed.push(entry);
+        self.plugin_set(
+            CORE_NAMESPACE,
+            INSTALLED_KEY,
+            &serde_json::Value::Array(installed.clone()),
+        )
+        .await?;
+        Ok(installed)
+    }
+
+    /// Replace the whole installed list; the uninstall path uses this after
+    /// dropping one entry and its directory.
+    pub async fn replace_installed(
+        &self,
+        installed: Vec<serde_json::Value>,
+    ) -> Result<(), StoreError> {
+        self.plugin_set(
+            CORE_NAMESPACE,
+            INSTALLED_KEY,
+            &serde_json::Value::Array(installed),
+        )
+        .await
     }
 
     /// The read-only core-data handle handed to plugins that hold

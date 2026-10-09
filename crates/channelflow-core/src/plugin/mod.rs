@@ -1,5 +1,6 @@
-//! How the core loads, lists, and drives plugins.
+//! How the core loads, lists, drives, and installs plugins.
 
 pub mod manager;
+pub mod repo;
 
 pub use manager::PluginManager;

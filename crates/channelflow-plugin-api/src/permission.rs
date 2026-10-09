@@ -33,6 +33,8 @@ pub enum Permission {
     UiSettings,
     /// Inject into a specific UI area.
     UiInject(String),
+    /// Write files under a named area of the core's filesystem, e.g. images.
+    FilesystemWrite(String),
     /// Read the core configuration.
     SystemConfigRead,
     /// Subscribe to core events.
@@ -66,6 +68,12 @@ impl Permission {
             ("ui", Some(arg)) if arg.starts_with("inject:") => {
                 Ok(Permission::UiInject(arg["inject:".len()..].to_string()))
             }
+            // Any other `ui:<area>` is treated as a named injection point; a
+            // media-source plugin's `ui:library_tab` is one of these.
+            ("ui", Some(arg)) => Ok(Permission::UiInject(arg.to_string())),
+            ("filesystem", Some(arg)) if arg.starts_with("write:") => {
+                Ok(Permission::FilesystemWrite(arg["write:".len()..].to_string()))
+            }
             ("system", Some("config:read")) => Ok(Permission::SystemConfigRead),
             ("system", Some("events")) => Ok(Permission::SystemEvents),
             _ => Err(format!("\"{raw}\" is not a permission the base knows")),
@@ -92,6 +100,7 @@ impl Permission {
             Permission::UiPages => "ui:pages".to_string(),
             Permission::UiSettings => "ui:settings".to_string(),
             Permission::UiInject(area) => format!("ui:inject:{area}"),
+            Permission::FilesystemWrite(area) => format!("filesystem:write:{area}"),
             Permission::SystemConfigRead => "system:config:read".to_string(),
             Permission::SystemEvents => "system:events".to_string(),
         }
@@ -117,12 +126,21 @@ mod tests {
             "ui:pages",
             "ui:settings",
             "ui:inject:settings",
+            "ui:inject:library_tab",
+            "filesystem:write:images",
+            "storage:write:jellyfin",
             "system:config:read",
             "system:events",
         ] {
             let parsed = Permission::parse(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
             assert_eq!(parsed.as_str(), raw);
         }
+        // The shorthand `ui:<area>` is accepted and canonicalises to
+        // `ui:inject:<area>`; media sources use it for `ui:library_tab`.
+        assert_eq!(
+            Permission::parse("ui:library_tab").unwrap().as_str(),
+            "ui:inject:library_tab"
+        );
     }
 
     #[test]

@@ -1,0 +1,275 @@
+//! The `MediaSource` contract: how a plugin becomes a media library source.
+//!
+//! A media-source plugin (the Jellyfin sync being the first) implements
+//! [`MediaSource`] on top of the ordinary [`Plugin`](crate::plugin::Plugin)
+//! lifecycle. It declares the fields a connection form needs, tests a
+//! connection's URL and key, lists its libraries, and — when asked — syncs a
+//! chosen set of libraries into its own database tables, writing poster and
+//! people images under the core's image root. The core shows these sources,
+//! stores `Connection`s, and drives sync; the plugin owns its schema, its
+//! dedup rules, and the per-version file selection.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use axum::Router;
+use serde::{Deserialize, Serialize};
+
+use crate::database::PluginDatabase;
+
+/// The kinds of media a source can provide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaType {
+    Movie,
+    Series,
+    Season,
+    Episode,
+    Artist,
+    Album,
+    Track,
+    MusicVideo,
+}
+
+/// One configured connection to a media-source server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Connection {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub api_key: String,
+    /// Path remaps: `{ from -> to }` applied to remote paths after sync.
+    #[serde(default)]
+    pub path_remaps: serde_json::Value,
+    /// The user whose libraries this connection reads (optional per source).
+    #[serde(default)]
+    pub sync_user_id: Option<String>,
+    /// Defaults to verifying TLS; turn off for self-signed test servers.
+    #[serde(default = "default_true")]
+    pub verify_tls: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            api_key: String::new(),
+            path_remaps: serde_json::json!({}),
+            sync_user_id: None,
+            verify_tls: true,
+        }
+    }
+}
+
+/// A single form field a connection form renders for this source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FieldSpec {
+    Text { key: String, label: String, required: bool },
+    Secret { key: String, label: String, required: bool },
+    Remaps { key: String, label: String, required: bool },
+    Action { key: String, label: String, required: bool },
+}
+
+impl FieldSpec {
+    pub fn text(key: &str, label: &str) -> Self {
+        Self::Text {
+            key: key.to_string(),
+            label: label.to_string(),
+            required: false,
+        }
+    }
+
+    pub fn secret(key: &str, label: &str) -> Self {
+        Self::Secret {
+            key: key.to_string(),
+            label: label.to_string(),
+            required: false,
+        }
+    }
+
+    pub fn remaps(key: &str, label: &str) -> Self {
+        Self::Remaps {
+            key: key.to_string(),
+            label: label.to_string(),
+            required: false,
+        }
+    }
+
+    pub fn action(key: &str, label: &str) -> Self {
+        Self::Action {
+            key: key.to_string(),
+            label: label.to_string(),
+            required: false,
+        }
+    }
+
+    pub fn required(mut self) -> Self {
+        self.set_required(true);
+        self
+    }
+
+    fn set_required(&mut self, required: bool) {
+        match self {
+            Self::Text { required: value, .. }
+            | Self::Secret { required: value, .. }
+            | Self::Remaps { required: value, .. }
+            | Self::Action { required: value, .. } => *value = required,
+        }
+    }
+}
+
+/// The answer to "is this URL + key a working server for this source?"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestResult {
+    pub ok: bool,
+    pub code: TestCode,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TestCode {
+    Ok,
+    AuthFailed,
+    Unreachable,
+    BadUrl,
+}
+
+impl TestResult {
+    pub fn ok(detail: impl Into<String>) -> Self {
+        Self {
+            ok: true,
+            code: TestCode::Ok,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn auth_failed(detail: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            code: TestCode::AuthFailed,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn unreachable(detail: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            code: TestCode::Unreachable,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn bad_url(detail: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            code: TestCode::BadUrl,
+            detail: detail.into(),
+        }
+    }
+}
+
+/// A library the server exposes, remote identity + collection type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Library {
+    pub remote_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub collection_type: Option<String>,
+}
+
+/// Everything a sync pass needs from the core.
+#[derive(Clone)]
+pub struct SyncCtx {
+    /// The connection being synced.
+    pub connection: Connection,
+    /// This source's secret for that connection.
+    pub api_key: String,
+    /// The libraries to sync on this pass.
+    pub enabled_libraries: Vec<Library>,
+    /// The connection's row id in the core's `connections` table.
+    pub connection_id: i64,
+    /// The plugin's own tables, on the base's Postgres.
+    pub db: Arc<dyn PluginDatabase>,
+    /// Where posters and people images are written (`<config>/Images`).
+    pub image_root: PathBuf,
+    /// The connection's path remaps, `{ from -> to }`.
+    pub remaps: serde_json::Value,
+}
+
+/// What a sync pass changed.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct SyncReport {
+    pub added: u64,
+    pub updated: u64,
+    pub removed: u64,
+    pub errors: u64,
+}
+
+/// The media-source plugin contract.
+#[async_trait]
+pub trait MediaSource: Send + Sync {
+    /// Stable source id, e.g. `jellyfin`; also the connection `kind`.
+    fn type_id(&self) -> &'static str;
+
+    /// Human name shown in the connection picker.
+    fn display_name(&self) -> &'static str;
+
+    /// The fields a connection form renders for this source.
+    fn connection_fields(&self) -> Vec<FieldSpec>;
+
+    /// What media kinds this source can sync.
+    fn supported_media(&self) -> &[MediaType];
+
+    /// Check a connection's URL and key.
+    async fn test_connection(&self, connection: &Connection, api_key: &str) -> TestResult;
+
+    /// The libraries the server exposes, for the connection's picker.
+    async fn list_libraries(&self, connection: &Connection, api_key: &str) -> Vec<Library>;
+
+    /// Sync the chosen libraries. Implementations update their own database
+    /// tables, write images, and report what changed.
+    async fn sync_library(&self, ctx: SyncCtx) -> SyncReport;
+
+    /// Extra API routes mounted under `/api/plugins/{id}`, if any.
+    fn routes(&self) -> Option<Router> {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_defaults_verify_tls_on() {
+        assert!(Connection::default().verify_tls);
+        assert_eq!(Connection::default().path_remaps, serde_json::json!({}));
+    }
+
+    #[test]
+    fn field_specs_mark_required() {
+        let name = FieldSpec::text("name", "Connection name").required();
+        match name {
+            FieldSpec::Text { key, required, .. } => {
+                assert_eq!(key, "name");
+                assert!(required);
+            }
+            _ => panic!("expected a text field"),
+        }
+    }
+
+    #[test]
+    fn test_result_carries_the_code() {
+        let result = TestResult::auth_failed("nope");
+        assert!(!result.ok);
+        assert_eq!(result.code, TestCode::AuthFailed);
+    }
+}

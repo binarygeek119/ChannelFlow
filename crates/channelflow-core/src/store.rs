@@ -370,6 +370,56 @@ impl Store {
         .await
     }
 
+    // ── media-source connections ───────────────────────────────────────────
+
+    /// Every media-source connection, oldest first.
+    pub async fn connection_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        match &self.backend {
+            Backend::Files => file::connection_list(&self.root),
+            Backend::Postgres(pool) => pg::connection_list(pool).await,
+        }
+    }
+
+    /// Add a connection for a media source. `config` is the source's own
+    /// connection object (name, url, api key, remaps, …).
+    pub async fn connection_create(
+        &self,
+        kind: &str,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value, StoreError> {
+        match &self.backend {
+            Backend::Files => file::connection_create(&self.root, kind, config),
+            Backend::Postgres(pool) => pg::connection_create(pool, kind, config).await,
+        }
+    }
+
+    /// Update a connection's config; the `kind` never changes.
+    pub async fn connection_update(
+        &self,
+        id: i64,
+        config: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        match &self.backend {
+            Backend::Files => file::connection_update(&self.root, id, config),
+            Backend::Postgres(pool) => pg::connection_update(pool, id as i32, config).await,
+        }
+    }
+
+    /// Remove a connection. Plugins whose tables reference `connections(id)`
+    /// cascade with it; the caller is responsible for any post-cascade sweep.
+    pub async fn connection_delete(&self, id: i64) -> Result<Option<serde_json::Value>, StoreError> {
+        match &self.backend {
+            Backend::Files => file::connection_delete(&self.root, id),
+            Backend::Postgres(pool) => pg::connection_delete(pool, id as i32).await,
+        }
+    }
+
+    /// Where media-source plugins write posters and people images:
+    /// `<config>/Images`.
+    pub fn images_dir(&self) -> PathBuf {
+        self.root.join("Images")
+    }
+
     /// The read-only core-data handle handed to plugins that hold
     /// `api:core:read`.
     pub fn core_data(&self) -> StoreCoreData {
@@ -579,6 +629,22 @@ impl PluginDatabase for PgPluginDatabase {
             .map_err(database_error)
     }
 
+    async fn execute_params(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<u64, PluginDatabaseError> {
+        let mut query = sqlx::query(sql);
+        for param in params {
+            query = bind_param(query, param);
+        }
+        query
+            .execute(&self.pool)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(database_error)
+    }
+
     async fn fetch(&self, sql: &str) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
         let wrapped = format!("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t");
         let row = sqlx::query(&wrapped)
@@ -593,6 +659,44 @@ impl PluginDatabase for PgPluginDatabase {
             serde_json::Value::Array(rows) => Ok(rows),
             _ => Ok(Vec::new()),
         }
+    }
+
+    async fn fetch_params(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
+        let wrapped = format!("SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM ({sql}) t");
+        let mut query = sqlx::query(&wrapped);
+        for param in params {
+            query = bind_param(query, param);
+        }
+        let row = query
+            .fetch_one(&self.pool)
+            .await
+            .map_err(database_error)?;
+        let value: serde_json::Value = row
+            .try_get::<Json<serde_json::Value>, _>(0)
+            .map_err(database_error)?
+            .0;
+        match value {
+            serde_json::Value::Array(rows) => Ok(rows),
+            _ => Ok(Vec::new()),
+        }
+    }
+}
+
+/// Bind one JSON parameter as text. `null` becomes SQL NULL; strings pass
+/// through; booleans/numbers use their JSON text form; the SQL casts where a
+/// typed column needs it (`$1::int`, `$1::bool`).
+fn bind_param<'a>(
+    query: sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    param: &serde_json::Value,
+) -> sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    match param {
+        serde_json::Value::Null => query.bind(None::<String>),
+        serde_json::Value::String(text) => query.bind(text.clone()),
+        other => query.bind(other.to_string()),
     }
 }
 
@@ -843,6 +947,92 @@ mod file {
         }
     }
 
+    // ── media-source connections ───────────────────────────────────────────
+    // One JSON document under `<config>/connections.json` (written 0600; the
+    // configs carry API keys). Postgres keeps the same rows in `connections`,
+    // which the media-source plugins' own tables reference.
+
+    fn connections_path(root: &Path) -> PathBuf {
+        root.join("connections.json")
+    }
+
+    fn read_connections(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
+        let path = connections_path(root);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        Ok(value.as_array().cloned().unwrap_or_default())
+    }
+
+    fn write_connections(root: &Path, connections: &[serde_json::Value]) -> Result<(), StoreError> {
+        let json = serde_json::to_string_pretty(&serde_json::Value::Array(connections.to_vec()))?;
+        write_private(&connections_path(root), &json)?;
+        Ok(())
+    }
+
+    pub fn connection_list(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
+        read_connections(root)
+    }
+
+    pub fn connection_create(
+        root: &Path,
+        kind: &str,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value, StoreError> {
+        let mut connections = read_connections(root)?;
+        let next = connections
+            .iter()
+            .map(|connection| connection["id"].as_i64().unwrap_or(0))
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let connection = serde_json::json!({ "id": next, "kind": kind, "config": config });
+        connections.push(connection.clone());
+        write_connections(root, &connections)?;
+        Ok(connection)
+    }
+
+    pub fn connection_update(
+        root: &Path,
+        id: i64,
+        config: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let mut connections = read_connections(root)?;
+        let Some(index) = connections
+            .iter()
+            .position(|connection| connection["id"].as_i64() == Some(id))
+        else {
+            return Ok(None);
+        };
+        let kind = connections[index]["kind"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let connection = serde_json::json!({ "id": id, "kind": kind, "config": config });
+        connections[index] = connection.clone();
+        write_connections(root, &connections)?;
+        Ok(Some(connection))
+    }
+
+    pub fn connection_delete(
+        root: &Path,
+        id: i64,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let mut connections = read_connections(root)?;
+        let Some(index) = connections
+            .iter()
+            .position(|connection| connection["id"].as_i64() == Some(id))
+        else {
+            return Ok(None);
+        };
+        let removed = connections.remove(index);
+        write_connections(root, &connections)?;
+        Ok(Some(removed))
+    }
+
     /// Remove a plugin's whole storage directory.
     pub fn drop_plugin_data(root: &Path, namespace: &str) -> Result<u64, StoreError> {
         if !is_safe_namespace(namespace) {
@@ -898,6 +1088,14 @@ mod pg {
                 key TEXT NOT NULL,
                 value JSONB NOT NULL,
                 PRIMARY KEY (namespace, key)
+            )",
+            // Media-source connections, shared by every media-source plugin
+            // (the Jellyfin schema's tables reference connections(id)).
+            "CREATE TABLE IF NOT EXISTS connections (
+                id SERIAL PRIMARY KEY,
+                kind TEXT NOT NULL,
+                config JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
         ] {
             sqlx::query(statement).execute(pool).await?;
@@ -1113,6 +1311,80 @@ mod pg {
             .execute(pool)
             .await?;
         Ok(())
+    }
+
+    // ── media-source connections ───────────────────────────────────────────
+
+    pub async fn connection_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
+        let rows = sqlx::query("SELECT id, kind, config FROM connections ORDER BY id")
+            .fetch_all(pool)
+            .await?;
+        let mut connections = Vec::new();
+        for row in rows {
+            let id: i32 = row.try_get("id")?;
+            let kind: String = row.try_get("kind")?;
+            let config: serde_json::Value =
+                row.try_get::<Json<serde_json::Value>, _>("config")?.0;
+            connections.push(serde_json::json!({ "id": id, "kind": kind, "config": config }));
+        }
+        Ok(connections)
+    }
+
+    pub async fn connection_create(
+        pool: &PgPool,
+        kind: &str,
+        config: &serde_json::Value,
+    ) -> Result<serde_json::Value, StoreError> {
+        let row = sqlx::query(
+            "INSERT INTO connections (kind, config) VALUES ($1, $2) RETURNING id, kind, config",
+        )
+        .bind(kind)
+        .bind(Json(config))
+        .fetch_one(pool)
+        .await?;
+        let id: i32 = row.try_get("id")?;
+        let config: serde_json::Value = row.try_get::<Json<serde_json::Value>, _>("config")?.0;
+        Ok(serde_json::json!({ "id": id, "kind": kind, "config": config }))
+    }
+
+    pub async fn connection_update(
+        pool: &PgPool,
+        id: i32,
+        config: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let row = sqlx::query(
+            "UPDATE connections SET config = $1 WHERE id = $2 RETURNING id, kind, config",
+        )
+        .bind(Json(config))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        match row {
+            Some(row) => {
+                let kind: String = row.try_get("kind")?;
+                let config: serde_json::Value =
+                    row.try_get::<Json<serde_json::Value>, _>("config")?.0;
+                Ok(Some(serde_json::json!({ "id": id, "kind": kind, "config": config })))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub async fn connection_delete(
+        pool: &PgPool,
+        id: i32,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let row = sqlx::query("DELETE FROM connections WHERE id = $1 RETURNING id, kind")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+        match row {
+            Some(row) => {
+                let kind: String = row.try_get("kind")?;
+                Ok(Some(serde_json::json!({ "id": id, "kind": kind })))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Drop every table this plugin created and delete its key/value rows.

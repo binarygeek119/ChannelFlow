@@ -1,4 +1,5 @@
 mod api;
+mod media;
 mod model;
 mod plugin;
 mod store;
@@ -168,6 +169,11 @@ async fn main() -> Result<()> {
     let plugin_routers = manager.routers();
     let plugins = Arc::new(Mutex::new(manager));
 
+    // The media sources: plugins that implement the MediaSource contract
+    // register their connection forms and sync drives here. Jellyfin is added
+    // when its crate is wired into this build.
+    let mut media_sources = media::MediaSources::new();
+
     // The plugin store: seed the ChannelFlow-Plugins repository so the Store
     // tab has something to show, unless the operator points it elsewhere.
     if store.repo_list().await?.is_empty() {
@@ -204,7 +210,7 @@ async fn main() -> Result<()> {
     };
     axum::serve(
         listener,
-        api::router(store, about, plugins, http, plugin_routers),
+        api::router(store, about, plugins, Arc::new(media_sources), http, plugin_routers),
     )
     .await?;
     Ok(())

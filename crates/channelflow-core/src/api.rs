@@ -15,6 +15,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::media::MediaSources;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::{repo, PluginManager};
 use crate::store::{Store, StoreError};
@@ -29,13 +30,15 @@ pub struct AboutInfo {
 }
 
 /// What handlers may reach: the channel store, the process facts above, the
-/// loaded plugins, and the outbound HTTP client repository installs use. The
-/// same client is what each plugin's own state holds.
+/// loaded plugins, the registered media sources, and the outbound HTTP client
+/// repository installs use. The same client is what each plugin's own state
+/// holds.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Store,
     pub about: AboutInfo,
     pub plugins: Arc<Mutex<PluginManager>>,
+    pub media: Arc<MediaSources>,
     pub http: reqwest::Client,
 }
 
@@ -43,6 +46,7 @@ pub fn router(
     store: Store,
     about_info: AboutInfo,
     plugins: Arc<Mutex<PluginManager>>,
+    media: Arc<MediaSources>,
     http: reqwest::Client,
     plugin_routers: Vec<(String, Router)>,
 ) -> Router {
@@ -72,11 +76,15 @@ pub fn router(
         .route("/api/plugins/install", post(install_plugin))
         .route("/api/plugins/installed", get(list_installed))
         .route("/api/plugins/installed/{id}", delete(uninstall_plugin))
+        .route("/api/mediasources", get(list_media_sources))
+        .route("/api/connections", get(list_connections).post(create_connection))
+        .route("/api/connections/{id}", put(update_connection).delete(delete_connection))
         .route("/live/{asset}", get(live_pending))
         .with_state(AppState {
             store,
             about: about_info,
             plugins,
+            media,
             http,
         });
     for (id, plugin_router) in plugin_routers {
@@ -680,6 +688,74 @@ async fn uninstall_plugin(
     })))
 }
 
+// ── media sources and their connections ──────────────────────────────────
+
+/// The registered media-source plugins: identity, connection fields, and
+/// supported media, for the connection pickers.
+async fn list_media_sources(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({ "sources": state.media.catalog() }))
+}
+
+async fn list_connections(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let connections = state.store.connection_list().await?;
+    Ok(Json(json!({ "connections": connections })))
+}
+
+#[derive(Deserialize)]
+struct NewConnection {
+    /// The media source's `type_id`, e.g. `jellyfin`.
+    kind: String,
+    /// The source's own connection object.
+    config: serde_json::Value,
+}
+
+async fn create_connection(
+    State(state): State<AppState>,
+    Json(input): Json<NewConnection>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    if state.media.find(&input.kind).is_none() {
+        return Err(StoreError::Plugin(format!(
+            "no media source registered as {:?}",
+            input.kind
+        ))
+        .into());
+    }
+    let connection = state.store.connection_create(&input.kind, &input.config).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "connection": connection }))))
+}
+
+#[derive(Deserialize)]
+struct UpdateConnection {
+    config: serde_json::Value,
+}
+
+async fn update_connection(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(input): Json<UpdateConnection>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let connection = state
+        .store
+        .connection_update(id, &input.config)
+        .await?
+        .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
+    Ok(Json(json!({ "connection": connection })))
+}
+
+async fn delete_connection(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let removed = state
+        .store
+        .connection_delete(id)
+        .await?
+        .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
+    Ok(Json(json!({ "removed": removed })))
+}
+
 /// The streaming paths the Live TV page advertises.
 ///
 /// Only port `8097` is published and the encoder listens inside the container
@@ -813,7 +889,7 @@ mod tests {
             listen_port: 0,
             started: std::time::Instant::now(),
         };
-        let _ = router(store, about, plugins, http, routers);
+        let _ = router(store, about, plugins, Arc::new(crate::media::MediaSources::new()), http, routers);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -41,9 +41,24 @@ pub trait PluginDatabase: Send + Sync {
     /// Run one statement — DDL or DML — returning rows affected (0 for DDL).
     async fn execute(&self, sql: &str) -> Result<u64, PluginDatabaseError>;
 
+    /// Like [`Self::execute`], with `$1..$n` parameters. Values are bound as
+    /// text; cast in the SQL where a typed column needs it (`$1::int`).
+    async fn execute_params(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<u64, PluginDatabaseError>;
+
     /// Run a query and return its rows as JSON objects. The query is wrapped
     /// in `json_agg(row_to_json(...))`, so any `SELECT` works.
     async fn fetch(&self, sql: &str) -> Result<Vec<serde_json::Value>, PluginDatabaseError>;
+
+    /// Like [`Self::fetch`] with `$1..$n` parameters, bound as text.
+    async fn fetch_params(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<Vec<serde_json::Value>, PluginDatabaseError>;
 }
 
 /// The double used on the file backend and in tests: there is no database.
@@ -68,7 +83,27 @@ impl PluginDatabase for NoPluginDatabase {
         ))
     }
 
+    async fn execute_params(
+        &self,
+        _sql: &str,
+        _params: &[serde_json::Value],
+    ) -> Result<u64, PluginDatabaseError> {
+        Err(PluginDatabaseError(
+            "this backend has no database — set DATABASE_URL".to_string(),
+        ))
+    }
+
     async fn fetch(&self, _sql: &str) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
+        Err(PluginDatabaseError(
+            "this backend has no database — set DATABASE_URL".to_string(),
+        ))
+    }
+
+    async fn fetch_params(
+        &self,
+        _sql: &str,
+        _params: &[serde_json::Value],
+    ) -> Result<Vec<serde_json::Value>, PluginDatabaseError> {
         Err(PluginDatabaseError(
             "this backend has no database — set DATABASE_URL".to_string(),
         ))

@@ -15,6 +15,7 @@
 pub mod core;
 pub mod database;
 pub mod manifest;
+pub mod media;
 pub mod permission;
 pub mod plugin;
 pub mod storage;
@@ -24,6 +25,10 @@ pub mod version;
 pub use core::{CoreChannel, CoreData, CoreDataError, InMemoryCoreData, NoCoreData};
 pub use database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 pub use manifest::{Assets, Hooks, PluginManifest, Repository};
+pub use media::{
+    Connection, FieldSpec, Library, MediaSource, MediaType, SyncCtx, SyncReport, TestCode,
+    TestResult,
+};
 pub use permission::Permission;
 pub use plugin::{
     NoopPlugin, Plugin, PluginApi, PluginError, PluginHealth, PluginLogger, PLUGIN_ABI_VERSION,

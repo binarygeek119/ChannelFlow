@@ -6,8 +6,18 @@
 //! cookie holds only the token; the token itself is kept in the store, where
 //! `logout` can revoke it.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+/// One password-reset request: the PIN handed to the operator through a file
+/// in the config directory, the file's name, and when it was issued.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetPin {
+    pub pin: String,
+    pub file: String,
+    pub created_at: DateTime<Utc>,
+}
 
 /// What setup stores. The password is never kept — only a salted hash.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -40,6 +50,26 @@ pub fn verify(record: &AuthRecord, password: &str) -> bool {
 /// Constant-time comparison of two session tokens.
 pub fn verify_token(left: &str, right: &str) -> bool {
     constant_time_eq(left.as_bytes(), right.as_bytes())
+}
+
+/// The characters a reset PIN is drawn from — no 0/O or 1/I, so it is easy to
+/// read back off a printed file.
+const PIN_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// A fresh reset pin: six pairs of digits and letters, dash-separated, e.g.
+/// `AB-1C-D2-E3-F4-G5`. Random each call.
+pub fn generate_pin() -> String {
+    let uuid = uuid::Uuid::new_v4();
+    let bytes = uuid.as_bytes();
+    let mut pin = String::with_capacity(17);
+    for pair in 0..6 {
+        if pair > 0 {
+            pin.push('-');
+        }
+        pin.push(PIN_CHARS[(bytes[pair * 2] as usize) % PIN_CHARS.len()] as char);
+        pin.push(PIN_CHARS[(bytes[pair * 2 + 1] as usize) % PIN_CHARS.len()] as char);
+    }
+    pin
 }
 
 /// A new random salt and a new random session token.
@@ -75,5 +105,16 @@ mod tests {
         assert!(!verify(&record, "wrong"));
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
+    }
+
+    #[test]
+    fn pins_are_random_six_pairs() {
+        let one = generate_pin();
+        let two = generate_pin();
+        assert_ne!(one, two, "a fresh pin on every request");
+        assert_eq!(one.len(), 17, "six pairs joined by dashes");
+        assert!(one
+            .split('-')
+            .all(|pair| pair.len() == 2 && pair.bytes().all(|b| b.is_ascii_alphanumeric())));
     }
 }

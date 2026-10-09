@@ -1672,6 +1672,72 @@ document.getElementById("login-form").addEventListener("submit", async (event) =
   }
 });
 
+// ── forgotten password ──────────────────────────────────────────────────────
+// The reset pin is written to a file only in the server's config directory, so
+// nothing sensitive travels through this page. Resets are on a 10-minute
+// cooldown.
+
+function setResetNote(message, bad) {
+  const note = document.getElementById("reset-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+function showForgot() {
+  document.getElementById("login-view").hidden = true;
+  document.getElementById("reset-view").hidden = false;
+  setResetNote("");
+  document.getElementById("forgot-info").textContent = "";
+}
+
+function showLoginView() {
+  document.getElementById("reset-view").hidden = true;
+  document.getElementById("login-view").hidden = false;
+  document.getElementById("reset-pin").value = "";
+  document.getElementById("reset-pass").value = "";
+  document.getElementById("reset-pass2").value = "";
+}
+
+document.getElementById("forgot-link").addEventListener("click", showForgot);
+document.getElementById("reset-back").addEventListener("click", showLoginView);
+
+document.getElementById("forgot-generate").addEventListener("click", async () => {
+  document.getElementById("forgot-generate").disabled = true;
+  document.getElementById("forgot-info").textContent = "Writing a reset pin…";
+  setResetNote("");
+  try {
+    const data = await request("/api/auth/forgot", { method: "POST" });
+    document.getElementById("forgot-info").textContent =
+      `Reset pin written to config/${data.file}. Open that file to read it.`;
+  } catch (error) {
+    document.getElementById("forgot-info").textContent = "";
+    setResetNote(error.message || "Could not generate a reset pin.", true);
+  } finally {
+    document.getElementById("forgot-generate").disabled = false;
+  }
+});
+
+document.getElementById("reset-submit").addEventListener("click", async () => {
+  const pin = document.getElementById("reset-pin").value.trim();
+  const password = document.getElementById("reset-pass").value;
+  const confirm = document.getElementById("reset-pass2").value;
+  if (!pin) return setResetNote("Enter the pin from the reset file.", true);
+  if (password.length < 4) return setResetNote("Password must be at least 4 characters.", true);
+  if (password !== confirm) return setResetNote("Passwords do not match.", true);
+  setResetNote("");
+  try {
+    await request("/api/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ pin, password }),
+    });
+    showLoginView();
+    setLoginNote("Password changed — log in with the new one.", false);
+  } catch (error) {
+    setResetNote(error.message || "Could not reset the password.", true);
+  }
+});
+
 async function boot() {
   try {
     const state = await request("/api/auth/state");

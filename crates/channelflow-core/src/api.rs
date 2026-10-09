@@ -16,7 +16,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::auth::{self, AuthRecord};
+use crate::auth::{self, AuthRecord, ResetPin};
 use crate::media::MediaSources;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::{repo, PluginManager};
@@ -75,6 +75,8 @@ pub fn router(
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/setup", post(setup))
+        .route("/api/auth/forgot", post(forgot))
+        .route("/api/auth/reset", post(reset_password))
         .route("/api/channels", get(list_channels).post(create_channel))
         .route(
             "/api/channels/{id}",
@@ -248,6 +250,105 @@ async fn setup(
         setup_complete: true,
     };
     state.store.save_auth_record(&record).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// How long is a password-reset pin valid for, and the cooldown between
+/// resets.
+const RESET_COOLDOWN_SECONDS: i64 = 600;
+const RESET_PIN_TTL_SECONDS: i64 = 1800;
+
+/// Start a password reset: write a fresh random pin to a file in the config
+/// directory (`reset-<MM-DD-YY-HH-MM-SS>.txt`) that only someone with filesystem
+/// access can read. Nothing about the pin goes through the web UI.
+async fn forgot(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let now = chrono::Utc::now();
+    if let Some(last) = state.store.last_reset_at().await? {
+        let elapsed = now - last;
+        if elapsed <= chrono::Duration::seconds(RESET_COOLDOWN_SECONDS) {
+            let wait = RESET_COOLDOWN_SECONDS - elapsed.num_seconds();
+            return Err(StoreError::Plugin(format!(
+                "a reset is still on cooldown — try again in {wait} seconds"
+            ))
+            .into());
+        }
+    }
+
+    let pin = auth::generate_pin();
+    let filename = format!("reset-{}.txt", chrono::Local::now().format("%m-%d-%y-%H-%M-%S"));
+    let path = state.store.config_dir().join(&filename);
+    std::fs::write(
+        &path,
+        format!("ChannelFlow password reset pin\n\npin: {pin}\n"),
+    )
+    .map_err(StoreError::Io)?;
+
+    state
+        .store
+        .save_reset_pin(&ResetPin {
+            pin: pin.clone(),
+            file: filename.clone(),
+            created_at: now,
+        })
+        .await?;
+    state.store.save_last_reset_at(now).await?;
+    tracing::info!(path = %path.display(), "wrote a password reset pin — only readable from the config directory");
+    Ok(Json(json!({ "file": filename })))
+}
+
+#[derive(Deserialize)]
+struct ResetBody {
+    pin: String,
+    password: String,
+}
+
+/// Finish a password reset: match the pin from the config-directory file,
+/// then set the new password. The file and the stored pin are cleared.
+async fn reset_password(
+    State(state): State<AppState>,
+    Json(input): Json<ResetBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let active = state
+        .store
+        .reset_pin()
+        .await?
+        .ok_or_else(|| StoreError::Plugin("no reset is pending — generate a pin first".to_string()))?;
+    let age = chrono::Utc::now() - active.created_at;
+    if age > chrono::Duration::seconds(RESET_PIN_TTL_SECONDS) {
+        // Clear it so a stale pin cannot be tried forever.
+        let _ = state.store.clear_reset_pin().await;
+        return Err(StoreError::Plugin(
+            "that reset pin has expired — generate a new one".to_string(),
+        )
+        .into());
+    }
+    if !auth::verify_token(&active.pin, input.pin.trim()) {
+        return Err(StoreError::Plugin(
+            "that pin does not match the one in the reset file".to_string(),
+        )
+        .into());
+    }
+    if input.password.len() < 4 {
+        return Err(StoreError::Plugin(
+            "password must be at least 4 characters".to_string(),
+        )
+        .into());
+    }
+    let mut record = state
+        .store
+        .auth_record()
+        .await?
+        .ok_or_else(|| StoreError::Plugin("there is no account to reset".to_string()))?;
+    let salt = auth::new_secret();
+    record.salt = salt.clone();
+    record.password_hash = auth::hash_password(&salt, &input.password);
+    state.store.save_auth_record(&record).await?;
+
+    let _ = std::fs::remove_file(state.store.config_dir().join(&active.file));
+    state.store.clear_reset_pin().await?;
+    state.store.save_last_reset_at(chrono::Utc::now()).await?;
+    // Any open session is old credentials; revoke it after a reset.
+    state.store.clear_session().await?;
     Ok(Json(json!({ "ok": true })))
 }
 

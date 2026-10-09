@@ -66,6 +66,8 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/auth/login` | log in; sets the `channelflow_session` cookie |
 | `POST` | `/api/auth/logout` | invalidate the session |
 | `POST` | `/api/auth/setup` | create the Web UI admin account and finish setup |
+| `POST` | `/api/auth/forgot` | write a random reset pin to `<config>/reset-<timestamp>.txt`; one per 10 minutes |
+| `POST` | `/api/auth/reset` | match the pin from that file and set a new password |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |
 | `GET` | `/api/channels/{id}` | one channel, `404` if absent |
@@ -190,6 +192,8 @@ The file is committed on both `master` and `2.0.0` because GitHub only runs `sch
 The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears: a short introduction, an explanation of the plugin model (and that some plugins are required), then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
 
 After that, every API call except the auth endpoints and `/api/health` requires a session. `POST /api/auth/login` with the account created during setup sets a `channelflow_session` cookie (`HttpOnly`); the session lives in the store (file or Postgres) so a restart keeps you logged in, and `logout` revokes it. The password is never stored — only a salted hash. Setup is described endpoint-by-endpoint in the API table above.
+
+**Forgot a password?** There is no mail server, so the login screen's *Forgot password* flow writes a six-pair random pin to `<config>/reset-<timestamp>.txt` (e.g. `reset-10-16-26-15-45-32.txt`) — a file only someone with filesystem access to the config volume can read, never exposed by the web UI. Enter the pin plus a new password and it is changed; the file is deleted, the old session is revoked, and resets are limited to one every ten minutes.
 
 ## Running it
 

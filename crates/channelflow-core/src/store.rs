@@ -34,7 +34,7 @@ use sqlx::types::Json;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::auth::AuthRecord;
+use crate::auth::{AuthRecord, ResetPin};
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::registry::PluginRegistry;
 
@@ -58,6 +58,8 @@ const INSTALLED_KEY: &str = "installed";
 const PLUGIN_REGISTRY_KEY: &str = "plugin_registry";
 const AUTH_KEY: &str = "auth";
 const SESSION_KEY: &str = "auth_session";
+const RESET_KEY: &str = "auth_reset";
+const RESET_AT_KEY: &str = "auth_reset_at";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -490,6 +492,48 @@ impl Store {
 
     pub async fn clear_session(&self) -> Result<(), StoreError> {
         self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await
+    }
+
+    /// The active password-reset pin, issued by `forgot`.
+    pub async fn reset_pin(&self) -> Result<Option<ResetPin>, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, RESET_KEY).await? {
+            Some(value) => Ok(Some(serde_json::from_value(value)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn save_reset_pin(&self, reset: &ResetPin) -> Result<(), StoreError> {
+        let value = serde_json::to_value(reset)?;
+        self.plugin_set(CORE_NAMESPACE, RESET_KEY, &value).await
+    }
+
+    pub async fn clear_reset_pin(&self) -> Result<(), StoreError> {
+        self.plugin_delete(CORE_NAMESPACE, RESET_KEY).await
+    }
+
+    /// When the last password reset was issued, for the cooldown.
+    pub async fn last_reset_at(&self) -> Result<Option<chrono::DateTime<Utc>>, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, RESET_AT_KEY).await? {
+            Some(value) => Ok(serde_json::from_value(value)?),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn save_last_reset_at(
+        &self,
+        at: chrono::DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        self.plugin_set(
+            CORE_NAMESPACE,
+            RESET_AT_KEY,
+            &serde_json::to_value(at)?,
+        )
+        .await
+    }
+
+    /// The config directory, where reset pin files and plugin data live.
+    pub fn config_dir(&self) -> &Path {
+        &self.root
     }
 
     /// Erase everything a plugin stored: its key/value files or rows, and the

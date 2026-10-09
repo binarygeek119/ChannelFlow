@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=4">
+<link rel="stylesheet" href="/app.css?v=5">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -456,19 +456,46 @@
 </div>
 
 <div id="login-screen" class="auth-screen" hidden>
-  <form class="auth-card" id="login-form">
-    <img src="/logo.png" alt="ChannelFlow" class="auth-logo">
-    <h1>ChannelFlow</h1>
-    <p class="hint">Log in to manage your channels.</p>
-    <label class="field-label" for="login-username">Username</label>
-    <input id="login-username" type="text" autocomplete="username" spellcheck="false" autofocus>
-    <label class="field-label" for="login-password">Password</label>
-    <input id="login-password" type="password" autocomplete="current-password">
-    <button type="submit" class="primary">Log in</button>
-    <p class="hint bad" id="login-note" hidden></p>
-  </form>
+  <div class="auth-card">
+    <div id="login-view">
+      <img src="/logo.png" alt="ChannelFlow" class="auth-logo">
+      <h1>ChannelFlow</h1>
+      <p class="hint">Log in to manage your channels.</p>
+      <form id="login-form">
+        <label class="field-label" for="login-username">Username</label>
+        <input id="login-username" type="text" autocomplete="username" spellcheck="false">
+        <label class="field-label" for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password">
+        <button type="submit" class="primary">Log in</button>
+      </form>
+      <button type="button" id="forgot-link" class="link">Forgot password?</button>
+      <p class="hint bad" id="login-note" hidden></p>
+    </div>
+
+    <div id="reset-view" hidden>
+      <img src="/logo.png" alt="ChannelFlow" class="auth-logo">
+      <h1>Reset password</h1>
+      <p class="hint">
+        ChannelFlow can't email you — it writes a <strong>reset pin</strong> to a file in the
+        server's <code>config</code> folder. Open that file from the filesystem (it never appears
+        in the web UI) and type the pin below. A new pin is random each time, and resets are
+        limited to one every ten minutes.
+      </p>
+      <button type="button" id="forgot-generate" class="primary">Generate reset pin</button>
+      <p class="hint" id="forgot-info"></p>
+      <label class="field-label" for="reset-pin">Reset pin</label>
+      <input id="reset-pin" type="text" autocomplete="off" spellcheck="false">
+      <label class="field-label" for="reset-pass">New password</label>
+      <input id="reset-pass" type="password" autocomplete="new-password">
+      <label class="field-label" for="reset-pass2">Confirm new password</label>
+      <input id="reset-pass2" type="password" autocomplete="new-password">
+      <button type="button" id="reset-submit" class="primary">Set new password</button>
+      <button type="button" id="reset-back" class="link">Back to login</button>
+      <p class="hint bad" id="reset-note" hidden></p>
+    </div>
+  </div>
 </div>
 
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 </body>
 </html>

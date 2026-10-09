@@ -24,6 +24,7 @@ channelflow-plugin-api = { git = "https://github.com/binarygeek119/ChannelFlow",
 # The bundled plugins live in their own repo; the base builds against them by
 # git so the combined image still ships them compiled in.
 channelflow-plugin-ai = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
+channelflow-plugin-ersatztv = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

@@ -2,7 +2,6 @@ mod api;
 mod model;
 mod plugin;
 mod store;
-mod transcode;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -87,12 +86,16 @@ async fn main() -> Result<()> {
                 )
             })?
     };
-    // The one-time move of the pre-plugin AI settings into the AI plugin's own
-    // storage happens before the plugin loads and reads it.
+    // The one-time moves of pre-plugin settings into their plugins' own
+    // storage happen before those plugins load and read them.
     store
         .upgrade_legacy_ai()
         .await
         .context("moving legacy AI settings into plugin storage")?;
+    store
+        .upgrade_legacy_transcode()
+        .await
+        .context("moving legacy transcode settings into plugin storage")?;
     store.seed().await?;
 
     // ── plugins ─────────────────────────────────────────────────────────────
@@ -122,6 +125,28 @@ async fn main() -> Result<()> {
         .enable(&ai_manifest.id)
         .await
         .map_err(|error| anyhow::anyhow!("enabling the AI plugin: {error}"))?;
+
+    // The ErsatzTV transcoding plugin reads the channel list through the
+    // api:core:read handle, so it gets the same store-backed CoreData.
+    let ersatztv_plugin = channelflow_plugin_ersatztv::plugin();
+    let ersatztv_manifest = ersatztv_plugin.metadata().clone();
+    let ersatztv_api = PluginApi {
+        id: ersatztv_manifest.id.clone(),
+        storage: store.plugin_storage(&ersatztv_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&ersatztv_manifest.id),
+        logger: PluginLogger::new(&ersatztv_manifest.id),
+        core: Arc::new(store.core_data()),
+    };
+    manager
+        .add(ersatztv_plugin, ersatztv_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the ErsatzTV plugin: {error}"))?;
+    manager
+        .enable(&ersatztv_manifest.id)
+        .await
+        .map_err(|error| anyhow::anyhow!("enabling the ErsatzTV plugin: {error}"))?;
 
     let plugin_routers = manager.routers();
     let plugins = Arc::new(Mutex::new(manager));

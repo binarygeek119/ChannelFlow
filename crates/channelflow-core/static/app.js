@@ -633,11 +633,14 @@ els.aiKeyReveal.addEventListener("click", () => {
 });
 
 // --- Transcode -------------------------------------------------------------
-// The field list is served, not hard-coded here: `/api/transcode` builds it
-// from next's `channel_config.json`, and a test asserts it names exactly the
-// settings next accepts. That is why the form cannot offer a setting next
-// would reject, or quietly miss one it would take — a field added upstream
-// shows up here after a refresh.
+// The Transcode feature is the ErsatzTV plugin; the page calls its routes.
+const ERSATZTV_API = "/api/plugins/com.channelflow.ersatztv";
+
+// The field list is served, not hard-coded here: the plugin builds it from
+// next's `channel_config.json`, and a test in the plugin asserts it names
+// exactly the settings next accepts. That is why the form cannot offer a
+// setting next would reject, or quietly miss one it would take — a field
+// added upstream shows up here after a refresh.
 //
 // next keeps these settings per channel. ChannelFlow keeps instance defaults
 // on the Transcode page and stores only a channel's *differences* from them,
@@ -919,7 +922,7 @@ function setTranscodeNote(message, bad) {
 
 async function loadTranscode() {
   try {
-    const data = await request("/api/transcode");
+    const data = await request(ERSATZTV_API);
     transcodeSpec = data.spec;
     transcodeDraft = data.defaults;
     renderSettings(els.transcodeGroups, data.spec.groups, transcodeDraft);
@@ -931,7 +934,7 @@ async function loadTranscode() {
 
 async function saveTranscode() {
   try {
-    const data = await request("/api/transcode", {
+    const data = await request(ERSATZTV_API, {
       method: "PUT",
       body: JSON.stringify(transcodeDraft),
     });
@@ -958,7 +961,7 @@ function showChannelTranscodeError(message) {
 
 async function openChannelTranscode(id) {
   try {
-    const data = await request(`/api/channels/${id}/transcode`);
+    const data = await request(`${ERSATZTV_API}/channels/${id}`);
     channelTranscode = data;
     // Edit a copy of the effective settings; the diff against the defaults is
     // what gets stored.
@@ -983,7 +986,7 @@ async function saveChannelTranscode() {
   const diff = diffAgainst(channelTranscode.defaults, channelTranscodeDraft);
   const patch = diff === NO_CHANGE ? {} : diff;
   try {
-    const data = await request(`/api/channels/${channelTranscode.channel.id}/transcode`, {
+    const data = await request(`${ERSATZTV_API}/channels/${channelTranscode.channel.id}`, {
       method: "PUT",
       body: JSON.stringify(patch),
     });
@@ -1010,7 +1013,7 @@ async function saveChannelTranscode() {
 async function clearChannelTranscode() {
   if (!channelTranscode) return;
   try {
-    const data = await request(`/api/channels/${channelTranscode.channel.id}/transcode`, {
+    const data = await request(`${ERSATZTV_API}/channels/${channelTranscode.channel.id}`, {
       method: "DELETE",
     });
     channelTranscode.overrides = data.overrides;

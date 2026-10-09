@@ -17,7 +17,6 @@ use uuid::Uuid;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::PluginManager;
 use crate::store::{Store, StoreError};
-use crate::transcode::{self, TranscodeConfig};
 
 /// Facts about the running process that only `main` can know: where the config
 /// directory is, what port is bound, and when the process started.
@@ -63,13 +62,6 @@ pub fn router(
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/{id}/enable", put(enable_plugin))
         .route("/api/plugins/{id}/disable", put(disable_plugin))
-        .route("/api/transcode", get(get_transcode).put(put_transcode))
-        .route(
-            "/api/channels/{id}/transcode",
-            get(get_channel_transcode)
-                .put(put_channel_transcode)
-                .delete(clear_channel_transcode),
-        )
         .route("/live/{asset}", get(live_pending))
         .with_state(AppState {
             store,
@@ -97,7 +89,6 @@ impl IntoResponse for ApiError {
             StoreError::NotFound(_) => (StatusCode::NOT_FOUND, self.0.to_string()),
             StoreError::DuplicateNumber(_) => (StatusCode::CONFLICT, self.0.to_string()),
             StoreError::Invalid(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
-            StoreError::Transcode(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Plugin(_) => (StatusCode::BAD_REQUEST, self.0.to_string()),
             StoreError::Io(_) | StoreError::Json(_) | StoreError::Database(_) => {
                 tracing::error!(error = %self.0, "storage failure");
@@ -300,6 +291,14 @@ async fn disable_plugin(
 /// answer `503` with a sentence rather than `404`: a player pointed at one gets
 /// an honest "not yet" instead of "no such thing", and the milestone repoints
 /// these at ErsatzTV next without the page changing.
+/// The streaming paths the Live TV page advertises.
+///
+/// Only port `8097` is published and the encoder listens inside the container
+/// on another port, so every URL the page shows is written against ChannelFlow's
+/// own origin. Until the playout milestone produces those streams these paths
+/// answer `503` with a sentence rather than `404`: a player pointed at one gets
+/// an honest "not yet" instead of "no such thing", and the milestone repoints
+/// these at ErsatzTV next without the page changing.
 async fn live_pending() -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
@@ -310,80 +309,6 @@ async fn live_pending() -> Response {
         "Live video arrives with the playout milestone — ChannelFlow is not encoding yet.\n",
     )
         .into_response()
-}
-
-/// The instance transcode defaults, together with the field list the page
-/// renders.
-///
-/// The spec travels with the values so the form cannot drift from next's
-/// schema: `transcode::spec` is checked against
-/// `vendor/ersatztv-next/schema/channel_config.json` by a test in that module.
-async fn get_transcode(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults().await?;
-    Ok(Json(json!({
-        "spec": transcode::spec(),
-        "defaults": defaults,
-    })))
-}
-
-async fn put_transcode(
-    State(state): State<AppState>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let config = TranscodeConfig::parse(&body).map_err(StoreError::Transcode)?;
-    state.store.save_transcode_defaults(&config).await?;
-    Ok(Json(json!({ "defaults": config })))
-}
-
-/// A channel's overrides plus the effective settings they resolve to, so the
-/// dialog can show both "you set this" and "this is what next will do".
-async fn get_channel_transcode(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let channel = state.store.get(id).await?;
-    let defaults = state.store.transcode_defaults().await?;
-    let effective = defaults
-        .merged(&channel.transcode)
-        .map_err(StoreError::Transcode)?;
-    Ok(Json(json!({
-        "channel": { "id": channel.id, "number": channel.number, "name": channel.name },
-        "spec": transcode::spec(),
-        "defaults": defaults,
-        "overrides": channel.transcode,
-        "effective": effective,
-    })))
-}
-
-async fn put_channel_transcode(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults().await?;
-    // Resolve before storing, so a patch next would reject never reaches the
-    // channel document.
-    let effective = defaults.merged(&body).map_err(StoreError::Transcode)?;
-    let channel = state.store.set_channel_transcode(id, body).await?;
-    Ok(Json(json!({
-        "overrides": channel.transcode,
-        "effective": effective,
-    })))
-}
-
-/// Drop every override so the channel follows the Transcode page again.
-async fn clear_channel_transcode(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    let defaults = state.store.transcode_defaults().await?;
-    let channel = state.store
-        .set_channel_transcode(id, serde_json::Value::Object(serde_json::Map::new()))
-        .await?;
-    Ok(Json(json!({
-        "overrides": channel.transcode,
-        "effective": defaults,
-    })))
 }
 
 // The UI is compiled into the binary so the shipped image needs no asset

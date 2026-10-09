@@ -15,35 +15,29 @@ The image is multi-arch (amd64 + arm64) and is not pinned to a platform, so the 
 ## The server
 
 ```
-Cargo.toml                    workspace: core, the plugin SDK, and bundled plugins
+Cargo.toml                    workspace: core and the plugin SDK
 crates/channelflow-core/      the base system — channels, storage, plugin manager
   build.rs                    stamps GIT_SHA + RUSTC_VERSION for the About page
   src/main.rs                 CLI, startup, config directory, plugin loading
   src/model.rs                Channel / NewChannel / UpdateChannel
-  src/transcode.rs            next's ffmpeg + normalization settings (core for now)
   src/store.rs                file- or Postgres-backed storage behind one Store
   src/api.rs                  axum routes, HTTP status mapping, embedded UI
   src/plugin/                 the plugin manager: lifecycle, catalog, permissions
-crates/channelflow-plugin-api/  the SDK: Plugin trait, manifest, storage, UI contracts
-crates/plugins/ai/            the AI Provider Suite plugin (provider list, tests, failover)
-  plugin.json                 the plugin's manifest
-  src/ai.rs                   provider list: names, priorities, models
-  src/openai.rs               provider tests plus the priority-order failover walk
-  src/api.rs                  the routes the AI page calls, mounted under /api/plugins/{id}
+crates/channelflow-plugin-api/  the SDK: Plugin trait, manifest, storage, core-data, UI
   static/                     index.html, app.css, app.js, logo + favicons — compiled in
 ```
 
-This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins that implement the `Plugin` trait. Plugins declare who they are in a `plugin.json` manifest — their id, version range against the base, requested permissions, and UI contributions — and get namespaced storage, an HTTP client, and a logger from `PluginApi`. The manager loads, lists, enables and disables them, and mounts each plugin's routes under `/api/plugins/{id}`. The **AI page is the first feature extracted**: the shell still renders it, but every call it makes goes to the AI plugin's routes, and its provider list is persisted in the plugin's own storage. The Transcode page stays core-owned for now.
+Plugins live in their own repo, [`ChannelFlow-Plugins`](https://github.com/binarygeek119/ChannelFlow-Plugins), fetched by git dependency: `com.channelflow.ai` (the AI Provider Suite) and `com.channelflow.ersatztv` (the ErsatzTV Transcoding Engine). Each implements the `Plugin` trait against the SDK, names itself in a `plugin.json`, and is loaded, enabled, and route-mounted by the core's plugin manager under `/api/plugins/{id}`.
 
-Plugins live in their own repo, [`ChannelFlow-Plugins`](https://github.com/binarygeek119/ChannelFlow-Plugins), and this base pulls the bundled ones by **git dependency** — the SDK is fetched the same way everywhere, so there is exactly one `channelflow-plugin-api` in the graph and core's `Plugin` trait is the plugin's `Plugin` trait. The Transcode crates are the pattern for the next extraction. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
+This is the **modular architecture** in its first pass. The base is `channelflow-core` plus the `channelflow-plugin-api` SDK; features live in plugins. Plugins declare their id, version range against the base, requested permissions, and UI contributions, and get namespaced storage, an HTTP client, a logger, and (with `api:core:read`) a read-only view of the channels from `PluginApi`. The **AI page** and the **Transcode page** are both plugins now: the shell still renders them, but every call they make goes to the plugin's routes, and their settings live in the plugin's own storage. The schema-driven Transcode form is mirrored from next's own `channel_config.json`, vendored beside the plugin so the contract tests still walk it. Plugins are compiled in today; the same trait and lifecycle are what a dynamic loader will call once plugins ship as shared libraries.
 
-Storage has two backends behind one `Store`, and either holds the same settings: the channels, the instance transcode defaults, and each plugin's own data.
+Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 
-**Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, `<config>/transcode.json`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys. next is driven by JSON documents itself, so file storage keeps the on-disk state the same shape you would hand to the engine.
+**Files** — the default, with nothing to install. One JSON document per channel under `<config>/channels/`, and one file per plugin key under `<config>/plugins/{plugin}/{key}.json`. Plugin files are written `0600` because their data can hold keys.
 
-**Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in tables created automatically at startup: `channels`, the one-row `transcode_settings`, and `plugin_kv` (namespaced per plugin). The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
+**Postgres** — set `DATABASE_URL` (or pass `--database-url`) and the same settings live in tables created automatically at startup: `channels` and `plugin_kv` (namespaced per plugin). The first open against an empty database imports whatever the config directory already contains, so moving everything over keeps exactly what the files had; after that Postgres is the only source of truth and nothing is written to the directory. `DATABASE_URL` can point at the same server next uses — ChannelFlow's tables are its own.
 
-When the AI feature became a plugin, its old store — `<config>/ai.json` in files mode, the `ai_settings` row in Postgres — was migrated once into the AI plugin's own storage (`plugin_kv`, or `<config>/plugins/com.channelflow.ai/providers.json`) and the legacy copy is removed.
+When features became plugins, their settings moved into plugin storage with a one-time migration: the AI provider list (from `<config>/ai.json` / the `ai_settings` row) and the transcode defaults plus per-channel overrides (from `<config>/transcode.json` / the `transcode_settings` row, plus each channel's own patch). The legacy copies are removed once moved.
 
 Storage failures keep their own error type rather than collapsing into `anyhow`, so the API can answer `404` for a missing channel, `409` for a channel number already in use, and `400` for invalid input instead of reporting everything as `500`.
 
@@ -58,8 +52,12 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/channels` | create, `201`; `409` duplicate number, `400` invalid |
 | `PUT` | `/api/channels/{id}` | partial update |
 | `DELETE` | `/api/channels/{id}` | `204` |
-| `GET` | `/api/transcode` | the Transcode page's field list plus the instance defaults |
-| `PUT` | `/api/transcode` | replace the defaults, `400` if next's schema would reject it |
+| `GET` | `/api/plugins/com.channelflow.ersatztv/` | the Transcode page's field list plus the instance defaults |
+| `PUT` | `/api/plugins/com.channelflow.ersatztv/` | replace the defaults, `400` if next's schema would reject it |
+| `GET` | `/api/plugins/com.channelflow.ersatztv/channels` | every channel and whether it has overrides |
+| `GET` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | overrides, the defaults, and the effective settings |
+| `PUT` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | store that channel's override patch |
+| `DELETE` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | drop every override |
 | `GET` | `/api/plugins` | the plugin catalog: manifests, permissions, UI contributions, health |
 | `PUT` | `/api/plugins/{id}/enable` / `disable` | call the plugin's lifecycle hooks |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
@@ -69,16 +67,13 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/plugins/com.channelflow.ai/test` | try an unsaved provider from the "New provider" tab; always `200`, the result carries `ok` |
 | `POST` | `/api/plugins/com.channelflow.ai/providers/{id}/test` | try a saved provider with the form's changes laid over it |
 | `POST` | `/api/plugins/com.channelflow.ai/test-all` | walk the providers by priority and report the first that answers |
-| `GET` | `/api/channels/{id}/transcode` | overrides, the defaults, and the effective settings |
-| `PUT` | `/api/channels/{id}/transcode` | store that channel's override patch |
-| `DELETE` | `/api/channels/{id}/transcode` | drop every override |
 | `GET` | `/live/channels.m3u` | every channel as an M3U playlist — `503` until the playout milestone |
 | `GET` | `/live/xmltv.xml` | the guide — `503` until the playout milestone |
 | `GET` | `/live/{n}.m3u8` | one channel's HLS stream — `503` until the playout milestone |
 
 The web UI is served at `/` and compiled into the binary — the markup, CSS and JS via `include_str!`, the logo and favicons via `include_bytes!` — so the image needs no asset directory and cannot start with a half-copied web root. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
 
-The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer (plus one new **Plugins** item), the near-black/rose palette, and the mark. Six menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings below; **AI** edits the provider list served by the AI plugin; **Plugins** lists what is loaded, what each asked permission for, and toggles them. The other 16 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer (plus one new **Plugins** item), the near-black/rose palette, and the mark. Six menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings served by the ErsatzTV plugin; **AI** edits the provider list served by the AI plugin; **Plugins** lists what is loaded, what each asked permission for, and toggles them. The other 16 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
 
 ### AI settings
 
@@ -92,7 +87,7 @@ Each provider's key is treated as a secret. The plugin never returns a key — o
 
 ### Transcode settings
 
-ErsatzTV next reads `ffmpeg` and `normalization` from a per-channel `channel_config.json`. `src/transcode.rs` mirrors exactly those two keys — the settings that change how a stream is encoded — and deliberately leaves out `playout` and `fallback`, which describe *what* plays. Two tests in that module walk `vendor/ersatztv-next/schema/channel_config.json`, one asserting the Rust types can hold every field it declares and write it back unchanged, the other asserting the Transcode page's field list names exactly the same set. A field added or renamed upstream fails the build instead of going unwritten.
+ErsatzTV next reads `ffmpeg` and `normalization` from a per-channel `channel_config.json`. The ErsatzTV plugin's `transcode.rs` mirrors exactly those two keys — the settings that change how a stream is encoded — and deliberately leaves out `playout` and `fallback`, which describe *what* plays. Two tests in that module walk the vendored `schema/channel_config.json` that ships with the plugin, one asserting the Rust types can hold every field it declares and write it back unchanged, the other asserting the Transcode page's field list names exactly the same set. A field added or renamed upstream fails the build instead of going unwritten.
 
 The page offers next's settings as **instance defaults**; each channel stores only its **differences** from them, deep-merged on top when the settings are read back. That is a third state per field, not two: an absent key inherits, while a key present with `null` is a real value — a channel can say "software encode" or "automatic bitrate" even when the default names a hardware encoder or a number. Because the stored patch is sparse, editing a default still reaches every channel that has not overridden that one field, which is what the Transcode page promises. The per-channel dialog diffs its edited values against the defaults to decide what to store, so a field is marked overridden exactly when it differs; there is no separate toggle to keep in sync.
 
@@ -171,11 +166,10 @@ From a source checkout: `cargo run --release -p channelflow -- --config ./config
 
 ## Where this goes next
 
-1. **Extract the next feature** — move the transcode settings into a `channelflow-plugin-ersatztv` crate in the `ChannelFlow-Plugins` repo (the AI plugin is the pattern), driven by the same git dependency.
-2. **Dynamic loading** — load plugins as shared libraries from `/config/plugins` via the manifest's `entrypoint`, with the install/update/rollback flow and the repo index feeding the catalog.
-3. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
-4. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.
-5. **Library sync, scheduling, EBS/off-air** — the 1.x features, rebuilt.
+1. **Dynamic loading** — load plugins as shared libraries from `/config/plugins` via the manifest's `entrypoint`, with the install/update/rollback flow and the repo index feeding the catalog.
+2. **Playout writer** — turn `Channel` into next's `channel.json` and `playout.json` under `schema/`, and start `ersatztv` alongside with a supervisor entrypoint.
+3. **Compositor** — serve ws4kp frames as an HTTP source next pulls, giving one real weather channel.
+4. **Library sync, scheduling, EBS/off-air** — the 1.x features, rebuilt.
 
 ## Port
 

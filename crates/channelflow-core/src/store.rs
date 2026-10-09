@@ -1,24 +1,24 @@
-//! Storage: channels, the instance transcode defaults, and each plugin's own
-//! namespaced key/value data.
+//! Storage: channels and each plugin's own namespaced key/value data.
 //!
 //! Two backends sit behind one `Store`, so how the app persists its settings
 //! does not change what the rest of it sees.
 //!
 //! * **Files** — the default, with zero setup. One JSON document per channel
-//!   under `<config>/channels/`, `<config>/transcode.json`, and one file per
-//!   plugin key under `<config>/plugins/{plugin}/{key}.json` (written `0600`
-//!   because plugin data can hold secrets).
+//!   under `<config>/channels/`, and one file per plugin key under
+//!   `<config>/plugins/{plugin}/{key}.json` (written `0600` because plugin
+//!   data can hold secrets).
 //! * **Postgres** — used when `DATABASE_URL` is set. The same settings live in
-//!   tables created at startup: `channels`, the one-row `transcode_settings`,
-//!   and `plugin_kv`. On first open against an empty database the config
-//!   directory is read once and imported, so moving to Postgres keeps exactly
-//!   what the files had; after that Postgres is the only source of truth and
-//!   nothing is written to the directory.
+//!   tables created at startup: `channels` and `plugin_kv`. On first open
+//!   against an empty database the config directory is read once and imported,
+//!   so moving to Postgres keeps exactly what the files had; after that
+//!   Postgres is the only source of truth and nothing is written to the
+//!   directory.
 //!
-//! The transcode defaults are core-owned, so they keep their file and table.
-//! The AI provider list moved into a plugin, so it now lives in that plugin's
-//! key/value storage; the old `ai.json` / `ai_settings` document is migrated
-//! there once by [`Store::upgrade_legacy_ai`].
+//! Two features grew plugins and their settings moved into plugin storage
+//! with a one-time migration: the AI provider list and the transcode settings.
+//! The old `ai.json` / `transcode.json` files (and their `ai_settings` /
+//! `transcode_settings` rows) are read once and removed by
+//! [`Store::upgrade_legacy_ai`] and [`Store::upgrade_legacy_transcode`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,14 +34,16 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::model::{Channel, NewChannel, UpdateChannel};
-use crate::transcode::{TranscodeConfig, TranscodeError};
-
-const TRANSCODE_FILE: &str = "transcode.json";
 
 /// The plugin that used to be a core feature — its legacy `ai.json` document
 /// is migrated into its own storage under these names.
 const LEGACY_AI_NAMESPACE: &str = "com.channelflow.ai";
 const LEGACY_AI_KEY: &str = "providers";
+
+/// The transcode plugin and the legacy documents that predate it.
+const LEGACY_TRANSCODE_NAMESPACE: &str = "com.channelflow.ersatztv";
+const LEGACY_TRANSCODE_DEFAULTS_KEY: &str = "defaults";
+const LEGACY_TRANSCODE_OVERRIDES_KEY: &str = "overrides";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -51,9 +53,6 @@ pub enum StoreError {
     NotFound(Uuid),
     DuplicateNumber(u32),
     Invalid(&'static str),
-    /// A transcode document — the defaults, or the body of a request — that
-    /// next's schema would reject.
-    Transcode(TranscodeError),
     /// A plugin lifecycle call was refused: unknown id, incompatible with this
     /// base, or the plugin's own failure.
     Plugin(String),
@@ -87,7 +86,6 @@ impl std::fmt::Display for StoreError {
             StoreError::NotFound(id) => write!(f, "no channel with id {id}"),
             StoreError::DuplicateNumber(n) => write!(f, "channel number {n} is already in use"),
             StoreError::Invalid(msg) => write!(f, "{msg}"),
-            StoreError::Transcode(error) => write!(f, "{error}"),
             StoreError::Plugin(message) => write!(f, "{message}"),
             StoreError::Io(error) => write!(f, "storage error: {error}"),
             StoreError::Json(error) => write!(f, "channel document is not valid JSON: {error}"),
@@ -113,16 +111,14 @@ enum Backend {
 }
 
 impl Store {
-    /// The file backend: `<config>/channels` plus the settings file, seeded on
-    /// first run so they are real, hand-editable documents.
+    /// The file backend: `<config>/channels`, seeded so the directory exists
+    /// from the start.
     pub fn open(config: &Path) -> Result<Self, StoreError> {
         fs::create_dir_all(config.join("channels"))?;
-        let store = Self {
+        Ok(Self {
             root: config.to_path_buf(),
             backend: Backend::Files,
-        };
-        seed_transcode_file(config)?;
-        Ok(store)
+        })
     }
 
     /// The Postgres backend. Connecting, making the schema if it is missing,
@@ -134,7 +130,6 @@ impl Store {
             .connect(url)
             .await?;
         pg::ensure_schema(&pool).await?;
-        pg::ensure_transcode(&pool, config).await?;
         pg::import_channels(&pool, config).await?;
         Ok(Self {
             root: config.to_path_buf(),
@@ -142,23 +137,10 @@ impl Store {
         })
     }
 
-    /// The instance transcode defaults the Transcode page edits.
-    pub async fn transcode_defaults(&self) -> Result<TranscodeConfig, StoreError> {
-        match &self.backend {
-            Backend::Files => file::transcode_defaults(&self.root),
-            Backend::Postgres(pool) => pg::transcode(pool).await,
-        }
-    }
-
-    pub async fn save_transcode_defaults(&self, config: &TranscodeConfig) -> Result<(), StoreError> {
-        match &self.backend {
-            Backend::Files => file::save_transcode_defaults(&self.root, config),
-            Backend::Postgres(pool) => pg::save_transcode(pool, config).await,
-        }
-    }
-
     /// Replace one channel's transcode overrides. The caller validates the
-    /// patch first; this only stores it.
+    /// patch first; this only stores it. Live use moved to the ErsatzTV
+    /// plugin, so the remaining caller is the legacy migration clearing the
+    /// patches it moves into plugin storage.
     pub async fn set_channel_transcode(
         &self,
         id: Uuid,
@@ -310,6 +292,70 @@ impl Store {
         }
         Ok(())
     }
+
+    /// One-time move of the old transcode settings into the ErsatzTV plugin's
+    /// own storage: the instance defaults under `defaults`, and each channel's
+    /// override patch under `overrides` (a channel-id map). Channel patches
+    /// are cleared here so the plugin's copy is the only one.
+    pub async fn upgrade_legacy_transcode(&self) -> Result<(), StoreError> {
+        if self
+            .plugin_get(LEGACY_TRANSCODE_NAMESPACE, LEGACY_TRANSCODE_DEFAULTS_KEY)
+            .await?
+            .is_none()
+        {
+            let legacy = match &self.backend {
+                Backend::Files => file::read_legacy_transcode(&self.root)?,
+                Backend::Postgres(pool) => pg::read_legacy_transcode(pool).await?,
+            };
+            if let Some(value) = legacy {
+                self.plugin_set(
+                    LEGACY_TRANSCODE_NAMESPACE,
+                    LEGACY_TRANSCODE_DEFAULTS_KEY,
+                    &value,
+                )
+                .await?;
+            }
+        }
+
+        if self
+            .plugin_get(LEGACY_TRANSCODE_NAMESPACE, LEGACY_TRANSCODE_OVERRIDES_KEY)
+            .await?
+            .is_none()
+        {
+            let mut overrides = serde_json::Map::new();
+            let mut to_clear = Vec::new();
+            for channel in self.list().await? {
+                if let Some(patch) = channel.transcode.as_object() {
+                    if !patch.is_empty() {
+                        overrides.insert(channel.id.to_string(), channel.transcode);
+                        to_clear.push(channel.id);
+                    }
+                }
+            }
+            if !overrides.is_empty() {
+                self.plugin_set(
+                    LEGACY_TRANSCODE_NAMESPACE,
+                    LEGACY_TRANSCODE_OVERRIDES_KEY,
+                    &serde_json::Value::Object(overrides),
+                )
+                .await?;
+                for id in to_clear {
+                    self.set_channel_transcode(
+                        id,
+                        serde_json::Value::Object(serde_json::Map::new()),
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        match &self.backend {
+            Backend::Files => file::remove_legacy_transcode(&self.root)?,
+            Backend::Postgres(pool) => pg::remove_legacy_transcode(pool).await?,
+        }
+        tracing::info!(plugin = LEGACY_TRANSCODE_NAMESPACE, "migrated legacy transcode settings into plugin storage");
+        Ok(())
+    }
 }
 
 /// The read-only view of channels handed to plugins that hold `api:core:read`.
@@ -377,29 +423,21 @@ mod file {
         root.join("channels").join(format!("{id}.json"))
     }
 
-    pub fn transcode_defaults(root: &Path) -> Result<TranscodeConfig, StoreError> {
-        let path = root.join(TRANSCODE_FILE);
+    pub fn read_legacy_transcode(root: &Path) -> Result<Option<serde_json::Value>, StoreError> {
+        let path = root.join("transcode.json");
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TranscodeConfig::default());
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
         };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
-        TranscodeConfig::parse(&value).map_err(StoreError::Transcode)
+        Ok(Some(serde_json::from_str(&text)?))
     }
 
-    pub fn save_transcode_defaults(
-        root: &Path,
-        config: &TranscodeConfig,
-    ) -> Result<(), StoreError> {
-        let path = root.join(TRANSCODE_FILE);
-        let tmp = path.with_extension("json.tmp");
-        let json = serde_json::to_string_pretty(config)?;
-        fs::write(&tmp, json)?;
-        fs::rename(&tmp, &path)?;
-        Ok(())
+    pub fn remove_legacy_transcode(root: &Path) -> Result<(), StoreError> {
+        match fs::remove_file(root.join("transcode.json")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(Into::into),
+        }
     }
 
     pub fn set_channel_transcode(
@@ -595,10 +633,6 @@ mod pg {
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )",
-            "CREATE TABLE IF NOT EXISTS transcode_settings (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                config JSONB NOT NULL
-            )",
             "CREATE TABLE IF NOT EXISTS plugin_kv (
                 namespace TEXT NOT NULL,
                 key TEXT NOT NULL,
@@ -611,27 +645,34 @@ mod pg {
         Ok(())
     }
 
-    /// First run against an empty database: import the on-disk defaults, or
-    /// fall back to the same defaults a fresh install would seed.
-    pub async fn ensure_transcode(pool: &PgPool, config: &Path) -> Result<(), StoreError> {
-        let present = sqlx::query("SELECT 1 FROM transcode_settings WHERE id = 1")
+    /// The pre-plugin `transcode_settings` row, if the old schema is still
+    /// around — an existing database keeps it until the plugin migration.
+    pub async fn read_legacy_transcode(
+        pool: &PgPool,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let legacy: i64 = sqlx::query(
+            "SELECT count(*) FROM information_schema.tables \
+             WHERE table_schema = 'public' AND table_name = 'transcode_settings'",
+        )
+        .fetch_one(pool)
+        .await?
+        .try_get(0)?;
+        if legacy == 0 {
+            return Ok(None);
+        }
+        match sqlx::query("SELECT config FROM transcode_settings WHERE id = 1")
             .fetch_optional(pool)
             .await?
-            .is_some();
-        if present {
-            return Ok(());
+        {
+            Some(row) => Ok(Some(row.try_get::<Json<serde_json::Value>, _>("config")?.0)),
+            None => Ok(None),
         }
-        let text = match fs::read_to_string(config.join(TRANSCODE_FILE)) {
-            Ok(text) => text,
-            Err(_) => {
-                save_transcode(pool, &TranscodeConfig::default()).await?;
-                return Ok(());
-            }
-        };
-        let value: serde_json::Value = serde_json::from_str(&text)?;
-        let transcode = TranscodeConfig::parse(&value).map_err(StoreError::Transcode)?;
-        save_transcode(pool, &transcode).await?;
-        tracing::info!(path = %config.join(TRANSCODE_FILE).display(), "migrated transcode defaults into Postgres");
+    }
+
+    pub async fn remove_legacy_transcode(pool: &PgPool) -> Result<(), StoreError> {
+        sqlx::query("DROP TABLE IF EXISTS transcode_settings")
+            .execute(pool)
+            .await?;
         Ok(())
     }
 
@@ -671,31 +712,6 @@ mod pg {
         if imported > 0 {
             tracing::info!(imported, "migrated channels from file into Postgres");
         }
-        Ok(())
-    }
-
-    pub async fn transcode(pool: &PgPool) -> Result<TranscodeConfig, StoreError> {
-        match sqlx::query("SELECT config FROM transcode_settings WHERE id = 1")
-            .fetch_optional(pool)
-            .await?
-        {
-            Some(row) => {
-                let value = row.try_get::<Json<serde_json::Value>, _>("config")?.0;
-                TranscodeConfig::parse(&value).map_err(StoreError::Transcode)
-            }
-            None => Ok(TranscodeConfig::default()),
-        }
-    }
-
-    pub async fn save_transcode(pool: &PgPool, config: &TranscodeConfig) -> Result<(), StoreError> {
-        let value = serde_json::to_value(config)?;
-        sqlx::query(
-            "INSERT INTO transcode_settings (id, config) VALUES (1, $1)
-             ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config",
-        )
-        .bind(Json(value))
-        .execute(pool)
-        .await?;
         Ok(())
     }
 
@@ -959,21 +975,8 @@ fn checked_new(mut input: NewChannel) -> Result<NewChannel, StoreError> {
     Ok(input)
 }
 
-/// Write `transcode.json` on first run, so the instance defaults are a real,
-/// hand-editable file from the start rather than an implied everything-unset.
-fn seed_transcode_file(config: &Path) -> Result<(), StoreError> {
-    let path = config.join(TRANSCODE_FILE);
-    if path.exists() {
-        return Ok(());
-    }
-    file::save_transcode_defaults(config, &TranscodeConfig::default())?;
-    tracing::info!(path = %path.display(), "wrote default transcode settings");
-    Ok(())
-}
-
-/// Write a file that may hold secrets, as the `ai.json` did. Plugin storage
-/// files get mode `0600`, like the old AI file: never world-readable even for
-/// the instant between temp file and rename.
+/// Write a file that may hold secrets. Plugin storage files get mode `0600`:
+/// never world-readable even for the instant between temp file and rename.
 fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -1081,6 +1084,79 @@ mod tests {
             .await
             .expect("cleanup");
         std::fs::remove_file(dir.join("ai.json")).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A legacy `transcode.json` plus per-channel patches move into the
+    /// ErsatzTV plugin's storage, and the channel patches are cleared.
+    #[tokio::test]
+    async fn legacy_transcode_migrates_into_plugin_storage() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-tc-migrate-{stamp}"));
+        std::fs::create_dir_all(dir.join("channels")).expect("dir");
+
+        std::fs::write(
+            dir.join("transcode.json"),
+            serde_json::to_string_pretty(&json!({
+                "normalization": { "video": { "bit_depth": 10 } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        // A channel whose document still carries a transcode patch.
+        let store = Store::open(&dir).expect("open file store");
+        let channel = store
+            .create(NewChannel {
+                number: 1,
+                name: "Migrating".to_string(),
+                description: String::new(),
+                enabled: true,
+            })
+            .await
+            .expect("create");
+        let id = channel.id.to_string();
+        store
+            .set_channel_transcode(
+                channel.id,
+                json!({ "normalization": { "video": { "bitrate_kbps": 2500 } } }),
+            )
+            .await
+            .expect("override");
+
+        store.upgrade_legacy_transcode().await.expect("migrate");
+
+        let defaults = store
+            .plugin_get("com.channelflow.ersatztv", "defaults")
+            .await
+            .expect("defaults");
+        assert_eq!(
+            defaults.unwrap()["normalization"]["video"]["bit_depth"],
+            json!(10),
+            "instance defaults carried over whole"
+        );
+        let overrides = store
+            .plugin_get("com.channelflow.ersatztv", "overrides")
+            .await
+            .expect("overrides")
+            .unwrap();
+        assert_eq!(
+            overrides[&id]["normalization"]["video"]["bitrate_kbps"],
+            json!(2500),
+            "the channel's patch moved into the plugin's map"
+        );
+        assert!(
+            !dir.join("transcode.json").exists(),
+            "the legacy defaults file is removed"
+        );
+        assert_eq!(
+            store.get(channel.id).await.unwrap().transcode,
+            json!({}),
+            "the channel's own copy is cleared"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

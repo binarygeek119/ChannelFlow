@@ -294,10 +294,25 @@ const PLUGIN_PANELS = {
   AiPage: "tab-ai",
 };
 
+// The ids of plugin-declared pages added to the drawer. Tracked so a rebuild
+// (after install or remove) can drop exactly those entries and re-add the
+// current set instead of duplicating them.
+const pluginPageKeys = new Set();
+
 // Plugin-declared pages add their own drawer entries. The catalog only lists
 // installed plugins, so an AI plugin that is not installed leaves no AI tab —
 // exactly the same rule that governs the connection types.
 async function loadPluginPages() {
+  // Rebuild from scratch: out goes whatever a previous run added, then the
+  // current plugin list decides the drawer again.
+  document
+    .querySelectorAll('.drawer-nav a[data-plugin-page]')
+    .forEach((link) => link.remove());
+  pluginPageKeys.forEach((key) => {
+    delete MENU[key];
+    delete PANEL_FOR[key];
+  });
+  pluginPageKeys.clear();
   let plugins;
   try {
     plugins = (await request("/api/plugins")).plugins || [];
@@ -314,8 +329,10 @@ async function loadPluginPages() {
       if (MENU[key]) return; // a core page keeps precedence
       MENU[key] = [contribution.title || key, plugin.description || ""];
       PANEL_FOR[key] = PLUGIN_PANELS[contribution.component] || "tab-placeholder";
+      pluginPageKeys.add(key);
       const link = document.createElement("a");
       link.className = "nav-item";
+      link.dataset.pluginPage = "1";
       link.dataset.tab = key;
       link.href = contribution.path || `/webui/${key}`;
       const icon =
@@ -1261,6 +1278,7 @@ async function removePlugin(dropDatabase) {
     els.pluginRemove.close();
     pluginRemoveId = null;
     loadInstalledPlugins();
+    loadPluginPages();
   } catch (error) {
     els.pluginRemoveNote.textContent = error.message || "Could not remove the plugin.";
   }
@@ -1274,6 +1292,7 @@ async function installPlugin(id, url, version) {
     });
     loadPluginStore();
     loadInstalledPlugins();
+    loadPluginPages();
   } catch (error) {
     els.pluginsStoreEmpty.hidden = false;
     els.pluginsStoreEmpty.textContent = error.message || "Could not install the plugin.";
@@ -1857,7 +1876,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "30";
+const UI_BUILD = "31";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

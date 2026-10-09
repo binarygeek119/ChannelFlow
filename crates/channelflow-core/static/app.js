@@ -1475,14 +1475,15 @@ function tabForPath(path) {
 
 document.querySelectorAll(".drawer-nav a").forEach((link) => {
   link.addEventListener("click", (event) => {
+    // Only intercept the tab links. The brand link (no data-tab) must do a
+    // real navigation: a full load of / is what leaves the walkthrough for the
+    // app once setup is done. Swallowing it and assigning location.href leaves
+    // the address bar on /first-time, and boot() bounces straight back.
+    if (!link.dataset.tab) return;
     event.preventDefault();
-    if (link.dataset.tab) {
-      history.pushState(null, "", link.getAttribute("href") || `/${link.dataset.tab}`);
-      showTab(link.dataset.tab);
-      link.scrollIntoView({ block: "nearest", inline: "nearest" });
-    } else {
-      location.href = link.getAttribute("href");
-    }
+    history.pushState(null, "", link.getAttribute("href") || `/${link.dataset.tab}`);
+    showTab(link.dataset.tab);
+    link.scrollIntoView({ block: "nearest", inline: "nearest" });
   });
 });
 
@@ -1741,11 +1742,10 @@ document.getElementById("ob-next").addEventListener("click", () => {
     obIndex++;
     renderOnboarding();
   } else {
-    // Final step: drop straight into the app in this same document. No reload
-    // and no boot() round-trip, so setup can never feel like it bounces back
-    // to the walkthrough.
-    history.pushState(null, "", "/");
-    showApp();
+    // Final step: a real navigation to /. boot() sees setup complete and
+    // opens the app. (pushState would leave the address bar on /first-time,
+    // and the next load would bounce back into the walkthrough.)
+    location.assign("/");
   }
 });
 
@@ -1772,7 +1772,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "21";
+const UI_BUILD = "22";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

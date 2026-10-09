@@ -753,6 +753,14 @@ async fn delete_connection(
         .connection_delete(id)
         .await?
         .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
+    // A media source's own rows cascade with the connection row; the sweep
+    // removes the poster files of any item that then lost every source.
+    if removed["kind"].as_str() == Some("jellyfin") {
+        let db = state.store.plugin_database("com.channelflow.jellyfin");
+        tokio::spawn(async move {
+            channelflow_plugin_jellyfin::sweep_orphan_posters(db).await;
+        });
+    }
     Ok(Json(json!({ "removed": removed })))
 }
 

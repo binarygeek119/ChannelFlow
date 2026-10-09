@@ -310,6 +310,7 @@ dependencies = [
  "channelflow-plugin-ai",
  "channelflow-plugin-api 2.0.0 (git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0)",
  "channelflow-plugin-ersatztv",
+ "channelflow-plugin-jellyfin",
  "chrono",
  "clap",
  "reqwest",
@@ -328,7 +329,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-ai"
 version = "2.0.0"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#7d928b769f615045e9d7cdff041b3bed533f865c"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#7a99bc373bd7e1fc3591771df0dafc2767547fa1"
 dependencies = [
  "async-trait",
  "axum",
@@ -357,7 +358,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-api"
 version = "2.0.0"
-source = "git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0#dc563e36b5a40508318fd2ef03b7718c6b8c58c7"
+source = "git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0#c3fe25a9aec7a031a42670fcb785f19538bf803b"
 dependencies = [
  "async-trait",
  "axum",
@@ -371,7 +372,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-ersatztv"
 version = "2.0.0"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#7d928b769f615045e9d7cdff041b3bed533f865c"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#7a99bc373bd7e1fc3591771df0dafc2767547fa1"
 dependencies = [
  "async-trait",
  "axum",
@@ -382,6 +383,24 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "channelflow-plugin-jellyfin"
+version = "0.1.0"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#7a99bc373bd7e1fc3591771df0dafc2767547fa1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "channelflow-plugin-api 2.0.0 (git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0)",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

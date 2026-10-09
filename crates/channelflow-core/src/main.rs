@@ -143,6 +143,25 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the ErsatzTV plugin: {error}"))?;
 
+    // The Jellyfin media source syncs remote libraries into its own tables
+    // and registers as a MediaSource for the connection forms and sync driver.
+    let jellyfin_plugin = channelflow_plugin_jellyfin::plugin();
+    let jellyfin_manifest = jellyfin_plugin.metadata().clone();
+    let jellyfin_api = PluginApi {
+        id: jellyfin_manifest.id.clone(),
+        storage: store.plugin_storage(&jellyfin_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&jellyfin_manifest.id),
+        logger: PluginLogger::new(&jellyfin_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&jellyfin_manifest.id),
+    };
+    manager
+        .add(jellyfin_plugin, jellyfin_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Jellyfin plugin: {error}"))?;
+
     // First run seeds the bundled plugins as installed and enabled so the app
     // works out of the box; after that the registry is the source of truth, so
     // removing a plugin is not undone by a restart.
@@ -170,9 +189,9 @@ async fn main() -> Result<()> {
     let plugins = Arc::new(Mutex::new(manager));
 
     // The media sources: plugins that implement the MediaSource contract
-    // register their connection forms and sync drives here. Jellyfin is added
-    // when its crate is wired into this build.
+    // register their connection forms and sync drives here.
     let mut media_sources = media::MediaSources::new();
+    media_sources.register(channelflow_plugin_jellyfin::media_source());
 
     // The plugin store: seed the ChannelFlow-Plugins repository so the Store
     // tab has something to show, unless the operator points it elsewhere.

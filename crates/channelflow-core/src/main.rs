@@ -4,6 +4,7 @@ mod media;
 mod model;
 mod plugin;
 mod store;
+mod webui;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -69,6 +70,15 @@ async fn main() -> Result<()> {
             anyhow::Error::new(error)
                 .context(format!("creating config directory {}", config.display()))
         }
+    })?;
+
+    // The web UI lives as editable files under <config>/webui; write the
+    // defaults on first boot and after that they are served from disk.
+    webui::ensure(&config).with_context(|| {
+        format!(
+            "writing the web UI under {} — that directory must be writable",
+            config.join("webui").display()
+        )
     })?;
 
     let store = if args.database_url.trim().is_empty() {

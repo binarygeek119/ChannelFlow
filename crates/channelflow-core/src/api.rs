@@ -194,7 +194,7 @@ async fn spa_fallback(State(state): State<AppState>, uri: Uri) -> Response {
     if let Some(response) = setup_redirect(&state, path).await {
         return response;
     }
-    index().await
+    index(State(state)).await
 }
 
 /// API answers must never be cached: a stale `/api/auth/state` (say, from
@@ -1177,80 +1177,67 @@ async fn live_pending() -> Response {
         .into_response()
 }
 
-// The UI is compiled into the binary so the shipped image needs no asset
-// directory and cannot start with a half-copied web root. The document itself
-// is served no-store: it must never sit in a browser cache, or an upgrade
-// leaves users staring at a stale login screen while the server has moved on.
-async fn index() -> Response {
+// The web UI is served from <config>/webui — plain files an operator can edit
+// or brand without rebuilding. `main` writes the compiled-in defaults there on
+// first boot. The document itself is no-store: it must never sit in a browser
+// cache, or an upgrade leaves users staring at a stale page.
+async fn index(State(state): State<AppState>) -> Response {
+    let body = crate::webui::read(&state.store.config_dir(), "index.html").unwrap_or_default();
     (
         [
             (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
             (axum::http::header::CACHE_CONTROL, "no-store"),
         ],
-        include_str!("../static/index.html"),
+        axum::body::Bytes::from(body),
     )
         .into_response()
 }
 
-async fn css() -> Response {
-    static_response("text/css; charset=utf-8", include_str!("../static/app.css"))
+async fn css(State(state): State<AppState>) -> Response {
+    webui_file(&state, "text/css; charset=utf-8", "app.css")
 }
 
-async fn js() -> Response {
-    static_response(
-        "text/javascript; charset=utf-8",
-        include_str!("../static/app.js"),
-    )
+async fn js(State(state): State<AppState>) -> Response {
+    webui_file(&state, "text/javascript; charset=utf-8", "app.js")
 }
 
-/// Serve one compiled-in asset.
-///
-/// `no-cache` matters more than it looks: these bytes change with the binary
-/// but carry no ETag or Last-Modified, so a browser that cached them
-/// heuristically would otherwise pair a new `index.html` with a stale
-/// `app.js` after an upgrade. The UI is a few dozen kilobytes, so always
-/// refetching is cheaper than tracking a version suffix by hand.
-fn static_response(content_type: &'static str, body: impl Into<axum::body::Bytes>) -> Response {
+/// Serve one web-ui asset from `<config>/webui`. The bytes may change when the
+/// operator edits the file, and carry no ETag or Last-Modified, so they are
+/// always revalidated rather than heuristically cached.
+fn webui_file(
+    state: &AppState,
+    content_type: &'static str,
+    name: &'static str,
+) -> Response {
+    let body = crate::webui::read(&state.store.config_dir(), name).unwrap_or_default();
     (
         [
-            (axum::http::header::CONTENT_TYPE, content_type),
-            (axum::http::header::CACHE_CONTROL, "no-cache"),
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache"),
         ],
-        body.into(),
+        axum::body::Bytes::from(body),
     )
         .into_response()
 }
 
-async fn logo() -> Response {
-    static_response("image/png", include_bytes!("../static/logo.png").as_slice())
+async fn logo(State(state): State<AppState>) -> Response {
+    webui_file(&state, "image/png", "logo.png")
 }
 
-async fn favicon() -> Response {
-    static_response(
-        "image/x-icon",
-        include_bytes!("../static/favicon.ico").as_slice(),
-    )
+async fn favicon(State(state): State<AppState>) -> Response {
+    webui_file(&state, "image/x-icon", "favicon.ico")
 }
 
-async fn favicon_32() -> Response {
-    static_response(
-        "image/png",
-        include_bytes!("../static/favicon-32x32.png").as_slice(),
-    )
+async fn favicon_32(State(state): State<AppState>) -> Response {
+    webui_file(&state, "image/png", "favicon-32x32.png")
 }
 
-async fn favicon_16() -> Response {
-    static_response(
-        "image/png",
-        include_bytes!("../static/favicon-16x16.png").as_slice(),
-    )
+async fn favicon_16(State(state): State<AppState>) -> Response {
+    webui_file(&state, "image/png", "favicon-16x16.png")
 }
 
-async fn apple_touch_icon() -> Response {
-    static_response(
-        "image/png",
-        include_bytes!("../static/apple-touch-icon.png").as_slice(),
-    )
+async fn apple_touch_icon(State(state): State<AppState>) -> Response {
+    webui_file(&state, "image/png", "apple-touch-icon.png")
 }
 
 #[cfg(test)]

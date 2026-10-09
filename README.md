@@ -219,6 +219,8 @@ docker run --rm -p 8097:8097 \
   -v "$PWD/config:/config" channelflow:2.0.0
 ```
 
+The **web UI is plain files under `<config>/webui`** — `index.html`, `app.css`, `app.js`, the logo, and the favicons. The defaults are written there on first boot and served from disk from then on, so the UI can be edited or branded without rebuilding and survives upgrades; edits go live on the next request, and the binary keeps a compiled-in fallback copy.
+
 From a source checkout: `cargo run --release -p channelflow -- --config ./config --port 8097`, or `--database-url "$DATABASE_URL"` for the same Postgres mode. The scratch-database test in `store.rs` runs only when `TEST_DATABASE_URL` is set.
 
 ## Where this goes next

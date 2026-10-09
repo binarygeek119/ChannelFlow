@@ -1108,12 +1108,18 @@ async fn live_pending() -> Response {
 }
 
 // The UI is compiled into the binary so the shipped image needs no asset
-// directory and cannot start with a half-copied web root.
+// directory and cannot start with a half-copied web root. The document itself
+// is served no-store: it must never sit in a browser cache, or an upgrade
+// leaves users staring at a stale login screen while the server has moved on.
 async fn index() -> Response {
-    static_response(
-        "text/html; charset=utf-8",
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
         include_str!("../static/index.html"),
     )
+        .into_response()
 }
 
 async fn css() -> Response {

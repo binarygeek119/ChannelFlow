@@ -1808,7 +1808,7 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
 });
 
 async function boot() {
-  console.info("[channelflow] ui build v11");
+  console.info("[channelflow] ui build v12");
   try {
     const state = await request("/api/auth/state");
     if (!state.setup_done) {

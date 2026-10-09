@@ -131,10 +131,7 @@ async fn setup_redirect(state: &AppState, path: &str) -> Option<Response> {
     let walkthrough = path == "/first-time" || path.starts_with("/first-time/");
     let app = path == "/webui" || path.starts_with("/webui/");
     if setup_done && (walkthrough || path == "/" || path == "/webui" || path == "/webui/") {
-        // ?ready=1 is a different cache key from /webui/guide. A browser that
-        // cached the old "not set up yet" redirect of /webui/guide must not
-        // be able to bounce a finished install back into the walkthrough.
-        return Some(redirect_to("/webui/guide?ready=1"));
+        return Some(redirect_to("/webui/guide"));
     }
     if !setup_done && (app || path == "/") {
         return Some(redirect_to("/first-time"));

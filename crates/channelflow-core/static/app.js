@@ -1754,10 +1754,9 @@ document.getElementById("ob-next").addEventListener("click", () => {
     obIndex++;
     renderOnboarding();
   } else {
-    // Final step: a real navigation to /. boot() sees setup complete and
-    // opens the app. (pushState would leave the address bar on /first-time,
-    // and the next load would bounce back into the walkthrough.)
-    location.assign("/webui/guide?ready=1");
+    // Final step: land on /webui/guide. boot() will show the login screen
+    // (no session yet) and, once the password checks out, the Guide.
+    location.assign("/webui/guide");
   }
 });
 
@@ -1777,7 +1776,7 @@ document.getElementById("login-form").addEventListener("submit", async (event) =
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
-    location.reload();
+    location.assign("/webui/guide");
   } catch (error) {
     setLoginNote(error.message || "Wrong username or password.", true);
   }
@@ -1858,7 +1857,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "28";
+const UI_BUILD = "29";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1889,7 +1888,7 @@ async function fetchStateWithRetry() {
   throw lastError;
 }
 
-const APP_HOME = "/webui/guide?ready=1";
+const APP_HOME = "/webui/guide";
 
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);

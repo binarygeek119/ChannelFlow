@@ -1488,6 +1488,7 @@ function setLoginNote(message, bad) {
 const OB_STEPS = [
   "Welcome",
   "Plugins",
+  "Database",
   "Transcoding",
   "Media source",
   "Account",
@@ -1529,6 +1530,15 @@ const OB = [
     next: () => true,
     body: () =>
       `<p>ChannelFlow is built from <strong>plugins</strong>. Each one brings a capability — the transcoding engine, a media source, AI and speech. Some are needed for the app to do anything useful, and this walkthrough installs them for you. After setup you can add and remove plugins from the <strong>Plugins</strong> page.</p>`,
+  },
+  {
+    next: () => !!obCompleted["database"],
+    body: () =>
+      `<p>ChannelFlow keeps everything in <strong>Postgres</strong> when you give it one. Enter the server's connection string, and once it connects — the schema is created and any data in the config directory is carried over — you can continue.</p>
+       <label class="field-label" for="ob-db-url">Postgres connection string</label>
+       <input id="ob-db-url" type="text" autocomplete="off" spellcheck="false" placeholder="postgres://user:password@host:5432/channelflow">
+       <div class="ob-action"><button type="button" class="primary" id="ob-do">Connect database</button></div>`,
+    after: () => attachObDatabase(),
   },
   {
     next: () => !!obCompleted["com.channelflow.ersatztv"],
@@ -1574,6 +1584,34 @@ function renderOnboarding() {
   $next.hidden = obIndex === OB.length - 1;
   refreshObNext();
   if (step.after) step.after();
+}
+
+function attachObDatabase() {
+  const btn = document.getElementById("ob-do");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const url = document.getElementById("ob-db-url").value.trim();
+    if (!url.startsWith("postgres://") && !url.startsWith("postgresql://")) {
+      return setObNote("The connection string must start with postgres://", true);
+    }
+    btn.disabled = true;
+    btn.textContent = "Connecting…";
+    setObNote("");
+    try {
+      await request("/api/setup/database", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      obCompleted["database"] = true;
+      btn.textContent = "Connected";
+      setObNote("Connected — ChannelFlow is using Postgres.", false);
+      refreshObNext();
+    } catch (error) {
+      btn.disabled = false;
+      btn.textContent = "Connect database";
+      setObNote(error.message || "Could not connect to Postgres.", true);
+    }
+  });
 }
 
 async function attachObInstall(pluginId, label) {

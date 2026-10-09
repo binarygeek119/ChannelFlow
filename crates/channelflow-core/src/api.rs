@@ -77,6 +77,7 @@ pub fn router(
         .route("/api/auth/setup", post(setup))
         .route("/api/auth/forgot", post(forgot))
         .route("/api/auth/reset", post(reset_password))
+        .route("/api/setup/database", post(setup_database))
         .route("/api/channels", get(list_channels).post(create_channel))
         .route(
             "/api/channels/{id}",
@@ -251,6 +252,36 @@ async fn setup(
     };
     state.store.save_auth_record(&record).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct DatabaseBody {
+    /// The Postgres connection string, e.g. postgres://user:pass@host:5432/db.
+    url: String,
+}
+
+/// The walkthrough's database step: connect to the Postgres the user entered,
+/// make the schema, import anything that currently lives in the config
+/// directory, and switch the running store to it. The URL is only persisted
+/// after the connect succeeds, so a bad string cannot lock a restart out.
+async fn setup_database(
+    State(state): State<AppState>,
+    Json(input): Json<DatabaseBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let url = input.url.trim().to_string();
+    if !(url.starts_with("postgres://") || url.starts_with("postgresql://")) {
+        return Err(StoreError::Plugin(
+            "the connection string must look like postgres://user:password@host:5432/db".to_string(),
+        )
+        .into());
+    }
+    state
+        .store
+        .connect_database(&url)
+        .await
+        .map_err(|error| StoreError::Plugin(format!("Postgres: {error}")))?;
+    state.store.save_database_url(&url).await?;
+    Ok(Json(json!({ "ok": true, "database": "postgres" })))
 }
 
 /// How long is a password-reset pin valid for, and the cooldown between
@@ -1022,7 +1053,7 @@ async fn delete_connection(
     // A media source's own rows cascade with the connection row; the sweep
     // removes the poster files of any item that then lost every source.
     if removed["kind"].as_str() == Some("jellyfin") {
-        let db = state.store.plugin_database("com.channelflow.jellyfin");
+        let db = state.store.plugin_database("com.channelflow.jellyfin").await;
         tokio::spawn(async move {
             channelflow_plugin_jellyfin::sweep_orphan_posters(db).await;
         });

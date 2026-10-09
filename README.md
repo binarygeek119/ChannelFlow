@@ -68,6 +68,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/auth/setup` | create the Web UI admin account and finish setup |
 | `POST` | `/api/auth/forgot` | write a random reset pin to `<config>/reset-<timestamp>.txt`; one per 10 minutes |
 | `POST` | `/api/auth/reset` | match the pin from that file and set a new password |
+| `POST` | `/api/setup/database` | connect to Postgres, import the config directory, and switch the running store to it |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |
 | `GET` | `/api/channels/{id}` | one channel, `404` if absent |
@@ -189,7 +190,9 @@ The file is committed on both `master` and `2.0.0` because GitHub only runs `sch
 
 ## First run and login
 
-The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears: a short introduction, an explanation of the plugin model (and that some plugins are required), then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
+The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears: a short introduction, an explanation of the plugin model (and that some plugins are required), a **database** step where you enter your Postgres connection string — once it connects, the schema is created, anything in the config directory is imported, and the running app switches to it without a restart — then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
+
+The connection string entered there is written to the config directory, so a later restart opens that same database automatically, the same way `--database-url` or `DATABASE_URL` would. A bad connection string is never saved, so it cannot lock a restart out.
 
 After that, every API call except the auth endpoints and `/api/health` requires a session. `POST /api/auth/login` with the account created during setup sets a `channelflow_session` cookie (`HttpOnly`); the session lives in the store (file or Postgres) so a restart keeps you logged in, and `logout` revokes it. The password is never stored — only a salted hash. Setup is described endpoint-by-endpoint in the API table above.
 

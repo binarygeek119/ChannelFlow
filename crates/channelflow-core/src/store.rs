@@ -60,6 +60,7 @@ const AUTH_KEY: &str = "auth";
 const SESSION_KEY: &str = "auth_session";
 const RESET_KEY: &str = "auth_reset";
 const RESET_AT_KEY: &str = "auth_reset_at";
+const DATABASE_URL_KEY: &str = "database_url";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -120,7 +121,9 @@ pub struct Store {
     /// The config directory: home of the file backend, and the source of the
     /// one-time import into Postgres.
     root: PathBuf,
-    backend: Backend,
+    /// Shared so `connect_database` can switch every `Store` clone (the ones
+    /// the plugins hold included) to Postgres while the app is running.
+    backend: std::sync::Arc<tokio::sync::RwLock<Backend>>,
 }
 
 #[derive(Clone)]
@@ -136,7 +139,7 @@ impl Store {
         fs::create_dir_all(config.join("channels"))?;
         Ok(Self {
             root: config.to_path_buf(),
-            backend: Backend::Files,
+            backend: std::sync::Arc::new(tokio::sync::RwLock::new(Backend::Files)),
         })
     }
 
@@ -152,8 +155,16 @@ impl Store {
         pg::import_channels(&pool, config).await?;
         Ok(Self {
             root: config.to_path_buf(),
-            backend: Backend::Postgres(pool),
+            backend: std::sync::Arc::new(tokio::sync::RwLock::new(Backend::Postgres(pool))),
         })
+    }
+
+    /// The currently active backend, for the duration of one call. Taking a
+    /// snapshot (rather than holding the lock across the call) is what lets
+    /// `connect_database` swap the running backend without anyone having to
+    /// coordinate.
+    async fn snapshot(&self) -> Backend {
+        self.backend.read().await.clone()
     }
 
     /// Replace one channel's transcode overrides. The caller validates the
@@ -165,7 +176,7 @@ impl Store {
         id: Uuid,
         overrides: serde_json::Value,
     ) -> Result<Channel, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::set_channel_transcode(&self.root, id, overrides),
             Backend::Postgres(pool) => pg::set_channel_transcode(pool, id, overrides).await,
         }
@@ -173,35 +184,35 @@ impl Store {
 
     /// Every channel, ordered by number then name.
     pub async fn list(&self) -> Result<Vec<Channel>, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::list(&self.root),
             Backend::Postgres(pool) => pg::list(pool).await,
         }
     }
 
     pub async fn get(&self, id: Uuid) -> Result<Channel, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::get(&self.root, id),
             Backend::Postgres(pool) => pg::get(pool, id).await,
         }
     }
 
     pub async fn create(&self, input: NewChannel) -> Result<Channel, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::create(&self.root, input),
             Backend::Postgres(pool) => pg::create(pool, input).await,
         }
     }
 
     pub async fn update(&self, id: Uuid, input: UpdateChannel) -> Result<Channel, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::update(&self.root, id, input),
             Backend::Postgres(pool) => pg::update(pool, id, input).await,
         }
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<(), StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::delete(&self.root, id),
             Backend::Postgres(pool) => pg::delete(pool, id).await,
         }
@@ -233,7 +244,7 @@ impl Store {
         namespace: &str,
         key: &str,
     ) -> Result<Option<serde_json::Value>, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::plugin_get(&self.root, namespace, key),
             Backend::Postgres(pool) => pg::plugin_get(pool, namespace, key).await,
         }
@@ -246,7 +257,7 @@ impl Store {
         key: &str,
         value: &serde_json::Value,
     ) -> Result<(), StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::plugin_set(&self.root, namespace, key, value),
             Backend::Postgres(pool) => pg::plugin_set(pool, namespace, key, value).await,
         }
@@ -257,7 +268,7 @@ impl Store {
         namespace: &str,
         key: &str,
     ) -> Result<(), StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::plugin_delete(&self.root, namespace, key),
             Backend::Postgres(pool) => pg::plugin_delete(pool, namespace, key).await,
         }
@@ -379,7 +390,7 @@ impl Store {
 
     /// Every media-source connection, oldest first.
     pub async fn connection_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::connection_list(&self.root),
             Backend::Postgres(pool) => pg::connection_list(pool).await,
         }
@@ -392,7 +403,7 @@ impl Store {
         kind: &str,
         config: &serde_json::Value,
     ) -> Result<serde_json::Value, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::connection_create(&self.root, kind, config),
             Backend::Postgres(pool) => pg::connection_create(pool, kind, config).await,
         }
@@ -404,7 +415,7 @@ impl Store {
         id: i64,
         config: &serde_json::Value,
     ) -> Result<Option<serde_json::Value>, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::connection_update(&self.root, id, config),
             Backend::Postgres(pool) => pg::connection_update(pool, id as i32, config).await,
         }
@@ -413,7 +424,7 @@ impl Store {
     /// Remove a connection. Plugins whose tables reference `connections(id)`
     /// cascade with it; the caller is responsible for any post-cascade sweep.
     pub async fn connection_delete(&self, id: i64) -> Result<Option<serde_json::Value>, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::connection_delete(&self.root, id),
             Backend::Postgres(pool) => pg::connection_delete(pool, id as i32).await,
         }
@@ -436,8 +447,8 @@ impl Store {
     /// A plugin's own Postgres tables (`storage:database`). On the file
     /// backend this is the no-database double, so a plugin can tell there is
     /// no Postgres and fall back to key/value storage.
-    pub fn plugin_database(&self, namespace: &str) -> Arc<dyn PluginDatabase> {
-        match &self.backend {
+    pub async fn plugin_database(&self, namespace: &str) -> Arc<dyn PluginDatabase> {
+        match &self.snapshot().await {
             Backend::Files => Arc::new(NoPluginDatabase::default()),
             Backend::Postgres(pool) => Arc::new(PgPluginDatabase {
                 pool: pool.clone(),
@@ -536,11 +547,53 @@ impl Store {
         &self.root
     }
 
+    /// The Postgres connection string the walkthrough configured, if any. A
+    /// restart uses it the same way `DATABASE_URL` would.
+    pub async fn database_url(&self) -> Result<Option<String>, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, DATABASE_URL_KEY).await? {
+            Some(serde_json::Value::String(url)) => Ok(Some(url)),
+            _ => Ok(None),
+        }
+    }
+
+    pub async fn save_database_url(&self, url: &str) -> Result<(), StoreError> {
+        // Always to the file backend, never the active one: this value is what
+        // tells a fresh process which database to open, so it must be readable
+        // before any backend is connected.
+        file::plugin_set(
+            &self.root,
+            CORE_NAMESPACE,
+            DATABASE_URL_KEY,
+            &serde_json::Value::String(url.to_string()),
+        )
+    }
+
+    /// Connect an already-running (file-backed) instance to Postgres: make the
+    /// schema, import anything in the config directory that the database does
+    /// not already have, and switch every `Store` clone to the Postgres
+    /// backend. This is what the walkthrough's database step calls.
+    pub async fn connect_database(&self, url: &str) -> Result<(), StoreError> {
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(10))
+            .connect(url)
+            .await?;
+        pg::ensure_schema(&pool).await?;
+        pg::import_channels(&pool, &self.root).await?;
+        pg::import_plugin_storage(&pool, &self.root).await?;
+        {
+            let mut backend = self.backend.write().await;
+            *backend = Backend::Postgres(pool);
+        }
+        tracing::info!("switched the running store to Postgres");
+        Ok(())
+    }
+
     /// Erase everything a plugin stored: its key/value files or rows, and the
     /// tables it created. Returns how many tables/keys were dropped. This is
     /// what "remove and drop data" calls; "remove and keep data" skips it.
     pub async fn drop_plugin_data(&self, namespace: &str) -> Result<u64, StoreError> {
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::drop_plugin_data(&self.root, namespace),
             Backend::Postgres(pool) => pg::drop_plugin_data(pool, namespace).await,
         }
@@ -557,7 +610,7 @@ impl Store {
         {
             return Ok(());
         }
-        let legacy = match &self.backend {
+        let legacy = match &self.snapshot().await {
             Backend::Files => file::read_legacy_ai(&self.root)?,
             Backend::Postgres(pool) => pg::read_legacy_ai(pool).await?,
         };
@@ -567,7 +620,7 @@ impl Store {
         self.plugin_set(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY, &value)
             .await?;
         tracing::info!(plugin = LEGACY_AI_NAMESPACE, "migrated legacy AI settings into plugin storage");
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::remove_legacy_ai(&self.root)?,
             Backend::Postgres(pool) => pg::remove_legacy_ai(pool).await?,
         }
@@ -584,7 +637,7 @@ impl Store {
             .await?
             .is_none()
         {
-            let legacy = match &self.backend {
+            let legacy = match &self.snapshot().await {
                 Backend::Files => file::read_legacy_transcode(&self.root)?,
                 Backend::Postgres(pool) => pg::read_legacy_transcode(pool).await?,
             };
@@ -630,7 +683,7 @@ impl Store {
             }
         }
 
-        match &self.backend {
+        match &self.snapshot().await {
             Backend::Files => file::remove_legacy_transcode(&self.root)?,
             Backend::Postgres(pool) => pg::remove_legacy_transcode(pool).await?,
         }
@@ -1242,6 +1295,60 @@ mod pg {
         }
         if imported > 0 {
             tracing::info!(imported, "migrated channels from file into Postgres");
+        }
+        Ok(())
+    }
+
+    /// Copy every plugin's key/value file into `plugin_kv`, once, only when
+    /// the table is empty. This carries over the settings that predate the
+    /// database — the plugin registry, auth, repositories, and each plugin's
+    /// own data — so switching backends mid-run keeps everything.
+    pub async fn import_plugin_storage(
+        pool: &PgPool,
+        config: &Path,
+    ) -> Result<(), StoreError> {
+        let count: i64 = sqlx::query("SELECT count(*) FROM plugin_kv")
+            .fetch_one(pool)
+            .await?
+            .try_get(0)?;
+        if count > 0 {
+            return Ok(());
+        }
+        let base = config.join("plugins");
+        let entries = match fs::read_dir(&base) {
+            Ok(entries) => entries,
+            Err(_) => return Ok(()),
+        };
+        let mut imported = 0i64;
+        for namespace in entries.flatten() {
+            if !namespace.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let namespace = namespace.file_name().to_string_lossy().into_owned();
+            for key in fs::read_dir(base.join(&namespace)).into_iter().flatten() {
+                let entry = match key {
+                    Ok(entry) => entry,
+                    Err(_) => continue,
+                };
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                let Some(key_name) = path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let text = fs::read_to_string(&path)?;
+                let value: serde_json::Value = serde_json::from_str(&text)?;
+                plugin_set(pool, &namespace, &key_name, &value).await?;
+                imported += 1;
+            }
+        }
+        if imported > 0 {
+            tracing::info!(imported, "migrated plugin storage into Postgres");
         }
         Ok(())
     }

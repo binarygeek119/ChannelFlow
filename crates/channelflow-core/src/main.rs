@@ -72,12 +72,23 @@ async fn main() -> Result<()> {
     })?;
 
     let store = if args.database_url.trim().is_empty() {
-        Store::open(&config).with_context(|| {
+        let store = Store::open(&config).with_context(|| {
             format!(
                 "opening the channel store under {} — that directory must be writable by uid 1000 (`ersatztv`)",
                 config.display()
             )
-        })?
+        })?;
+        // The setup walkthrough can configure a Postgres connection; honor it
+        // the same way `--database-url` would.
+        if let Some(url) = store.database_url().await? {
+            if !url.trim().is_empty() {
+                store
+                    .connect_database(&url)
+                    .await
+                    .with_context(|| format!("connecting to the configured Postgres at {}", redact_url(&url)))?;
+            }
+        }
+        store
     } else {
         Store::open_postgres(&args.database_url, &config)
             .await
@@ -118,7 +129,7 @@ async fn main() -> Result<()> {
         dir: store.plugin_dir(&ai_manifest.id),
         logger: PluginLogger::new(&ai_manifest.id),
         core: Arc::new(store.core_data()),
-        database: store.plugin_database(&ai_manifest.id),
+        database: store.plugin_database(&ai_manifest.id).await,
     };
     manager
         .add(ai_plugin, ai_api)
@@ -137,7 +148,7 @@ async fn main() -> Result<()> {
         dir: store.plugin_dir(&ersatztv_manifest.id),
         logger: PluginLogger::new(&ersatztv_manifest.id),
         core: Arc::new(store.core_data()),
-        database: store.plugin_database(&ersatztv_manifest.id),
+        database: store.plugin_database(&ersatztv_manifest.id).await,
     };
     manager
         .add(ersatztv_plugin, ersatztv_api)
@@ -156,7 +167,7 @@ async fn main() -> Result<()> {
         dir: store.plugin_dir(&jellyfin_manifest.id),
         logger: PluginLogger::new(&jellyfin_manifest.id),
         core: Arc::new(store.core_data()),
-        database: store.plugin_database(&jellyfin_manifest.id),
+        database: store.plugin_database(&jellyfin_manifest.id).await,
     };
     manager
         .add(jellyfin_plugin, jellyfin_api)

@@ -1712,16 +1712,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-// One place for the UI build label; the boot tag prints it so a screenshot can
-// always identify the page's build without the console.
-const UI_BUILD = "18";
-
-function tagBoot(branch, state) {
-  const el = document.getElementById("ui-build");
-  if (!el) return;
-  const extra = state && state.setup_done !== undefined ? ` · setup_done:${state.setup_done}` : "";
-  el.textContent = `UI build ${UI_BUILD} · ${branch}${extra}`;
-}
+const UI_BUILD = "19";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1765,7 +1756,6 @@ async function boot() {
         location.replace("/first-time");
         return;
       }
-      tagBoot("setup", state);
       startOnboarding();
       return;
     }
@@ -1773,10 +1763,8 @@ async function boot() {
       location.replace("/");
       return;
     }
-    tagBoot("app", state);
     showApp();
   } catch (error) {
-    tagBoot("error");
     if (!atFirstTime) {
       location.replace("/first-time");
       return;

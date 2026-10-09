@@ -62,6 +62,7 @@ pub fn router(
 
     let mut app = Router::new()
         .route("/", get(index))
+        .route("/first-time", get(index))
         .route("/app.css", get(css))
         .route("/app.js", get(js))
         .route("/logo.png", get(logo))

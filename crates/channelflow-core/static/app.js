@@ -1699,7 +1699,7 @@ document.getElementById("ob-next").addEventListener("click", () => {
     obIndex++;
     renderOnboarding();
   } else {
-    showLogin();
+    location.replace("/");
   }
 });
 
@@ -1762,8 +1762,9 @@ document.getElementById("reset-setup-link").addEventListener("click", async () =
   setLoginNote("");
   try {
     await request("/api/auth/reset-setup", { method: "POST" });
-    // Straight to the walkthrough; no reload for a cache to get in the way.
-    startOnboarding();
+    // Back to the walkthrough at its own address; a fresh boot picks out
+    // /first-time and renders setup with no stale view left behind.
+    location.replace("/first-time");
   } catch (error) {
     link.dataset.armed = "";
     link.textContent = "First time here? Reset this instance to run setup again";
@@ -1809,7 +1810,7 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
 
 // One place for the UI build label; the boot tag prints it so a screenshot can
 // always identify the page's build without the console.
-const UI_BUILD = "16";
+const UI_BUILD = "17";
 
 function tagBoot(branch, state) {
   const el = document.getElementById("ui-build");
@@ -1851,11 +1852,23 @@ async function fetchStateWithRetry() {
 
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
+  // The setup walkthrough lives at /first-time. Until an account exists,
+  // any other URL funnels there; once setup is done /first-time sends the
+  // user to / where login (or the app) belongs.
+  const atFirstTime = location.pathname === "/first-time";
   try {
     const state = await fetchStateWithRetry();
     if (!state.setup_done) {
+      if (!atFirstTime) {
+        location.replace("/first-time");
+        return;
+      }
       tagBoot("setup", state);
       startOnboarding();
+      return;
+    }
+    if (atFirstTime) {
+      location.replace("/");
       return;
     }
     if (!state.authenticated) {
@@ -1867,6 +1880,10 @@ async function boot() {
     showApp();
   } catch (error) {
     tagBoot("error");
+    if (!atFirstTime) {
+      location.replace("/first-time");
+      return;
+    }
     showSetupUnreachable(error);
   }
 }

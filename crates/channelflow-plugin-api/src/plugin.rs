@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use axum::Router;
 
 use crate::core::CoreData;
+use crate::database::PluginDatabase;
 use crate::manifest::PluginManifest;
 use crate::storage::PluginStorage;
 use crate::ui::UiContribution;
@@ -89,6 +90,8 @@ pub struct PluginApi {
     pub logger: PluginLogger,
     /// Read-only view of core data (only useful with `api:core:read`).
     pub core: Arc<dyn CoreData>,
+    /// The plugin's own Postgres tables (only useful with `storage:database`).
+    pub database: Arc<dyn PluginDatabase>,
 }
 
 impl std::fmt::Debug for PluginApi {

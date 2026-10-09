@@ -13,6 +13,7 @@
 //! plugin, and is checked before a plugin is allowed to run.
 
 pub mod core;
+pub mod database;
 pub mod manifest;
 pub mod permission;
 pub mod plugin;
@@ -21,6 +22,7 @@ pub mod ui;
 pub mod version;
 
 pub use core::{CoreChannel, CoreData, CoreDataError, InMemoryCoreData, NoCoreData};
+pub use database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 pub use manifest::{Assets, Hooks, PluginManifest, Repository};
 pub use permission::Permission;
 pub use plugin::{

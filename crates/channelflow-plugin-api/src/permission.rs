@@ -15,6 +15,8 @@ pub enum Permission {
     StorageRead,
     /// Write into the named storage namespace (defaults to its own).
     StorageWrite(String),
+    /// Create and query the plugin's own tables in the base's Postgres.
+    StorageDatabase,
     /// Make outbound HTTP requests.
     NetworkOutbound,
     /// Bind a specific inbound port.
@@ -51,6 +53,7 @@ impl Permission {
             ("storage", Some(arg)) if arg.starts_with("write:") => {
                 Ok(Permission::StorageWrite(arg["write:".len()..].to_string()))
             }
+            ("storage", Some("database")) => Ok(Permission::StorageDatabase),
             ("network", Some("outbound")) => Ok(Permission::NetworkOutbound),
             ("network", Some(arg)) if arg.starts_with("inbound:") => {
                 Ok(Permission::NetworkInbound(arg["inbound:".len()..].to_string()))
@@ -80,6 +83,7 @@ impl Permission {
                     format!("storage:write:{namespace}")
                 }
             }
+            Permission::StorageDatabase => "storage:database".to_string(),
             Permission::NetworkOutbound => "network:outbound".to_string(),
             Permission::NetworkInbound(port) => format!("network:inbound:{port}"),
             Permission::ProcessSpawn => "process:spawn".to_string(),
@@ -104,6 +108,7 @@ mod tests {
             "storage:read",
             "storage:write",
             "storage:write:next",
+            "storage:database",
             "network:outbound",
             "network:inbound:8409",
             "process:spawn",

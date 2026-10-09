@@ -1748,15 +1748,23 @@ document.getElementById("forgot-link").addEventListener("click", showForgot);
 document.getElementById("reset-back").addEventListener("click", showLoginView);
 
 document.getElementById("reset-setup-link").addEventListener("click", async () => {
-  const confirmed = window.confirm(
-    "Reset ChannelFlow back to the first-run setup? Your account, session and the installed-plugins list will be cleared (channels and plugin data are kept). You will run the setup walkthrough again."
-  );
-  if (!confirmed) return;
+  const link = document.getElementById("reset-setup-link");
+  // First click arms it — no window.confirm to get blocked by the browser —
+  // the second click resets and drops this page straight into the walkthrough.
+  if (!link.dataset.armed) {
+    link.dataset.armed = "1";
+    link.textContent = "Click again to confirm — this clears the account and starts setup over";
+    setLoginNote("");
+    return;
+  }
   setLoginNote("");
   try {
     await request("/api/auth/reset-setup", { method: "POST" });
-    location.reload();
+    // Straight to the walkthrough; no reload for a cache to get in the way.
+    startOnboarding();
   } catch (error) {
+    link.dataset.armed = "";
+    link.textContent = "First time here? Reset this instance to run setup again";
     setLoginNote(error.message || "Could not reset the instance.", true);
   }
 });

@@ -1177,12 +1177,41 @@ async fn live_pending() -> Response {
         .into_response()
 }
 
-// The web UI is served from <config>/webui — plain files an operator can edit
-// or brand without rebuilding. `main` writes the compiled-in defaults there on
-// first boot. The document itself is no-store: it must never sit in a browser
-// cache, or an upgrade leaves users staring at a stale page.
+// The web UI is served from <config>/webui — plain files this binary loads,
+// not embedded code. The document itself is no-store: it must never sit in a
+// browser cache, or an operator's edit leaves users staring at a stale page.
+//
+// When the UI files are missing, `/` answers with a short page saying where
+// to put them instead of a blank screen; assets 404.
+const WEBUI_MISSING: &str = r#"<!doctype html><meta charset="utf-8"><title>ChannelFlow — web UI not installed</title>
+<body style="font-family:sans-serif;background:#101010;color:#eee;padding:2rem">
+<h1>ChannelFlow</h1>
+<p>The web UI is not installed. This binary only loads it — it reads the UI
+files from <code>&lt;config&gt;/webui</code>.</p>
+<p>Copy the UI into the config directory, for example:</p>
+<pre>scripts/install-webui.sh ./config</pre>
+<p>or by hand:</p>
+<pre>cp crates/channelflow-core/static/* ./config/webui/</pre>
+</body>"#;
+
 async fn index(State(state): State<AppState>) -> Response {
-    let body = crate::webui::read(&state.store.config_dir(), "index.html").unwrap_or_default();
+    let body = match crate::webui::read(&state.store.config_dir(), "index.html") {
+        Ok(body) => body,
+        Err(_) => {
+            tracing::warn!(
+                root = %state.store.config_dir().display(),
+                "web UI missing under <config>/webui"
+            );
+            return (
+                [
+                    (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    (axum::http::header::CACHE_CONTROL, "no-store"),
+                ],
+                WEBUI_MISSING,
+            )
+                .into_response();
+        }
+    };
     (
         [
             (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -1209,15 +1238,17 @@ fn webui_file(
     content_type: &'static str,
     name: &'static str,
 ) -> Response {
-    let body = crate::webui::read(&state.store.config_dir(), name).unwrap_or_default();
-    (
-        [
-            (header::CONTENT_TYPE, content_type),
-            (header::CACHE_CONTROL, "no-cache"),
-        ],
-        axum::body::Bytes::from(body),
-    )
-        .into_response()
+    match crate::webui::read(&state.store.config_dir(), name) {
+        Ok(body) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            axum::body::Bytes::from(body),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn logo(State(state): State<AppState>) -> Response {

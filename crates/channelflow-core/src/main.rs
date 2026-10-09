@@ -72,14 +72,31 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    // The web UI lives as editable files under <config>/webui; write the
-    // defaults on first boot and after that they are served from disk.
-    webui::ensure(&config).with_context(|| {
-        format!(
-            "writing the web UI under {} — that directory must be writable",
-            config.join("webui").display()
-        )
-    })?;
+    // The binary is a loader: the web UI is plain files that must be present
+    // under <config>/webui. If they are missing, seed them from the shipped
+    // copy (the image keeps it at /usr/share/channelflow/webui;
+    // CHANNELFLOW_WEBUI overrides) so a fresh /config works out of the box.
+    if !webui::webui_dir(&config).join("index.html").exists() {
+        let shipped = std::env::var("CHANNELFLOW_WEBUI").unwrap_or_else(|_| {
+            "/usr/share/channelflow/webui".to_string()
+        });
+        let src = PathBuf::from(&shipped);
+        if src.join("index.html").exists() {
+            match webui::copy_from(&src, &config) {
+                Ok(count) => tracing::info!(
+                    root = %config.join("webui").display(),
+                    copied = count,
+                    "seeded the web UI from {shipped}"
+                ),
+                Err(error) => tracing::warn!(%error, shipped, "could not seed the web UI"),
+            }
+        } else {
+            tracing::warn!(
+                root = %config.join("webui").display(),
+                "web UI files are missing and no CHANNELFLOW_WEBUI source was found — copy crates/channelflow-core/static/* into <config>/webui, or run scripts/install-webui.sh"
+            );
+        }
+    }
 
     let store = if args.database_url.trim().is_empty() {
         let store = Store::open(&config).with_context(|| {

@@ -33,6 +33,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 COPY --from=rust-build /src/target/release/channelflow /usr/local/bin/channelflow
 
+# The web UI ships as files alongside the binary — the loader serves them from
+# /config/webui, and a fresh (empty) /config gets them copied in on start
+# (see main.rs: CHANNELFLOW_WEBUI default below).
+COPY crates/channelflow-core/static /usr/share/channelflow/webui
+
 # The WeatherStar renderers the compositor serves. They ship with the image so
 # a fresh install has the graphics without a second download.
 COPY vendor/ws4kp /app/channelflow/ws4kp

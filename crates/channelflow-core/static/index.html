@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=27">
+<link rel="stylesheet" href="/app.css?v=28">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -65,10 +65,8 @@
       </div>
       <div class="topbar-meta">
         <div class="topbar-actions">
-          <button type="button" id="start-over" class="ghost">Start over</button>
-          <span class="engine">built on ErsatzTV next</span>
-          <span class="version" id="version">2.0.0</span>
           <span class="status" id="status">connecting…</span>
+          <button type="button" id="logout" class="ghost">Log out</button>
         </div>
       </div>
     </header>
@@ -453,7 +451,6 @@
         <button type="submit" class="primary">Log in</button>
       </form>
       <button type="button" id="forgot-link" class="link">Forgot password?</button>
-      <button type="button" id="reset-setup-link" class="link">First time here? Reset this instance to run setup again</button>
       <p class="hint bad" id="login-note" hidden></p>
     </div>
 
@@ -500,6 +497,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=27"></script>
+<script src="/app.js?v=28"></script>
 </body>
 </html>

@@ -68,7 +68,6 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/auth/setup` | create the Web UI account and finish setup |
 | `POST` | `/api/auth/forgot` | write a random reset pin to `<config>/reset-<timestamp>.txt`; one per 10 minutes |
 | `POST` | `/api/auth/reset` | match the pin from that file and set a new password |
-| `POST` | `/api/auth/reset-setup` | forget the account, session, and install registry so the first-boot walkthrough runs again |
 | `POST` | `/api/setup/database` | connect to Postgres, import the config directory, and switch the running store to it |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |
@@ -199,7 +198,7 @@ After that, every API call except the auth endpoints and `/api/health` requires 
 
 **Forgot a password?** The login screen's *Forgot password* flow writes a six-pair random pin to `<config>/reset-<timestamp>.txt` (e.g. `reset-10-16-26-15-45-32.txt`) — a file only someone with filesystem access to the config volume can read, never exposed by the web UI. Enter the pin plus a new password and it is changed; the file is deleted, the old session is revoked, and resets are limited to one every ten minutes.
 
-**Start over** — the app's top bar (and the login screen) has a **Start over** link (clicked twice to confirm) that forgets the account, session, and install registry, then sends you to `/first-time` to run the walkthrough again. The same effect without the UI: `POST /api/auth/reset-setup`.
+**Sign out** — every page has a **Log out** button in the top right; it revokes the session and returns to the login screen. If the account is ever lost, the walkthrough is re-entered by removing the `config/setup-complete` file and the auth record from the store.
 
 ## Running it
 

@@ -15,7 +15,6 @@ const els = {
   cancel: $("cancel"),
   error: $("error"),
   status: $("status"),
-  version: $("version"),
   pageTitle: $("page-title"),
   pageSubtitle: $("page-subtitle"),
   tabChannels: $("tab-channels"),
@@ -156,7 +155,6 @@ async function load() {
       request("/api/channels"),
     ]);
     channels = list;
-    els.version.textContent = health.version;
     setStatus(`v${health.version} · ok`, "ok");
     render();
   } catch (error) {
@@ -1810,27 +1808,6 @@ function showLoginView() {
 document.getElementById("forgot-link").addEventListener("click", showForgot);
 document.getElementById("reset-back").addEventListener("click", showLoginView);
 
-document.getElementById("reset-setup-link").addEventListener("click", async () => {
-  const link = document.getElementById("reset-setup-link");
-  // First click arms it — the second click wipes setup and returns to the
-  // walkthrough.
-  if (!link.dataset.armed) {
-    link.dataset.armed = "1";
-    link.textContent = "Click again to confirm — this clears the account and starts setup over";
-    setLoginNote("");
-    return;
-  }
-  setLoginNote("");
-  try {
-    await request("/api/auth/reset-setup", { method: "POST" });
-    location.replace("/first-time");
-  } catch (error) {
-    link.dataset.armed = "";
-    link.textContent = "First time here? Reset this instance to run setup again";
-    setLoginNote(error.message || "Could not reset the instance.", true);
-  }
-});
-
 document.getElementById("forgot-generate").addEventListener("click", async () => {
   document.getElementById("forgot-generate").disabled = true;
   document.getElementById("forgot-info").textContent = "Writing a reset pin…";
@@ -1867,31 +1844,21 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
   }
 });
 
-// ── start over ───────────────────────────────────────────────────────────────-
-// Wipe setup and run /first-time again — the escape hatch if the account is
-// lost. Two clicks to confirm. Also reachable from the login screen.
+// ── log out ───────────────────────────────────────────────────────────────────
+// Every /webui page has a Log out button in the top right. Clearing the
+// session returns to the login screen.
 
-let startOverArmed = false;
-document.getElementById("start-over").addEventListener("click", async () => {
-  const btn = document.getElementById("start-over");
-  if (!startOverArmed) {
-    startOverArmed = true;
-    btn.textContent = "Click again to start setup over";
-    return;
-  }
-  btn.textContent = "Starting over…";
+document.getElementById("logout").addEventListener("click", async () => {
   try {
-    await request("/api/auth/reset-setup", { method: "POST" });
-    try { localStorage.removeItem("cf_setup_done"); } catch (e) {}
-    location.replace("/first-time");
+    await request("/api/auth/logout", { method: "POST" });
   } catch (error) {
-    startOverArmed = false;
-    btn.textContent = "Start over";
-    setStatus(error.message || "Could not reset the instance.", "bad");
+    // Logging out is best-effort; even if the call fails the session is gone
+    // once setup is re-entered, and a reload shows login either way.
   }
+  location.replace("/");
 });
 
-const UI_BUILD = "27";
+const UI_BUILD = "28";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

@@ -331,11 +331,16 @@ async function loadPluginPages() {
       link.appendChild(label);
       link.addEventListener("click", (event) => {
         event.preventDefault();
+        history.pushState(null, "", contribution.path || `/${key}`);
         showTab(key);
       });
       nav.appendChild(link);
     });
   });
+  // Plugin pages load asynchronously; a deep link to one can only be resolved
+  // once its drawer entry exists.
+  const key = tabForPath(location.pathname);
+  if (key) showTab(key);
 }
 
 // Render rows as `<div class="about-row">` pairs. Rows with no value are
@@ -1453,12 +1458,39 @@ function showTab(key) {
   if (key === "plugins") loadPlugins();
 }
 
+function pathForTab(key) {
+  for (const link of document.querySelectorAll(".drawer-nav a[data-tab]")) {
+    if (link.dataset.tab === key) return link.getAttribute("href") || `/${key}`;
+  }
+  return `/${key}`;
+}
+
+function tabForPath(path) {
+  let found = null;
+  document.querySelectorAll(".drawer-nav a[data-tab]").forEach((link) => {
+    if (link.getAttribute("href") === path) found = link.dataset.tab;
+  });
+  return found;
+}
+
 document.querySelectorAll(".drawer-nav a").forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
-    showTab(link.dataset.tab);
-    link.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (link.dataset.tab) {
+      history.pushState(null, "", link.getAttribute("href") || `/${link.dataset.tab}`);
+      showTab(link.dataset.tab);
+      link.scrollIntoView({ block: "nearest", inline: "nearest" });
+    } else {
+      location.href = link.getAttribute("href");
+    }
   });
+});
+
+// Back and forward hop between tabs exactly like pages: each tab has its own
+// URL, and the browser history moves through them.
+window.addEventListener("popstate", () => {
+  const key = tabForPath(location.pathname);
+  if (key) showTab(key);
 });
 
 // --- First boot: the walkthrough (and after that, the app itself) -----------
@@ -1476,6 +1508,7 @@ function showApp() {
   document.getElementById("app-shell").hidden = false;
   load();
   loadPluginPages();
+  showTab(tabForPath(location.pathname) || "channels");
 }
 
 const OB_STEPS = [
@@ -1579,6 +1612,9 @@ function renderOnboarding() {
   $next.hidden = false;
   refreshObNext();
   if (step.after) step.after();
+  // The address bar follows the walkthrough, step by step.
+  const path = `/first-time/${OB_STEP_PATHS[obIndex]}`;
+  if (location.pathname !== path) history.replaceState(null, "", path);
 }
 
 function attachObDatabase() {
@@ -1665,9 +1701,29 @@ function attachObAccount() {
   });
 }
 
+// Each walkthrough step has its own URL under /first-time (e.g.
+// /first-time/database), so a step can be deep-linked and the address bar
+// always says where you are.
+const OB_STEP_PATHS = [
+  "welcome",
+  "plugins",
+  "database",
+  "transcoding",
+  "media-source",
+  "account",
+  "done",
+];
+
+function obStepFromPath() {
+  const match = location.pathname.match(/^\/first-time\/([^/]+)\/?$/);
+  if (!match) return null;
+  const index = OB_STEP_PATHS.indexOf(match[1]);
+  return index >= 0 ? index : null;
+}
+
 function startOnboarding() {
   hideScreens();
-  obIndex = 0;
+  obIndex = obStepFromPath() ?? 0;
   obCompleted = {};
   document.getElementById("onboarding-screen").hidden = false;
   renderOnboarding();
@@ -1716,14 +1772,14 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "20";
+const UI_BUILD = "21";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
 function showSetupUnreachable(error) {
   hideScreens();
   document.getElementById("onboarding-screen").hidden = false;
-  obIndex = 0;
+  obIndex = obStepFromPath() ?? 0;
   obCompleted = {};
   renderOnboarding();
   setObNote(
@@ -1749,10 +1805,11 @@ async function fetchStateWithRetry() {
 
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
-  // The setup walkthrough lives at /first-time. Until setup completes, any
-  // other URL funnels there; once it does the server auto-authenticates and
-  // the app opens directly - there is no login screen.
-  const atFirstTime = location.pathname === "/first-time";
+  // The setup walkthrough lives under /first-time (each step at its own path).
+  // Until setup completes, any other URL funnels there; once it does the
+  // server auto-authenticates and the app opens directly - no login screen.
+  const atFirstTime =
+    location.pathname === "/first-time" || location.pathname.startsWith("/first-time/");
   try {
     const state = await fetchStateWithRetry();
     if (!state.setup_done) {

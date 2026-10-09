@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
@@ -103,6 +103,17 @@ pub fn router(
     }
     app.layer(middleware::from_fn_with_state(state, require_auth))
         .layer(middleware::from_fn(no_store))
+        .fallback(spa_fallback)
+}
+
+/// SPA fallback: any path that isn't the JSON API serves the UI document, so
+/// every app tab and every walkthrough step is deep-linkable at its own URL
+/// (e.g. `/guide`, `/first-time/database`). Unknown API paths still 404.
+async fn spa_fallback(uri: Uri) -> Response {
+    if uri.path().starts_with("/api/") {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response();
+    }
+    index().await
 }
 
 /// API answers must never be cached: a stale `/api/auth/state` (say, from

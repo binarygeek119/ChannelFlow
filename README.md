@@ -187,7 +187,7 @@ The file is committed on both `master` and `2.0.0` because GitHub only runs `sch
 
 ## First run
 
-The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears. It lives at `/first-time`; until an account exists any other URL (including `/`) redirects there, and once setup is done `/first-time` sends you to `/` where the app opens directly. The walkthrough covers: a short introduction, an explanation of the plugin model (and that some plugins are required), a **database** step where you enter your Postgres connection string — once it connects, the schema is created, anything in the config directory is imported, and the running app switches to it without a restart — then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
+The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears. It lives under `/first-time` with each step at its own URL — `/first-time/welcome`, `/first-time/plugins`, `/first-time/database`, `/first-time/transcoding`, `/first-time/media-source`, `/first-time/account`, `/first-time/done` — so any step can be visited or shared directly. Until an account exists any other URL (including `/`) redirects to the walkthrough; once setup is done, `/first-time/*` sends you to `/` where the app opens directly. The walkthrough covers: a short introduction, an explanation of the plugin model (and that some plugins are required), a **database** step where you enter your Postgres connection string — once it connects, the schema is created, anything in the config directory is imported, and the running app switches to it without a restart — then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
 
 The connection string entered there is written to the config directory, so a later restart opens that same database automatically, the same way `--database-url` or `DATABASE_URL` would. A bad connection string is never saved, so it cannot lock a restart out.
 
@@ -202,7 +202,7 @@ docker build -t channelflow:2.0.0 .
 docker run --rm -p 8097:8097 -v "$PWD/config:/config" channelflow:2.0.0
 ```
 
-Then open `http://127.0.0.1:8097/`.
+Then open `http://127.0.0.1:8097/`. Every page is its own URL too: the tabs live at `/channels`, `/guide`, `/livetv`, `/plugins`, `/about`, and the rest (one per drawer entry), so any screen can be bookmarked or opened directly.
 
 The container runs as **uid 1000 (`ersatztv`)**, inherited from the next base, so the mounted `config` directory must be writable by that user — `chmod 777 config` for a quick test, or `chown 1000:1000 config` for a real setup. The server says exactly this if the directory is not writable.
 

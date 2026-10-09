@@ -1807,20 +1807,31 @@ document.getElementById("reset-submit").addEventListener("click", async () => {
   }
 });
 
+function tagBoot(branch, state) {
+  const el = document.getElementById("ui-build");
+  if (!el) return;
+  const extra = state && state.setup_done !== undefined ? ` · setup_done:${state.setup_done}` : "";
+  el.textContent = `UI build 13 · ${branch}${extra}`;
+}
+
 async function boot() {
-  console.info("[channelflow] ui build v12");
+  console.info("[channelflow] ui build v13");
   try {
     const state = await request("/api/auth/state");
     if (!state.setup_done) {
+      tagBoot("setup", state);
       startOnboarding();
       return;
     }
     if (!state.authenticated) {
+      tagBoot("login", state);
       showLogin();
       return;
     }
+    tagBoot("app", state);
     showApp();
   } catch (error) {
+    tagBoot("error");
     showLogin("Could not reach ChannelFlow.");
   }
 }

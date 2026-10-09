@@ -5,4 +5,3 @@ pub mod registry;
 pub mod repo;
 
 pub use manager::PluginManager;
-pub use registry::PluginRegistry;

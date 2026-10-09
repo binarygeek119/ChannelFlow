@@ -15,7 +15,7 @@ use clap::Parser;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
-use crate::plugin::{PluginManager, PluginRegistry};
+use crate::plugin::PluginManager;
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
@@ -162,19 +162,10 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Jellyfin plugin: {error}"))?;
 
-    // First run seeds the bundled plugins as installed and enabled so the app
-    // works out of the box; after that the registry is the source of truth, so
-    // removing a plugin is not undone by a restart.
-    if !store.plugin_registry_exists().await? {
-        let mut registry = PluginRegistry::default();
-        for entry in manager.catalog() {
-            let id = entry["id"].as_str().unwrap_or_default();
-            let version = entry["version"].as_str().unwrap_or_default();
-            registry.install(id, version);
-        }
-        store.save_plugin_registry(&registry).await?;
-        tracing::info!(count = registry.installed.len(), "installed the bundled plugins");
-    }
+    // Plugins are loaded but not pre-installed: the Installed tab starts empty
+    // and the Store offers every plugin. The registry is the source of truth
+    // after that, so installing or removing a plugin is not undone by a
+    // restart.
     let registry = store.plugin_registry().await?;
     for installed in &registry.installed {
         if !installed.enabled {

@@ -449,16 +449,6 @@ impl Store {
         }
     }
 
-    /// Whether the registry has ever been written. A fresh install seeds the
-    /// bundled plugins here; after that an empty registry stays empty, so
-    /// removing every plugin is not undone by the next start.
-    pub async fn plugin_registry_exists(&self) -> Result<bool, StoreError> {
-        Ok(self
-            .plugin_get(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY)
-            .await?
-            .is_some())
-    }
-
     pub async fn save_plugin_registry(&self, registry: &PluginRegistry) -> Result<(), StoreError> {
         let value = serde_json::to_value(registry)?;
         self.plugin_set(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY, &value)

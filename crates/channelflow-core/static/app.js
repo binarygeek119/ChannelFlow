@@ -1454,8 +1454,239 @@ document.querySelectorAll(".drawer-nav a").forEach((link) => {
   });
 });
 
-// Plugin-declared pages (the AI tab) appear only when their plugin is
-// installed; the initial nav links were wired above, these are added on boot.
-loadPluginPages();
+// --- First boot: the walkthrough and the login screen -----------------------
+// boot() runs once on load. No setup yet → the walkthrough; setup done but no
+// session → log in; otherwise the app. The API is open while setup is not
+// complete, so this works before any account exists.
 
-load();
+function hideScreens() {
+  document.getElementById("login-screen").hidden = true;
+  document.getElementById("onboarding-screen").hidden = true;
+  document.getElementById("app-shell").hidden = true;
+}
+
+function showApp() {
+  hideScreens();
+  document.getElementById("app-shell").hidden = false;
+  load();
+  loadPluginPages();
+}
+
+function showLogin(note) {
+  hideScreens();
+  document.getElementById("login-screen").hidden = false;
+  if (note) setLoginNote(note, true);
+}
+
+function setLoginNote(message, bad) {
+  const note = document.getElementById("login-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+const OB_STEPS = [
+  "Welcome",
+  "Plugins",
+  "Transcoding",
+  "Media source",
+  "Account",
+  "Done",
+];
+let obIndex = 0;
+let obCompleted = {};
+
+function setObNote(message, bad) {
+  const note = document.getElementById("ob-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+function renderObSteps() {
+  document.getElementById("ob-steps").innerHTML = OB_STEPS.map((title, i) => {
+    const cls = i < obIndex ? "done" : i === obIndex ? "current" : "";
+    return `<span class="${cls}" title="${title}"></span>`;
+  }).join("");
+}
+
+function refreshObNext() {
+  const $next = document.getElementById("ob-next");
+  if (obIndex === OB.length - 1) {
+    $next.disabled = false;
+    return;
+  }
+  $next.disabled = !(OB[obIndex].next ? OB[obIndex].next() : true);
+}
+
+const OB = [
+  {
+    next: () => true,
+    body: () =>
+      `<p>Welcome to <strong>ChannelFlow</strong> — a simulated live-TV server: real channels, a guide, and scheduled playout, driven by ErsatzTV next underneath. This short walkthrough installs the two plugins it needs and creates the account you will log in with.</p>`,
+  },
+  {
+    next: () => true,
+    body: () =>
+      `<p>ChannelFlow is built from <strong>plugins</strong>. Each one brings a capability — the transcoding engine, a media source, AI and speech. Some are needed for the app to do anything useful, and this walkthrough installs them for you. After setup you can add and remove plugins from the <strong>Plugins</strong> page.</p>`,
+  },
+  {
+    next: () => !!obCompleted["com.channelflow.ersatztv"],
+    body: () =>
+      `<p>Your channels will be encoded and streamed by the <strong>ErsatzTV Transcoding Engine</strong>, which turns a channel into the HLS stream a player watches. Install it now:</p>
+       <div class="ob-action"><button type="button" class="primary" id="ob-do">Install latest ErsatzTV Transcoding Engine</button></div>`,
+    after: () =>
+      attachObInstall("com.channelflow.ersatztv", "Install latest ErsatzTV Transcoding Engine"),
+  },
+  {
+    next: () => !!obCompleted["com.channelflow.jellyfin"],
+    body: () =>
+      `<p>ChannelFlow pulls movies and shows from a <strong>media source</strong>. Install the <strong>Jellyfin media source</strong> now — it connects your Jellyfin library to your channels.</p>
+       <div class="ob-action"><button type="button" class="primary" id="ob-do">Install the Jellyfin media source</button></div>`,
+    after: () => attachObInstall("com.channelflow.jellyfin", "Install the Jellyfin media source"),
+  },
+  {
+    next: () => !!obCompleted["account"],
+    body: () =>
+      `<label class="field-label" for="ob-user">Username</label>
+       <input id="ob-user" type="text" autocomplete="username" spellcheck="false">
+       <label class="field-label" for="ob-pass">Password</label>
+       <input id="ob-pass" type="password" autocomplete="new-password">
+       <label class="field-label" for="ob-pass2">Confirm password</label>
+       <input id="ob-pass2" type="password" autocomplete="new-password">
+       <div class="ob-action"><button type="button" class="primary" id="ob-do">Create account</button></div>`,
+    after: () => attachObAccount(),
+  },
+  {
+    next: () => true,
+    body: () =>
+      `<p>That's it — the ErsatzTV engine and the Jellyfin media source are installed, and your account is ready. Log in to start using ChannelFlow.</p>`,
+  },
+];
+
+function renderOnboarding() {
+  renderObSteps();
+  const step = OB[obIndex];
+  document.getElementById("ob-body").innerHTML = step.body();
+  document.getElementById("ob-back").hidden = obIndex === 0;
+  const $next = document.getElementById("ob-next");
+  $next.textContent = obIndex === OB.length - 1 ? "Log in" : "Next";
+  $next.hidden = obIndex === OB.length - 1;
+  refreshObNext();
+  if (step.after) step.after();
+}
+
+async function attachObInstall(pluginId, label) {
+  const btn = document.getElementById("ob-do");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Installing…";
+    setObNote("");
+    try {
+      const catalog = await request("/api/plugins/catalog");
+      const plugin = catalog.plugins.find((entry) => entry.id === pluginId);
+      if (!plugin) throw new Error(`The store does not list ${pluginId}`);
+      await request("/api/plugins/install", {
+        method: "POST",
+        body: JSON.stringify({ id: pluginId, url: plugin.repository }),
+      });
+      obCompleted[pluginId] = true;
+      btn.textContent = "Installed";
+      setObNote("Installed.", false);
+      refreshObNext();
+    } catch (error) {
+      btn.disabled = false;
+      btn.textContent = label;
+      setObNote(error.message || "Could not install.", true);
+    }
+  });
+}
+
+function attachObAccount() {
+  const btn = document.getElementById("ob-do");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const username = document.getElementById("ob-user").value.trim();
+    const password = document.getElementById("ob-pass").value;
+    const confirm = document.getElementById("ob-pass2").value;
+    if (!username) return setObNote("Choose a username.", true);
+    if (password.length < 4) return setObNote("Password must be at least 4 characters.", true);
+    if (password !== confirm) return setObNote("Passwords do not match.", true);
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+    setObNote("");
+    try {
+      await request("/api/auth/setup", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      obCompleted["account"] = true;
+      btn.textContent = "Account created";
+      refreshObNext();
+    } catch (error) {
+      btn.disabled = false;
+      btn.textContent = "Create account";
+      setObNote(error.message || "Could not create the account.", true);
+    }
+  });
+}
+
+function startOnboarding() {
+  hideScreens();
+  obIndex = 0;
+  obCompleted = {};
+  document.getElementById("onboarding-screen").hidden = false;
+  renderOnboarding();
+}
+
+document.getElementById("ob-back").addEventListener("click", () => {
+  if (obIndex > 0) {
+    obIndex--;
+    renderOnboarding();
+  }
+});
+
+document.getElementById("ob-next").addEventListener("click", () => {
+  if (obIndex < OB.length - 1) {
+    obIndex++;
+    renderOnboarding();
+  } else {
+    showLogin();
+  }
+});
+
+document.getElementById("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+  setLoginNote("");
+  try {
+    await request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    location.reload();
+  } catch (error) {
+    setLoginNote(error.message || "Wrong username or password.", true);
+  }
+});
+
+async function boot() {
+  try {
+    const state = await request("/api/auth/state");
+    if (!state.setup_done) {
+      startOnboarding();
+      return;
+    }
+    if (!state.authenticated) {
+      showLogin();
+      return;
+    }
+    showApp();
+  } catch (error) {
+    showLogin("Could not reach ChannelFlow.");
+  }
+}
+
+boot();

@@ -579,6 +579,50 @@ select:focus-visible, textarea:focus-visible {
 button.ghost.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
 .plugin-remove-name { font-weight: 600; margin: 0.2rem 0 0.6rem; }
 
+/* --- First-boot walkthrough and login --- */
+
+.auth-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--page-bg);
+    overflow: auto;
+    padding: 1.5rem;
+}
+.auth-card {
+    width: min(520px, 100%);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+.auth-logo { height: 52px; width: 52px; align-self: center; }
+.auth-card h1 { margin: 0; text-align: center; font-size: 1.4rem; }
+.auth-card .hint { margin: 0; }
+.ob-steps { display: flex; justify-content: center; gap: 0.35rem; }
+.ob-steps span {
+    height: 6px;
+    width: 26px;
+    border-radius: 3px;
+    background: var(--border);
+}
+.ob-steps span.done { background: var(--ok); }
+.ob-steps span.current { background: var(--accent); }
+.ob-nav { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.4rem; }
+.ob-spacer { flex: 1 1 auto; }
+.ob-action { text-align: center; margin-top: 0.5rem; }
+.ob-action.ready button { opacity: 0.9; }
+#ob-body { min-height: 9rem; }
+#ob-body .ob-list { margin: 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.87rem; }
+#ob-body .ob-list li { padding: 0.12rem 0; }
+#ob-body label { margin-top: 0.3rem; }
+
 /* --- Per-channel override dialog --- */
 
 .settings-dialog {

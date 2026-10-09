@@ -9,10 +9,10 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=3">
+<link rel="stylesheet" href="/app.css?v=4">
 </head>
 <body>
-<div id="app-shell">
+<div id="app-shell" hidden>
   <aside class="app-drawer">
     <a href="/" class="drawer-brand" data-tab="channels"><img src="/logo.png" alt="ChannelFlow"></a>
     <nav class="drawer-nav" id="drawer-nav" aria-label="Main">
@@ -438,6 +438,37 @@
   <p class="hint" id="channel-transcode-note"></p>
 </dialog>
 
-<script src="/app.js?v=3"></script>
+<!-- First-boot walkthrough and login. The app shell is hidden until one of
+     these gives way to it. -->
+<div id="onboarding-screen" class="auth-screen" hidden>
+  <div class="auth-card">
+    <img src="/logo.png" alt="ChannelFlow" class="auth-logo">
+    <h1 id="ob-title">Welcome to ChannelFlow</h1>
+    <div class="ob-steps" id="ob-steps" aria-label="Setup progress"></div>
+    <div id="ob-body"></div>
+    <div class="ob-nav">
+      <button type="button" id="ob-back" class="ghost" hidden>Back</button>
+      <span class="ob-spacer"></span>
+      <button type="button" id="ob-next" class="primary">Next</button>
+    </div>
+    <p class="hint bad" id="ob-note" hidden></p>
+  </div>
+</div>
+
+<div id="login-screen" class="auth-screen" hidden>
+  <form class="auth-card" id="login-form">
+    <img src="/logo.png" alt="ChannelFlow" class="auth-logo">
+    <h1>ChannelFlow</h1>
+    <p class="hint">Log in to manage your channels.</p>
+    <label class="field-label" for="login-username">Username</label>
+    <input id="login-username" type="text" autocomplete="username" spellcheck="false" autofocus>
+    <label class="field-label" for="login-password">Password</label>
+    <input id="login-password" type="password" autocomplete="current-password">
+    <button type="submit" class="primary">Log in</button>
+    <p class="hint bad" id="login-note" hidden></p>
+  </form>
+</div>
+
+<script src="/app.js?v=4"></script>
 </body>
 </html>

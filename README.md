@@ -62,6 +62,10 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | Method | Path | Result |
 |---|---|---|
 | `GET` | `/api/health` | status, name, version |
+| `GET` | `/api/auth/state` | whether setup is done and this request is logged in |
+| `POST` | `/api/auth/login` | log in; sets the `channelflow_session` cookie |
+| `POST` | `/api/auth/logout` | invalidate the session |
+| `POST` | `/api/auth/setup` | create the Web UI admin account and finish setup |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/channels` | all channels, ordered by number |
 | `GET` | `/api/channels/{id}` | one channel, `404` if absent |
@@ -180,6 +184,12 @@ The file is committed on both `master` and `2.0.0` because GitHub only runs `sch
 ## WeatherStar assets
 
 `vendor/ws4kp/` and `vendor/ws3kp/` are the WeatherStar 4000/3000 renderers, carried over in full from 1.x (including `image-templates/`). They ship into the image at `/app/channelflow/ws4kp` and `/app/channelflow/ws3kp`, exported as `CHANNELFLOW_WS4KP` and `CHANNELFLOW_WS3KP` for the compositor to pick up when it lands.
+
+## First run and login
+
+The first time you open the web UI, ChannelFlow runs a **setup walkthrough** before anything appears: a short introduction, an explanation of the plugin model (and that some plugins are required), then an install of the **ErsatzTV Transcoding Engine** and a **Jellyfin media source** (both downloaded, verified, and staged from the plugin store), and finally a request for the **admin username and password** for this instance. The API stays open while setup is incomplete so the walkthrough can work, then locks down.
+
+After that, every API call except the auth endpoints and `/api/health` requires a session. `POST /api/auth/login` with the account created during setup sets a `channelflow_session` cookie (`HttpOnly`); the session lives in the store (file or Postgres) so a restart keeps you logged in, and `logout` revokes it. The password is never stored — only a salted hash. Setup is described endpoint-by-endpoint in the API table above.
 
 ## Running it
 

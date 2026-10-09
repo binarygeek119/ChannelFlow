@@ -34,6 +34,7 @@ use sqlx::types::Json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::auth::AuthRecord;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::registry::PluginRegistry;
 
@@ -55,6 +56,8 @@ const CORE_NAMESPACE: &str = "com.channelflow.core";
 const REPOSITORIES_KEY: &str = "repositories";
 const INSTALLED_KEY: &str = "installed";
 const PLUGIN_REGISTRY_KEY: &str = "plugin_registry";
+const AUTH_KEY: &str = "auth";
+const SESSION_KEY: &str = "auth_session";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -453,6 +456,40 @@ impl Store {
         let value = serde_json::to_value(registry)?;
         self.plugin_set(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY, &value)
             .await
+    }
+
+    /// The web UI's credentials and setup flag.
+    pub async fn auth_record(&self) -> Result<Option<AuthRecord>, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, AUTH_KEY).await? {
+            Some(value) => Ok(Some(serde_json::from_value(value)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn save_auth_record(&self, record: &AuthRecord) -> Result<(), StoreError> {
+        let value = serde_json::to_value(record)?;
+        self.plugin_set(CORE_NAMESPACE, AUTH_KEY, &value).await
+    }
+
+    /// The current session token, if any.
+    pub async fn session_token(&self) -> Result<Option<String>, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, SESSION_KEY).await? {
+            Some(serde_json::Value::String(token)) => Ok(Some(token)),
+            _ => Ok(None),
+        }
+    }
+
+    pub async fn save_session(&self, token: &str) -> Result<(), StoreError> {
+        self.plugin_set(
+            CORE_NAMESPACE,
+            SESSION_KEY,
+            &serde_json::Value::String(token.to_string()),
+        )
+        .await
+    }
+
+    pub async fn clear_session(&self) -> Result<(), StoreError> {
+        self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await
     }
 
     /// Erase everything a plugin stored: its key/value files or rows, and the

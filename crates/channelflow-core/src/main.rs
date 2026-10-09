@@ -1,4 +1,5 @@
 mod api;
+mod auth;
 mod media;
 mod model;
 mod plugin;

@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Path, Query, Request, State},
+    http::{header, StatusCode},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
     Json, Router,
@@ -15,6 +16,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::auth::{self, AuthRecord};
 use crate::media::MediaSources;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::{repo, PluginManager};
@@ -50,6 +52,14 @@ pub fn router(
     http: reqwest::Client,
     plugin_routers: Vec<(String, Router)>,
 ) -> Router {
+    let state = AppState {
+        store,
+        about: about_info,
+        plugins,
+        media,
+        http,
+    };
+
     let mut app = Router::new()
         .route("/", get(index))
         .route("/app.css", get(css))
@@ -61,6 +71,10 @@ pub fn router(
         .route("/apple-touch-icon.png", get(apple_touch_icon))
         .route("/api/about", get(about))
         .route("/api/health", get(health))
+        .route("/api/auth/state", get(auth_state))
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
+        .route("/api/auth/setup", post(setup))
         .route("/api/channels", get(list_channels).post(create_channel))
         .route(
             "/api/channels/{id}",
@@ -80,17 +94,144 @@ pub fn router(
         .route("/api/connections", get(list_connections).post(create_connection))
         .route("/api/connections/{id}", put(update_connection).delete(delete_connection))
         .route("/live/{asset}", get(live_pending))
-        .with_state(AppState {
-            store,
-            about: about_info,
-            plugins,
-            media,
-            http,
-        });
+        .with_state(state.clone());
     for (id, plugin_router) in plugin_routers {
         app = app.nest(&format!("/api/plugins/{id}"), plugin_router);
     }
-    app
+    app.layer(middleware::from_fn_with_state(state, require_auth))
+}
+
+/// Gate every `/api/*` request behind the session once setup has completed.
+/// Until then the walkthrough needs the API open; the auth endpoints and the
+/// health check stay public either way, as do the static assets.
+async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    if !path.starts_with("/api/")
+        || path.starts_with("/api/auth/")
+        || path == "/api/health"
+    {
+        return next.run(request).await;
+    }
+    let setup_done = match state.store.auth_record().await {
+        Ok(Some(record)) => record.setup_complete,
+        _ => false,
+    };
+    if !setup_done {
+        return next.run(request).await;
+    }
+    let token = request
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|cookie| {
+            cookie
+                .split(';')
+                .find_map(|part| {
+                    part.trim()
+                        .strip_prefix("channelflow_session=")
+                        .map(str::to_string)
+                })
+        });
+    let valid = match (token, state.store.session_token().await) {
+        (Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
+        _ => false,
+    };
+    if valid {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "log in to use the web UI" })),
+        )
+            .into_response()
+    }
+}
+
+// ── web UI auth ────────────────────────────────────────────────────────────
+
+/// Whether setup is done and whether this request is logged in. The shell
+/// reads this first thing and shows the walkthrough, the login screen, or the
+/// app accordingly.
+async fn auth_state(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let record = state.store.auth_record().await?;
+    let session = state.store.session_token().await?;
+    let setup_done = record.as_ref().map(|r| r.setup_complete).unwrap_or(false);
+    let authenticated = setup_done && session.is_some();
+    Ok(Json(json!({
+        "setup_done": setup_done,
+        "authenticated": authenticated,
+        "username": record.map(|r| r.username),
+    })))
+}
+
+#[derive(Deserialize)]
+struct LoginBody {
+    username: String,
+    password: String,
+}
+
+async fn login(
+    State(state): State<AppState>,
+    Json(input): Json<LoginBody>,
+) -> Result<Response, ApiError> {
+    let ok = state
+        .store
+        .auth_record()
+        .await?
+        .is_some_and(|record| {
+            record.username == input.username.trim() && auth::verify(&record, &input.password)
+        });
+    if !ok {
+        return Ok((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "wrong username or password" })),
+        )
+            .into_response());
+    }
+    let token = auth::new_secret();
+    state.store.save_session(&token).await?;
+    Ok((
+        [(header::SET_COOKIE, format!("channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax"))],
+        Json(json!({ "ok": true })),
+    )
+        .into_response())
+}
+
+async fn logout(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    state.store.clear_session().await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct SetupBody {
+    username: String,
+    password: String,
+}
+
+/// Create the web UI's admin account and mark setup complete. From here on
+/// every API call needs a session.
+async fn setup(
+    State(state): State<AppState>,
+    Json(input): Json<SetupBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let username = input.username.trim().to_string();
+    if username.is_empty() {
+        return Err(StoreError::Plugin("username cannot be empty".to_string()).into());
+    }
+    if input.password.len() < 4 {
+        return Err(StoreError::Plugin("password must be at least 4 characters".to_string()).into());
+    }
+    let salt = auth::new_secret();
+    let record = AuthRecord {
+        username,
+        salt: salt.clone(),
+        password_hash: auth::hash_password(&salt, &input.password),
+        setup_complete: true,
+    };
+    state.store.save_auth_record(&record).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Storage errors translated into HTTP status codes.

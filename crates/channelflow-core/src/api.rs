@@ -290,7 +290,12 @@ async fn auth_state(
     headers: axum::http::HeaderMap,
 ) -> Result<Response, ApiError> {
     let mut record = state.store.auth_record().await?;
-    let setup_done = record.as_ref().map(|r| r.setup_complete).unwrap_or(false);
+    // The same source of truth the routing layer uses (marker file OR auth
+    // record). If these disagreed - e.g. the setup-complete marker survived
+    // but the new Postgres database has no account yet - the server would
+    // route to the app while this endpoint said "not set up", and the page
+    // would bounce between /first-time and /webui forever.
+    let setup_done = setup_is_done(&state).await;
     let cookie = headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())

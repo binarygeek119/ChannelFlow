@@ -35,6 +35,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::model::{Channel, NewChannel, UpdateChannel};
+use crate::plugin::registry::PluginRegistry;
 
 /// The plugin that used to be a core feature — its legacy `ai.json` document
 /// is migrated into its own storage under these names.
@@ -45,6 +46,11 @@ const LEGACY_AI_KEY: &str = "providers";
 const LEGACY_TRANSCODE_NAMESPACE: &str = "com.channelflow.ersatztv";
 const LEGACY_TRANSCODE_DEFAULTS_KEY: &str = "defaults";
 const LEGACY_TRANSCODE_OVERRIDES_KEY: &str = "overrides";
+
+/// The core's own slice of the key/value storage, where the plugin registry
+/// is kept. `@core` cannot collide with a plugin id (they are dotted names).
+const CORE_NAMESPACE: &str = "@core";
+const PLUGIN_REGISTRY_KEY: &str = "plugin_registry";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -57,6 +63,11 @@ pub enum StoreError {
     /// A plugin lifecycle call was refused: unknown id, incompatible with this
     /// base, or the plugin's own failure.
     Plugin(String),
+    /// A plugin id that is not installed.
+    PluginNotFound(String),
+    /// A remote service (the plugin store) could not be reached or answered
+    /// with something unusable.
+    Upstream(String),
     Io(std::io::Error),
     Json(serde_json::Error),
     /// A Postgres round trip failed — connection, statement, or constraint.
@@ -88,6 +99,8 @@ impl std::fmt::Display for StoreError {
             StoreError::DuplicateNumber(n) => write!(f, "channel number {n} is already in use"),
             StoreError::Invalid(msg) => write!(f, "{msg}"),
             StoreError::Plugin(message) => write!(f, "{message}"),
+            StoreError::PluginNotFound(id) => write!(f, "plugin {id} is not installed"),
+            StoreError::Upstream(message) => write!(f, "{message}"),
             StoreError::Io(error) => write!(f, "storage error: {error}"),
             StoreError::Json(error) => write!(f, "channel document is not valid JSON: {error}"),
             StoreError::Database(error) => write!(f, "database error: {error}"),
@@ -276,6 +289,40 @@ impl Store {
                 pool: pool.clone(),
                 prefix: sanitise_table_prefix(namespace),
             }),
+        }
+    }
+
+    /// The installed/enabled plugin registry.
+    pub async fn plugin_registry(&self) -> Result<PluginRegistry, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY).await? {
+            Some(value) => Ok(serde_json::from_value(value)?),
+            None => Ok(PluginRegistry::default()),
+        }
+    }
+
+    /// Whether the registry has ever been written. A fresh install seeds the
+    /// bundled plugins here; after that an empty registry stays empty, so
+    /// removing every plugin is not undone by the next start.
+    pub async fn plugin_registry_exists(&self) -> Result<bool, StoreError> {
+        Ok(self
+            .plugin_get(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY)
+            .await?
+            .is_some())
+    }
+
+    pub async fn save_plugin_registry(&self, registry: &PluginRegistry) -> Result<(), StoreError> {
+        let value = serde_json::to_value(registry)?;
+        self.plugin_set(CORE_NAMESPACE, PLUGIN_REGISTRY_KEY, &value)
+            .await
+    }
+
+    /// Erase everything a plugin stored: its key/value files or rows, and the
+    /// tables it created. Returns how many tables/keys were dropped. This is
+    /// what "remove and drop data" calls; "remove and keep data" skips it.
+    pub async fn drop_plugin_data(&self, namespace: &str) -> Result<u64, StoreError> {
+        match &self.backend {
+            Backend::Files => file::drop_plugin_data(&self.root, namespace),
+            Backend::Postgres(pool) => pg::drop_plugin_data(pool, namespace).await,
         }
     }
 
@@ -476,6 +523,12 @@ fn is_identifier(name: &str) -> bool {
         && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Plugin namespaces are dotted ids. Reject anything that could climb out of
+/// the plugins directory or otherwise be used as a path.
+fn is_safe_namespace(namespace: &str) -> bool {
+    !namespace.is_empty() && !namespace.contains(['/', '\\']) && !namespace.contains("..")
 }
 
 /// The `PluginStorage` view of a `Store`, scoped to one plugin id.
@@ -689,6 +742,20 @@ mod file {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             other => other.map_err(Into::into),
         }
+    }
+
+    /// Remove a plugin's whole storage directory.
+    pub fn drop_plugin_data(root: &Path, namespace: &str) -> Result<u64, StoreError> {
+        if !is_safe_namespace(namespace) {
+            return Err(StoreError::Invalid("that is not a plugin namespace"));
+        }
+        let dir = root.join("plugins").join(namespace);
+        if !dir.exists() {
+            return Ok(0);
+        }
+        let count = fs::read_dir(&dir).map(|entries| entries.count()).unwrap_or(0) as u64;
+        fs::remove_dir_all(&dir)?;
+        Ok(count)
     }
 
     pub fn read_legacy_ai(root: &Path) -> Result<Option<serde_json::Value>, StoreError> {
@@ -947,6 +1014,31 @@ mod pg {
             .execute(pool)
             .await?;
         Ok(())
+    }
+
+    /// Drop every table this plugin created and delete its key/value rows.
+    pub async fn drop_plugin_data(pool: &PgPool, namespace: &str) -> Result<u64, StoreError> {
+        let prefix = sanitise_table_prefix(namespace);
+        let rows = sqlx::query(
+            "SELECT tablename FROM pg_tables \
+             WHERE schemaname = 'public' AND tablename LIKE $1",
+        )
+        .bind(format!("{prefix}%"))
+        .fetch_all(pool)
+        .await?;
+        let mut dropped = 0u64;
+        for row in rows {
+            let name: String = row.try_get("tablename")?;
+            sqlx::query(&format!("DROP TABLE IF EXISTS {name}"))
+                .execute(pool)
+                .await?;
+            dropped += 1;
+        }
+        let removed = sqlx::query("DELETE FROM plugin_kv WHERE namespace = $1")
+            .bind(namespace)
+            .execute(pool)
+            .await?;
+        Ok(dropped + removed.rows_affected())
     }
 
     /// The pre-plugin `ai_settings` row, if the old schema is still around.

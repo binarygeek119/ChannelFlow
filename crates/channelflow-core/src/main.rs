@@ -14,7 +14,7 @@ use clap::Parser;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
 
-use crate::plugin::PluginManager;
+use crate::plugin::{PluginManager, PluginRegistry, StoreClient};
 use crate::store::Store;
 
 #[derive(Parser, Debug)]
@@ -122,10 +122,6 @@ async fn main() -> Result<()> {
         .add(ai_plugin, ai_api)
         .await
         .map_err(|error| anyhow::anyhow!("loading the AI plugin: {error}"))?;
-    manager
-        .enable(&ai_manifest.id)
-        .await
-        .map_err(|error| anyhow::anyhow!("enabling the AI plugin: {error}"))?;
 
     // The ErsatzTV transcoding plugin reads the channel list through the
     // api:core:read handle, so it gets the same store-backed CoreData.
@@ -145,13 +141,39 @@ async fn main() -> Result<()> {
         .add(ersatztv_plugin, ersatztv_api)
         .await
         .map_err(|error| anyhow::anyhow!("loading the ErsatzTV plugin: {error}"))?;
-    manager
-        .enable(&ersatztv_manifest.id)
-        .await
-        .map_err(|error| anyhow::anyhow!("enabling the ErsatzTV plugin: {error}"))?;
+
+    // First run seeds the bundled plugins as installed and enabled so the app
+    // works out of the box; after that the registry is the source of truth, so
+    // removing a plugin is not undone by a restart.
+    if !store.plugin_registry_exists().await? {
+        let mut registry = PluginRegistry::default();
+        for entry in manager.catalog() {
+            let id = entry["id"].as_str().unwrap_or_default();
+            let version = entry["version"].as_str().unwrap_or_default();
+            registry.install(id, version);
+        }
+        store.save_plugin_registry(&registry).await?;
+        tracing::info!(count = registry.installed.len(), "installed the bundled plugins");
+    }
+    let registry = store.plugin_registry().await?;
+    for installed in &registry.installed {
+        if !installed.enabled {
+            continue;
+        }
+        if let Err(error) = manager.enable(&installed.id).await {
+            tracing::warn!(plugin = %installed.id, %error, "could not enable installed plugin");
+        }
+    }
 
     let plugin_routers = manager.routers();
     let plugins = Arc::new(Mutex::new(manager));
+
+    // The plugin store: the ChannelFlow-Plugins repository's manifest.json.
+    let store_url = std::env::var("CHANNELFLOW_PLUGIN_STORE").unwrap_or_else(|_| {
+        "https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json"
+            .to_string()
+    });
+    let store_client = Arc::new(StoreClient::new(http.clone(), store_url));
 
     // ── server ───────────────────────────────────────────────────────────────
     let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
@@ -176,7 +198,7 @@ async fn main() -> Result<()> {
     };
     axum::serve(
         listener,
-        api::router(store, about, plugins, plugin_routers),
+        api::router(store, about, plugins, plugin_routers, store_client),
     )
     .await?;
     Ok(())

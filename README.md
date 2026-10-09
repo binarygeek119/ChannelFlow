@@ -61,7 +61,10 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `PUT` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | store that channel's override patch |
 | `DELETE` | `/api/plugins/com.channelflow.ersatztv/channels/{id}` | drop every override |
 | `GET` | `/api/plugins/com.channelflow.ersatztv/channels/{id}/changes` | change history from the plugin's own Postgres table |
-| `GET` | `/api/plugins` | the plugin catalog: manifests, permissions, UI contributions, health |
+| `GET` | `/api/plugins` | installed plugins with manifest, permissions, health |
+| `GET` | `/api/plugins/store` | the ChannelFlow-Plugins repository manifest: versions, banners, install status |
+| `PUT` | `/api/plugins/{id}/install` | install a bundled plugin; `DELETE` uninstalls (`?drop_database=true` also erases its tables and storage) |
+| `PUT` | `/api/plugins/{id}/update` | report update status — compiled-in plugins update with ChannelFlow |
 | `PUT` | `/api/plugins/{id}/enable` / `disable` | call the plugin's lifecycle hooks |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
@@ -76,7 +79,15 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 
 The web UI is served at `/` and compiled into the binary — the markup, CSS and JS via `include_str!`, the logo and favicons via `include_bytes!` — so the image needs no asset directory and cannot start with a half-copied web root. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
 
-The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer (plus one new **Plugins** item), the near-black/rose palette, and the mark. Six menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings served by the ErsatzTV plugin; **AI** edits the provider list served by the AI plugin; **Plugins** lists what is loaded, what each asked permission for, and toggles them. The other 16 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+The shell is carried over from ChannelFlow 1.0.0 unchanged: the 260px left drawer (plus one new **Plugins** item), the near-black/rose palette, and the mark. Six menus are real pages. **Channels** is wired to the CRUD API; **About** reads its App and System tables from `/api/about` and reports plainly that the encoder arrives with the playout milestone; **Credits** is static markup; **Transcode** edits the encoder settings served by the ErsatzTV plugin; **AI** edits the provider list served by the AI plugin; **Plugins** has two tabs: **Installed** (update or remove what this instance runs — removing asks whether to drop the plugin's data or keep it) and **Store** (the ChannelFlow-Plugins repository, with banners, hiding what is already installed). The other 16 menus swap the topbar heading and show a placeholder — their hrefs are intercepted rather than served, so clicking one does not 404. Routing them to real pages is part of the wiring pass.
+
+### Plugins and the store
+
+The **Plugins** page has two tabs. **Installed** lists the plugins the instance runs, from a small persisted registry (kept in the `@core` namespace of the key/value storage, so it rides on files or Postgres). Each row can be updated (when the repository has a newer version) or removed. **Store** fetches [`ChannelFlow-Plugins`](https://github.com/binarygeek119/ChannelFlow-Plugins)' `manifest.json` — plugin name, description, category, versions, banners — and lists what is not yet installed, with an **Install** button. Installing adds it to the registry and enables it; because the store only lists what is not installed, it disappears from the Store and appears under Installed. Set `CHANNELFLOW_PLUGIN_STORE` to point at a different manifest (a local file server, a fork).
+
+Removing asks a question first, because it can be destructive: **drop data** erases the plugin's rows and the tables it created (its key/value storage and every `cf_{plugin}_*` table), so any settings or history it kept are permanently gone; **keep data** leaves them in the database for a reinstall to pick up. The plugin's own storage and tables are otherwise untouched.
+
+Plugins are still compiled into the base, so **Install** works for the plugins this build contains; the manifest may list others, which the Store shows but marks unavailable until dynamic loading lands — that is also what will let Update pull a new release instead of telling you to update ChannelFlow.
 
 ### AI settings
 

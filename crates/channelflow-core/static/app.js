@@ -1500,6 +1500,7 @@ window.addEventListener("popstate", () => {
 // directly — there is no login screen.
 
 function hideScreens() {
+  document.getElementById("login-screen").hidden = true;
   document.getElementById("onboarding-screen").hidden = true;
   document.getElementById("app-shell").hidden = true;
 }
@@ -1510,6 +1511,19 @@ function showApp() {
   load();
   loadPluginPages();
   showTab(tabForPath(location.pathname) || "guide");
+}
+
+function showLogin(note) {
+  hideScreens();
+  document.getElementById("login-screen").hidden = false;
+  if (note) setLoginNote(note, true);
+}
+
+function setLoginNote(message, bad) {
+  const note = document.getElementById("login-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
 }
 
 const OB_STEPS = [
@@ -1749,9 +1763,113 @@ document.getElementById("ob-next").addEventListener("click", () => {
   }
 });
 
+// ── login and forgotten password ────────────────────────────────────────────
+// Once setup is complete the API (and the app) locks behind a password. The
+// reset pin is written to a file only in the server's config directory, so
+// nothing sensitive travels through this page. Resets are on a 10-minute
+// cooldown.
+
+document.getElementById("login-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+  setLoginNote("");
+  try {
+    await request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    location.reload();
+  } catch (error) {
+    setLoginNote(error.message || "Wrong username or password.", true);
+  }
+});
+
+function setResetNote(message, bad) {
+  const note = document.getElementById("reset-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+function showForgot() {
+  document.getElementById("login-view").hidden = true;
+  document.getElementById("reset-view").hidden = false;
+  setResetNote("");
+  document.getElementById("forgot-info").textContent = "";
+}
+
+function showLoginView() {
+  document.getElementById("reset-view").hidden = true;
+  document.getElementById("login-view").hidden = false;
+  document.getElementById("reset-pin").value = "";
+  document.getElementById("reset-pass").value = "";
+  document.getElementById("reset-pass2").value = "";
+}
+
+document.getElementById("forgot-link").addEventListener("click", showForgot);
+document.getElementById("reset-back").addEventListener("click", showLoginView);
+
+document.getElementById("reset-setup-link").addEventListener("click", async () => {
+  const link = document.getElementById("reset-setup-link");
+  // First click arms it — the second click wipes setup and returns to the
+  // walkthrough.
+  if (!link.dataset.armed) {
+    link.dataset.armed = "1";
+    link.textContent = "Click again to confirm — this clears the account and starts setup over";
+    setLoginNote("");
+    return;
+  }
+  setLoginNote("");
+  try {
+    await request("/api/auth/reset-setup", { method: "POST" });
+    location.replace("/first-time");
+  } catch (error) {
+    link.dataset.armed = "";
+    link.textContent = "First time here? Reset this instance to run setup again";
+    setLoginNote(error.message || "Could not reset the instance.", true);
+  }
+});
+
+document.getElementById("forgot-generate").addEventListener("click", async () => {
+  document.getElementById("forgot-generate").disabled = true;
+  document.getElementById("forgot-info").textContent = "Writing a reset pin…";
+  setResetNote("");
+  try {
+    const data = await request("/api/auth/forgot", { method: "POST" });
+    document.getElementById("forgot-info").textContent =
+      `Reset pin written to config/${data.file}. Open that file to read it.`;
+  } catch (error) {
+    document.getElementById("forgot-info").textContent = "";
+    setResetNote(error.message || "Could not generate a reset pin.", true);
+  } finally {
+    document.getElementById("forgot-generate").disabled = false;
+  }
+});
+
+document.getElementById("reset-submit").addEventListener("click", async () => {
+  const pin = document.getElementById("reset-pin").value.trim();
+  const password = document.getElementById("reset-pass").value;
+  const confirm = document.getElementById("reset-pass2").value;
+  if (!pin) return setResetNote("Enter the pin from the reset file.", true);
+  if (password.length < 4) return setResetNote("Password must be at least 4 characters.", true);
+  if (password !== confirm) return setResetNote("Passwords do not match.", true);
+  setResetNote("");
+  try {
+    await request("/api/auth/reset", {
+      method: "POST",
+      body: JSON.stringify({ pin, password }),
+    });
+    showLoginView();
+    setLoginNote("Password changed — log in with the new one.", false);
+  } catch (error) {
+    setResetNote(error.message || "Could not reset the password.", true);
+  }
+});
+
 // ── start over ───────────────────────────────────────────────────────────────-
-// There is no login screen anymore, so the only account action left is wiping
-// setup and running /first-time again. Two clicks to confirm.
+// Wipe setup and run /first-time again — the escape hatch if the account is
+// lost. Two clicks to confirm. Also reachable from the login screen.
 
 let startOverArmed = false;
 document.getElementById("start-over").addEventListener("click", async () => {
@@ -1773,7 +1891,7 @@ document.getElementById("start-over").addEventListener("click", async () => {
   }
 });
 
-const UI_BUILD = "26";
+const UI_BUILD = "27";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.
@@ -1806,47 +1924,49 @@ async function fetchStateWithRetry() {
 
 const APP_HOME = "/webui/guide?ready=1";
 
-function rememberSetup(done) {
-  try {
-    if (done) localStorage.setItem("cf_setup_done", "1");
-    return localStorage.getItem("cf_setup_done") === "1";
-  } catch (error) {
-    return !!done;
-  }
-}
-
 async function boot() {
   console.info(`[channelflow] ui build v${UI_BUILD}`);
   const path = location.pathname;
-  const onApp = path === "/webui" || path.startsWith("/webui/");
+  const onFirstTime = path === "/first-time" || path.startsWith("/first-time/");
   let state = null;
   try {
     state = await fetchStateWithRetry();
   } catch (error) {
     state = null;
   }
-  const done = (state && state.setup_done) || (state === null && rememberSetup(false));
-  if (state && state.setup_done) rememberSetup(true);
-  // A finished install never renders the walkthrough, whatever URL we landed
-  // on. Leaving via a query the browser has not cached a redirect for is what
-  // breaks the /webui/guide ↔ /first-time loop.
-  if (done) {
-    if (!onApp || path === "/webui" || path === "/webui/") {
-      location.replace(APP_HOME);
+  if (state === null) {
+    // The server wasn't reachable. On /first-time show the walkthrough with
+    // the error; anywhere else the page was served, so show the app shell.
+    if (onFirstTime) {
+      showSetupUnreachable(new Error("the server is not responding"));
+    } else {
+      showApp();
+    }
+    return;
+  }
+  if (!state.setup_done) {
+    // Not set up yet: the walkthrough. Anything other than /first-time
+    // redirects there (the server does this too).
+    if (!onFirstTime) {
+      location.replace("/first-time");
       return;
     }
-    showApp();
+    startOnboarding();
     return;
   }
-  if (onApp && state && state.setup_done === false) {
-    location.replace("/first-time");
+  if (onFirstTime) {
+    // Setup finished; /first-time is no longer ours. The app (or login for
+    // the app) lives under /webui.
+    location.replace(APP_HOME);
     return;
   }
-  if (onApp) {
-    showApp();
+  if (!state.authenticated) {
+    // Setup is done but there is no session: the login screen. No state, no
+    // app until the password checks out.
+    showLogin();
     return;
   }
-  startOnboarding();
+  showApp();
 }
 
 boot();

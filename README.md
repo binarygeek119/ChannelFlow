@@ -62,8 +62,12 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | Method | Path | Result |
 |---|---|---|
 | `GET` | `/api/health` | status, name, version |
-| `GET` | `/api/auth/state` | whether setup is done; a completed setup issues a session automatically |
+| `GET` | `/api/auth/state` | whether setup is done and this request is logged in |
+| `POST` | `/api/auth/login` | log in; sets the `channelflow_session` cookie |
+| `POST` | `/api/auth/logout` | invalidate the session |
 | `POST` | `/api/auth/setup` | create the Web UI account and finish setup |
+| `POST` | `/api/auth/forgot` | write a random reset pin to `<config>/reset-<timestamp>.txt`; one per 10 minutes |
+| `POST` | `/api/auth/reset` | match the pin from that file and set a new password |
 | `POST` | `/api/auth/reset-setup` | forget the account, session, and install registry so the first-boot walkthrough runs again |
 | `POST` | `/api/setup/database` | connect to Postgres, import the config directory, and switch the running store to it |
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
@@ -191,9 +195,11 @@ The first time you open the web UI, ChannelFlow runs a **setup walkthrough** bef
 
 The connection string entered there is written to the config directory, so a later restart opens that same database automatically, the same way `--database-url` or `DATABASE_URL` would. A bad connection string is never saved, so it cannot lock a restart out.
 
-After that, every API call except the auth endpoints and `/api/health` requires a session. There is **no login screen**: once setup completes, `/api/auth/state` hands out a `channelflow_session` cookie automatically, so the web UI opens straight into the app. The session lives in the store (file or Postgres) so a restart keeps it valid. The password chosen during setup is stored only as a salted hash, and setup is described endpoint-by-endpoint in the API table above.
+After that, every API call except the auth endpoints and `/api/health` requires a session. Once setup is complete the web UI shows a **login screen**: `POST /api/auth/login` with the account created during setup sets a `channelflow_session` cookie (`HttpOnly`), and the session lives in the store (file or Postgres) so a restart keeps you logged in. The password is never stored — only a salted hash.
 
-**Start over — and that's the one account action there is.** The app's top bar has a **Start over** button (clicked twice to confirm) that forgets the account, session, and install registry, then sends you to `/first-time` to run the walkthrough again. The same effect without the UI: `POST /api/auth/reset-setup`.
+**Forgot a password?** The login screen's *Forgot password* flow writes a six-pair random pin to `<config>/reset-<timestamp>.txt` (e.g. `reset-10-16-26-15-45-32.txt`) — a file only someone with filesystem access to the config volume can read, never exposed by the web UI. Enter the pin plus a new password and it is changed; the file is deleted, the old session is revoked, and resets are limited to one every ten minutes.
+
+**Start over** — the app's top bar (and the login screen) has a **Start over** link (clicked twice to confirm) that forgets the account, session, and install registry, then sends you to `/first-time` to run the walkthrough again. The same effect without the UI: `POST /api/auth/reset-setup`.
 
 ## Running it
 

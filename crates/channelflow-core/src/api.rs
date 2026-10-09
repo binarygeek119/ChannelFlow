@@ -16,7 +16,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::auth::{self, AuthRecord};
+use crate::auth::{self, AuthRecord, ResetPin};
 use crate::media::MediaSources;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::{repo, PluginManager};
@@ -76,6 +76,8 @@ pub fn router(
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
         .route("/api/auth/setup", post(setup))
+        .route("/api/auth/forgot", post(forgot))
+        .route("/api/auth/reset", post(reset_password))
         .route("/api/auth/reset-setup", post(reset_setup))
         .route("/api/setup/database", post(setup_database))
         .route("/api/channels", get(list_channels).post(create_channel))
@@ -217,16 +219,6 @@ async fn no_store(request: Request, next: Next) -> Response {
 /// load all receive the same cookie instead of overwriting each other.
 static SESSION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-async fn ensure_session(store: &Store) -> Result<String, StoreError> {
-    let _guard = SESSION_LOCK.lock().await;
-    if let Some(token) = store.session_token().await? {
-        return Ok(token);
-    }
-    let token = auth::new_secret();
-    store.save_session(&token).await?;
-    Ok(token)
-}
-
 fn session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     headers
         .get(header::COOKIE)
@@ -241,9 +233,9 @@ fn session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 /// Until setup finishes the API stays open so the walkthrough can connect the
-/// database and install plugins. After that there is no login screen: a
-/// request without a session is given one and allowed through, never rejected
-/// with "log in to use the web UI".
+/// database and install plugins. After setup every API call except the auth
+/// endpoints and /api/health requires a real session - the login screen is
+/// back.
 async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
     if !path.starts_with("/api/")
@@ -262,79 +254,37 @@ async fn require_auth(State(state): State<AppState>, request: Request, next: Nex
         _ => false,
     };
     if valid {
-        return next.run(request).await;
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "log in to use the web UI" })),
+        )
+            .into_response()
     }
-    let token = match ensure_session(&state.store).await {
-        Ok(token) => token,
-        Err(error) => {
-            tracing::warn!(%error, "could not establish a session; allowing the request");
-            return next.run(request).await;
-        }
-    };
-    let mut response = next.run(request).await;
-    if let Ok(value) = HeaderValue::from_str(&format!(
-        "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax"
-    )) {
-        response.headers_mut().insert(header::SET_COOKIE, value);
-    }
-    response
 }
 
 // ── web UI auth ────────────────────────────────────────────────────────────
 
-/// Whether setup is done and whether this request is logged in. There is no
-/// login screen anymore: as soon as setup completes the server hands out a
-/// session automatically, so the UI goes straight to the app.
+/// Whether setup is done and whether this request is logged in. Setup is the
+/// same marker/record source the routing layer uses; authenticated reflects a
+/// real session cookie, because the login screen is required after setup.
 async fn auth_state(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
-) -> Result<Response, ApiError> {
-    let mut record = state.store.auth_record().await?;
-    // The same source of truth the routing layer uses (marker file OR auth
-    // record). If these disagreed - e.g. the setup-complete marker survived
-    // but the new Postgres database has no account yet - the server would
-    // route to the app while this endpoint said "not set up", and the page
-    // would bounce between /first-time and /webui forever.
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let record = state.store.auth_record().await?;
     let setup_done = setup_is_done(&state).await;
-    let cookie = headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookie| {
-            cookie
-                .split(';')
-                .find_map(|part| {
-                    part.trim()
-                        .strip_prefix("channelflow_session=")
-                        .map(str::to_string)
-                })
-        });
+    let cookie = session_cookie(&headers);
     let authenticated = match (setup_done, cookie, state.store.session_token().await) {
         (true, Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
         _ => false,
     };
-    if setup_done && !authenticated {
-        let token = auth::new_secret();
-        state.store.save_session(&token).await?;
-        let username = record.take().map(|r| r.username);
-        return Ok((
-            [(
-                header::SET_COOKIE,
-                format!("channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax"),
-            )],
-            Json(json!({
-                "setup_done": true,
-                "authenticated": true,
-                "username": username,
-            })),
-        )
-            .into_response());
-    }
     Ok(Json(json!({
         "setup_done": setup_done,
         "authenticated": authenticated,
         "username": record.map(|r| r.username),
-    }))
-    .into_response())
+    })))
 }
 
 #[derive(Deserialize)]
@@ -446,6 +396,102 @@ async fn setup_database(
     }
     state.store.save_database_url(&url).await?;
     Ok(Json(json!({ "ok": true, "database": "postgres" })))
+}
+
+/// How long is a password-reset pin valid for, and the cooldown between
+/// resets.
+const RESET_COOLDOWN_SECONDS: i64 = 600;
+const RESET_PIN_TTL_SECONDS: i64 = 1800;
+
+/// Start a password reset: write a fresh random pin to a file in the config
+/// directory (`reset-<MM-DD-YY-HH-MM-SS>.txt`) that only someone with
+/// filesystem access can read. Nothing about the pin goes through the web UI.
+async fn forgot(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let now = chrono::Utc::now();
+    if let Some(last) = state.store.last_reset_at().await? {
+        let elapsed = now - last;
+        if elapsed <= chrono::Duration::seconds(RESET_COOLDOWN_SECONDS) {
+            let wait = RESET_COOLDOWN_SECONDS - elapsed.num_seconds();
+            return Err(StoreError::Plugin(format!(
+                "a reset is still on cooldown — try again in {wait} seconds"
+            ))
+            .into());
+        }
+    }
+
+    let pin = auth::generate_pin();
+    let filename = format!("reset-{}.txt", chrono::Local::now().format("%m-%d-%y-%H-%M-%S"));
+    let path = state.store.config_dir().join(&filename);
+    std::fs::write(&path, format!("ChannelFlow password reset pin\n\npin: {pin}\n"))
+        .map_err(StoreError::Io)?;
+
+    state
+        .store
+        .save_reset_pin(&ResetPin {
+            pin: pin.clone(),
+            file: filename.clone(),
+            created_at: now,
+        })
+        .await?;
+    state.store.save_last_reset_at(now).await?;
+    tracing::info!(path = %path.display(), "wrote a password reset pin — only readable from the config directory");
+    Ok(Json(json!({ "file": filename })))
+}
+
+#[derive(Deserialize)]
+struct ResetBody {
+    pin: String,
+    password: String,
+}
+
+/// Finish a password reset: match the pin from the config-directory file,
+/// then set the new password. The file and the stored pin are cleared.
+async fn reset_password(
+    State(state): State<AppState>,
+    Json(input): Json<ResetBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let active = state
+        .store
+        .reset_pin()
+        .await?
+        .ok_or_else(|| StoreError::Plugin("no reset is pending — generate a pin first".to_string()))?;
+    let age = chrono::Utc::now() - active.created_at;
+    if age > chrono::Duration::seconds(RESET_PIN_TTL_SECONDS) {
+        // Clear it so a stale pin cannot be tried forever.
+        let _ = state.store.clear_reset_pin().await;
+        return Err(StoreError::Plugin(
+            "that reset pin has expired — generate a new one".to_string(),
+        )
+        .into());
+    }
+    if !auth::verify_token(&active.pin, input.pin.trim()) {
+        return Err(StoreError::Plugin(
+            "that pin does not match the one in the reset file".to_string(),
+        )
+        .into());
+    }
+    if input.password.len() < 4 {
+        return Err(StoreError::Plugin(
+            "password must be at least 4 characters".to_string(),
+        )
+        .into());
+    }
+    let mut record = state
+        .store
+        .auth_record()
+        .await?
+        .ok_or_else(|| StoreError::Plugin("there is no account to reset".to_string()))?;
+    let salt = auth::new_secret();
+    record.salt = salt.clone();
+    record.password_hash = auth::hash_password(&salt, &input.password);
+    state.store.save_auth_record(&record).await?;
+
+    let _ = std::fs::remove_file(state.store.config_dir().join(&active.file));
+    state.store.clear_reset_pin().await?;
+    state.store.save_last_reset_at(chrono::Utc::now()).await?;
+    // Any open session is old credentials; revoke it after a reset.
+    state.store.clear_session().await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Storage errors translated into HTTP status codes.

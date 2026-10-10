@@ -3,6 +3,7 @@ mod auth;
 mod media;
 mod model;
 mod plugin;
+mod settings;
 mod store;
 mod tasks;
 mod webui;

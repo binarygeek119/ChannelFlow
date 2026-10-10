@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State},
-    http::{header, HeaderValue, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
@@ -74,6 +74,10 @@ pub fn router(
         .route("/apple-touch-icon.png", get(apple_touch_icon))
         .route("/api/about", get(about))
         .route("/api/health", get(health))
+        .route(
+            "/api/settings/general",
+            get(general_settings_get).put(general_settings_put),
+        )
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -563,6 +567,43 @@ async fn about(State(state): State<AppState>) -> Json<serde_json::Value> {
 
 fn hostname() -> Option<String> {
     read_trimmed("/proc/sys/kernel/hostname").or_else(|| read_trimmed("/etc/hostname"))
+}
+
+// ── general settings ───────────────────────────────────────────────────────
+
+/// The stored public/local URLs. The local URL is detected once — on first boot,
+/// from the address this request arrived on (falling back to the host's primary
+/// interface) — and never guessed again; the operator can override it here.
+async fn general_settings_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut settings = state.store.general_settings().await?;
+    if settings.local_url.is_empty() {
+        let host = headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok());
+        if let Some(url) = crate::settings::detect_local_url(state.about.listen_port, host) {
+            settings.local_url = url;
+            state.store.save_general_settings(&settings).await?;
+        }
+    }
+    Ok(Json(json!({ "settings": settings })))
+}
+
+async fn general_settings_put(
+    State(state): State<AppState>,
+    Json(input): Json<crate::settings::GeneralSettings>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !crate::settings::is_valid_url(&input.public_url) {
+        return Err(StoreError::Invalid("the public URL must start with http:// or https://").into());
+    }
+    if !crate::settings::is_valid_url(&input.local_url) {
+        return Err(StoreError::Invalid("the local URL must start with http:// or https://").into());
+    }
+    let settings = input.normalized();
+    state.store.save_general_settings(&settings).await?;
+    Ok(Json(json!({ "settings": settings })))
 }
 
 /// Resident set size from `/proc/self/status`. Linux only, so the row simply

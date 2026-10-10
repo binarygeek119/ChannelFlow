@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "52";
+const UI_BUILD = "53";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -456,6 +456,7 @@ const OB_STEPS = [
   "Database",
   "Transcoding",
   "Media source",
+  "Addresses",
   "Account",
   "Done",
 ];
@@ -519,6 +520,18 @@ const OB = [
       `<p>ChannelFlow pulls movies and shows from a <strong>media source</strong>. Install the <strong>Jellyfin media source</strong> now — it connects your Jellyfin library to your channels.</p>
        <div class="ob-action"><button type="button" class="primary" id="ob-do">Install the Jellyfin media source</button></div>`,
     after: () => attachObInstall("com.channelflow.jellyfin", "Install the Jellyfin media source"),
+  },
+  {
+    next: () => true,
+    body: () =>
+      `<p>How should people reach ChannelFlow? We detected the <strong>local URL</strong> from the address you are using now — correct it if it is wrong. Set a <strong>public URL</strong> only if ChannelFlow is exposed beyond your network.</p>
+       <label class="field-label" for="ob-local-url">Local URL</label>
+       <input id="ob-local-url" type="text" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.2:8097">
+       <label class="field-label" for="ob-public-url">Public URL (optional)</label>
+       <input id="ob-public-url" type="text" autocomplete="off" spellcheck="false" placeholder="https://channelflow.example.com">
+       <p class="hint" id="ob-network-note"></p>`,
+    after: () => attachObNetwork(),
+    beforeNext: () => saveObNetwork(),
   },
   {
     next: () => !!obCompleted["account"],
@@ -611,6 +624,42 @@ async function attachObInstall(pluginId, label) {
   });
 }
 
+// The Addresses step shows the detected local URL (the server fills it on this
+// first request) and lets the operator correct it, plus set a public URL.
+async function attachObNetwork() {
+  const local = document.getElementById("ob-local-url");
+  const pub = document.getElementById("ob-public-url");
+  const note = document.getElementById("ob-network-note");
+  if (!local || !pub) return;
+  try {
+    const data = await request("/api/settings/general");
+    const settings = data.settings || {};
+    if (!local.value) local.value = settings.local_url || "";
+    if (!pub.value) pub.value = settings.public_url || "";
+  } catch (error) {
+    if (note) note.textContent = "Could not detect the local URL — enter it if you know it.";
+  }
+}
+
+async function saveObNetwork() {
+  const local = document.getElementById("ob-local-url");
+  const pub = document.getElementById("ob-public-url");
+  if (!local && !pub) return true;
+  try {
+    await request("/api/settings/general", {
+      method: "PUT",
+      body: JSON.stringify({
+        public_url: (pub && pub.value.trim()) || "",
+        local_url: (local && local.value.trim()) || "",
+      }),
+    });
+  } catch (error) {
+    // Don't block setup on a URL the server rejected; it can be fixed later in
+    // General Settings.
+  }
+  return true;
+}
+
 function attachObAccount() {
   const btn = document.getElementById("ob-do");
   if (!btn) return;
@@ -646,6 +695,7 @@ const OB_STEP_PATHS = [
   "database",
   "transcoding",
   "media-source",
+  "addresses",
   "account",
   "done",
 ];
@@ -672,7 +722,9 @@ document.getElementById("ob-back").addEventListener("click", () => {
   }
 });
 
-document.getElementById("ob-next").addEventListener("click", () => {
+document.getElementById("ob-next").addEventListener("click", async () => {
+  const step = OB[obIndex];
+  if (step && step.beforeNext && !(await step.beforeNext())) return;
   if (obIndex < OB.length - 1) {
     obIndex++;
     renderOnboarding();

@@ -38,6 +38,7 @@ use uuid::Uuid;
 use crate::auth::{AuthRecord, ResetPin};
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::registry::PluginRegistry;
+use crate::settings::GeneralSettings;
 
 /// The plugin that used to be a core feature — its legacy `ai.json` document
 /// is migrated into its own storage under these names.
@@ -62,6 +63,8 @@ const SESSION_KEY: &str = "auth_session";
 const RESET_KEY: &str = "auth_reset";
 const RESET_AT_KEY: &str = "auth_reset_at";
 const DATABASE_URL_KEY: &str = "database_url";
+/// The General Settings document (public and local URLs).
+const GENERAL_KEY: &str = "general";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -288,6 +291,23 @@ impl Store {
     ) -> Result<(), StoreError> {
         self.plugin_set(CORE_NAMESPACE, &format!("task_{key}"), value)
             .await
+    }
+
+    /// General settings (the public and local URLs). Stored once in the core
+    /// namespace; the local URL is detected on first boot and can be overridden.
+    pub async fn general_settings(&self) -> Result<GeneralSettings, StoreError> {
+        match self.plugin_get(CORE_NAMESPACE, GENERAL_KEY).await? {
+            Some(value) => Ok(serde_json::from_value(value).unwrap_or_default()),
+            None => Ok(GeneralSettings::default()),
+        }
+    }
+
+    pub async fn save_general_settings(
+        &self,
+        settings: &GeneralSettings,
+    ) -> Result<(), StoreError> {
+        let value = serde_json::to_value(settings)?;
+        self.plugin_set(CORE_NAMESPACE, GENERAL_KEY, &value).await
     }
 
     /// The storage handle passed to a plugin, scoped to its id.

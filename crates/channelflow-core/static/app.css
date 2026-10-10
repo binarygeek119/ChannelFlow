@@ -439,6 +439,22 @@ button.ghost:hover { color: var(--text); border-color: #3d3d3d; }
     color: var(--muted);
 }
 .field > input[type="checkbox"] { align-self: flex-start; width: 1.1rem; height: 1.1rem; }
+/* The login Remember me label wraps its checkbox; flex keeps the box on the
+   same line and centered against the (uppercase) label text. */
+label[for="login-remember"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    line-height: 1;
+    cursor: pointer;
+}
+#login-remember {
+    width: 0.95rem;
+    height: 0.95rem;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--accent);
+}
 .field-hint, .field-note { font-size: 0.76rem; color: var(--muted); line-height: 1.4; }
 .field-note { color: #7d7d7d; }
 /* In the per-channel dialog a field only sits on the channel once it differs

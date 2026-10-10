@@ -28,6 +28,7 @@ channelflow-plugin-ai = { git = "https://github.com/binarygeek119/ChannelFlow-Pl
 channelflow-plugin-ersatztv = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-jellyfin = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-offair = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
+channelflow-plugin-commercialbrainz = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

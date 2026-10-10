@@ -369,6 +369,26 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Local plugin: {error}"))?;
 
+    // The Past Tense News plugin scans a folder of news events into the media
+    // database as "news" items (TV-show-style, no seasons).
+    let pasttense_plugin = channelflow_plugin_pasttense::plugin();
+    let pasttense_manifest = pasttense_plugin.metadata().clone();
+    let pasttense_api = PluginApi {
+        id: pasttense_manifest.id.clone(),
+        storage: store.plugin_storage(&pasttense_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&pasttense_manifest.id),
+        logger: PluginLogger::new(&pasttense_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&pasttense_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(pasttense_plugin, pasttense_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Past Tense News plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a
@@ -394,6 +414,10 @@ async fn main() -> Result<()> {
         channelflow_plugin_jellyfin::media_source(),
     );
     media_sources.register("com.channelflow.local", channelflow_plugin_local::media_source());
+    media_sources.register(
+        "com.channelflow.pasttense",
+        channelflow_plugin_pasttense::media_source(),
+    );
 
     // The plugin store: seed the ChannelFlow-Plugins repository so the Store
     // tab has something to show, unless the operator points it elsewhere.

@@ -12,6 +12,7 @@ const MEDIA_TABS = [
   { key: "tvshows", label: "TV Shows", kinds: ["series"], shape: "portrait" },
   { key: "music", label: "Music", kinds: ["album", "artist"], shape: "portrait" },
   { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"], shape: "portrait" },
+  { key: "news", label: "Past Tense News", kinds: ["news"], shape: "portrait" },
 ];
 const MEDIA_SOURCE_LABELS = {
   jellyfin: "Jellyfin",
@@ -32,7 +33,7 @@ const MEDIA_DETAIL_PLUGINS = {
 };
 
 let mediaItems = [];
-let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
+let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0, news: 0 };
 let mediaPageKey = "movies";
 
 function mediaTabFromPath(path) {
@@ -102,7 +103,7 @@ async function loadMedia() {
     mediaCounts = data.counts || mediaCounts;
   } catch (error) {
     mediaItems = [];
-    mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
+    mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0, news: 0 };
   }
   renderMediaPage(mediaPageKey);
 }
@@ -150,7 +151,7 @@ function mediaPosterUrl(path) {
 
 function mediaKindLabel(kind) {
   return (
-    { movie: "Movie", series: "Series", album: "Album", artist: "Artist", musicvideo: "Music video" }[kind] ||
+    { movie: "Movie", series: "Series", album: "Album", artist: "Artist", musicvideo: "Music video", news: "Past Tense News" }[kind] ||
     kind
   );
 }

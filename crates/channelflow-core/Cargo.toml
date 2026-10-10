@@ -38,6 +38,7 @@ channelflow-plugin-news = { git = "https://github.com/binarygeek119/ChannelFlow-
 channelflow-plugin-presets = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-lists = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-local = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
+channelflow-plugin-pasttense = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

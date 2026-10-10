@@ -1814,7 +1814,7 @@ async fn media_catalog_list(
     enrich_source_web_urls(&state, &mut rows).await?;
     let counts = {
         let mut counts = serde_json::Map::new();
-        for tab in ["movies", "tvshows", "music", "musicvideos"] {
+        for tab in ["movies", "tvshows", "music", "musicvideos", "news"] {
             counts.insert(tab.to_string(), serde_json::json!(0));
         }
         for row in &rows {
@@ -1824,6 +1824,7 @@ async fn media_catalog_list(
                 "series" => "tvshows",
                 "album" | "artist" => "music",
                 "musicvideo" => "musicvideos",
+                "news" => "news",
                 _ => continue,
             };
             if let Some(count) = counts.get_mut(tab) {

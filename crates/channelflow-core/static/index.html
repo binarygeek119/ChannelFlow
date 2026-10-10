@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=41">
+<link rel="stylesheet" href="/app.css?v=42">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -386,12 +386,9 @@
             <div class="field">
               <label class="field-label">Schedule</label>
               <div class="field-row">
-                <label class="jf-mode"><input type="radio" name="jf-schedule-mode" value="daily" checked> Daily at</label>
+                <label class="jf-mode">Daily at</label>
                 <input type="time" id="jf-task-time" value="03:00">
               </div>
-              <p class="jf-mode"><label><input type="radio" name="jf-schedule-mode" value="cron"> Crontab (overrides daily)</label></p>
-              <input type="text" id="jf-task-cron" placeholder="0 3 * * *" spellcheck="false">
-              <small class="field-hint">A crontab expression like <code>0 3 * * *</code> (03:00 every day) replaces the daily time.</small>
             </div>
             <div class="ms-form-actions">
               <button type="submit" class="primary" id="jf-task-save">Save schedule</button>
@@ -664,6 +661,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=41"></script>
+<script src="/app.js?v=42"></script>
 </body>
 </html>

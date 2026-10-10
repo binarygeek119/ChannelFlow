@@ -2098,12 +2098,8 @@ async function loadTasks() {
 function renderJellyfinTask(config, runs) {
   const enabled = config.enabled !== false;
   const schedule = config.schedule || {};
-  const mode = schedule.mode === "cron" ? "cron" : "daily";
   $("jf-task-enabled").checked = enabled;
-  const radio = document.querySelector(`input[name="jf-schedule-mode"][value="${mode}"]`);
-  if (radio) radio.checked = true;
   $("jf-task-time").value = schedule.daily_time || "03:00";
-  $("jf-task-cron").value = schedule.cron || "";
   renderTaskRuns(runs);
 }
 
@@ -2130,11 +2126,10 @@ function renderTaskRuns(runs) {
 $("jellyfin-task-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const enabled = $("jf-task-enabled").checked;
-  const mode = (document.querySelector('input[name="jf-schedule-mode"]:checked') || {}).value || "daily";
   const schedule = {
-    mode,
+    mode: "daily",
     daily_time: $("jf-task-time").value || "03:00",
-    cron: $("jf-task-cron").value.trim(),
+    cron: "",
   };
   const save = $("jf-task-save");
   save.disabled = true;
@@ -2687,7 +2682,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "41";
+const UI_BUILD = "42";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

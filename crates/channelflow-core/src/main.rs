@@ -348,6 +348,27 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Lists plugin: {error}"))?;
 
+    // The Local plugin is a file-based media source (no server): its page
+    // browses folders and creates connections; the sync scans folders for
+    // .nfo metadata + poster.jpg/png.
+    let local_plugin = channelflow_plugin_local::plugin();
+    let local_manifest = local_plugin.metadata().clone();
+    let local_api = PluginApi {
+        id: local_manifest.id.clone(),
+        storage: store.plugin_storage(&local_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&local_manifest.id),
+        logger: PluginLogger::new(&local_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&local_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(local_plugin, local_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Local plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a
@@ -372,6 +393,7 @@ async fn main() -> Result<()> {
         "com.channelflow.jellyfin",
         channelflow_plugin_jellyfin::media_source(),
     );
+    media_sources.register("com.channelflow.local", channelflow_plugin_local::media_source());
 
     // The plugin store: seed the ChannelFlow-Plugins repository so the Store
     // tab has something to show, unless the operator points it elsewhere.

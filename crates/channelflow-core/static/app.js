@@ -2193,6 +2193,24 @@ for (const [id, label] of [
   });
 }
 
+// Catalog cleanup: the grace period, the daily time, and the two one-off
+// buttons are stubbed until the cleanup and local-file scan are implemented.
+for (const [id, label] of [
+  ["catalog-save-grace", "Save Grace Period"],
+  ["catalog-run", "Run Catalog Cleanup"],
+  ["catalog-scan", "Scan Local Files"],
+]) {
+  const button = document.getElementById(id);
+  if (!button) continue;
+  button.addEventListener("click", () => {
+    const note = document.getElementById("catalog-note");
+    if (note) {
+      note.hidden = false;
+      note.textContent = `${label} is not wired up yet.`;
+    }
+  });
+}
+
 // --- connection form ---
 
 function linesToRemaps(text) {
@@ -2669,7 +2687,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "39";
+const UI_BUILD = "40";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

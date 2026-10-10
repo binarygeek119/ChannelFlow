@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=39">
+<link rel="stylesheet" href="/app.css?v=40">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -430,6 +430,31 @@
           </div>
           <p class="hint" id="maintenance-note"></p>
         </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Catalog cleanup</h2>
+          </div>
+          <p class="hint">
+            Items removed from a media server are marked <strong>missing</strong> first. After the
+            grace period the cleanup task deletes them. Manage removals from
+            <strong>Library → Removed items</strong>.
+          </p>
+          <div class="field-row">
+            <label class="field-label" for="catalog-grace">Grace period (days)</label>
+            <input type="number" id="catalog-grace" min="0" step="1" value="14">
+            <button type="button" class="ghost" id="catalog-save-grace">Save Grace Period</button>
+          </div>
+          <div class="field-row">
+            <label class="field-label"><input type="checkbox" id="catalog-daily-enabled" checked> Run daily at</label>
+            <input type="time" id="catalog-daily-time" value="04:00">
+          </div>
+          <div class="actions">
+            <button type="button" class="ghost" id="catalog-run">Run Catalog Cleanup</button>
+            <button type="button" class="ghost" id="catalog-scan">Scan Local Files</button>
+          </div>
+          <p class="hint" id="catalog-note"></p>
+        </div>
       </section>
 
       <section id="tab-live-tv" class="tab-panel" hidden>
@@ -654,6 +679,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=39"></script>
+<script src="/app.js?v=40"></script>
 </body>
 </html>

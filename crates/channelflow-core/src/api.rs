@@ -256,9 +256,9 @@ async fn require_auth(State(state): State<AppState>, request: Request, next: Nex
         return next.run(request).await;
     }
     let cookie = session_cookie(request.headers());
-    let valid = match (cookie, state.store.session_token().await) {
-        (Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
-        _ => false,
+    let valid = match cookie {
+        Some(cookie) => state.store.session_valid(&cookie).await.unwrap_or(false),
+        None => false,
     };
     if valid {
         next.run(request).await
@@ -283,8 +283,8 @@ async fn auth_state(
     let record = state.store.auth_record().await?;
     let setup_done = setup_is_done(&state).await;
     let cookie = session_cookie(&headers);
-    let authenticated = match (setup_done, cookie, state.store.session_token().await) {
-        (true, Some(cookie), Ok(Some(stored))) => auth::verify_token(&cookie, &stored),
+    let authenticated = match (setup_done, cookie) {
+        (true, Some(cookie)) => state.store.session_valid(&cookie).await.unwrap_or(false),
         _ => false,
     };
     Ok(Json(json!({
@@ -294,10 +294,17 @@ async fn auth_state(
     })))
 }
 
+/// Sessions live six hours from login. Remember me only decides whether the
+/// browser cookie itself survives a restart, not the server-side window.
+const SESSION_TTL_HOURS: i64 = 6;
+const SESSION_TTL_SECS: u64 = (SESSION_TTL_HOURS as u64) * 3600;
+
 #[derive(Deserialize)]
 struct LoginBody {
     username: String,
     password: String,
+    #[serde(default)]
+    remember: bool,
 }
 
 async fn login(
@@ -319,12 +326,16 @@ async fn login(
             .into_response());
     }
     let token = auth::new_secret();
-    state.store.save_session(&token).await?;
-    Ok((
-        [(header::SET_COOKIE, format!("channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax"))],
-        Json(json!({ "ok": true })),
-    )
-        .into_response())
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS);
+    state.store.save_session(&token, expires_at).await?;
+    let cookie = if input.remember {
+        format!(
+            "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECS}"
+        )
+    } else {
+        format!("channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax")
+    };
+    Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response())
 }
 
 async fn logout(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {

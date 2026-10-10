@@ -29,7 +29,7 @@ use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError};
 use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 use channelflow_plugin_api::media::{CatalogItem, MediaCatalog};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::Json;
 use sqlx::Row;
@@ -576,19 +576,37 @@ impl Store {
         self.plugin_set(CORE_NAMESPACE, AUTH_KEY, &value).await
     }
 
-    /// The current session token, if any.
-    pub async fn session_token(&self) -> Result<Option<String>, StoreError> {
+    /// Whether `token` is the current session and it has not expired. A
+    /// session lives a fixed six hours from login; after that a stale cookie is
+    /// simply not a session.
+    pub async fn session_valid(&self, token: &str) -> Result<bool, StoreError> {
         match self.plugin_get(CORE_NAMESPACE, SESSION_KEY).await? {
-            Some(serde_json::Value::String(token)) => Ok(Some(token)),
-            _ => Ok(None),
+            Some(serde_json::Value::Object(map)) => {
+                let stored = map.get("token").and_then(serde_json::Value::as_str);
+                let expires_at = map
+                    .get("expires_at")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.with_timezone(&Utc));
+                let expired = expires_at.is_some_and(|expires| Utc::now() >= expires);
+                Ok(stored.is_some_and(|stored| crate::auth::verify_token(token, stored)) && !expired)
+            }
+            _ => Ok(false),
         }
     }
 
-    pub async fn save_session(&self, token: &str) -> Result<(), StoreError> {
+    pub async fn save_session(
+        &self,
+        token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
         self.plugin_set(
             CORE_NAMESPACE,
             SESSION_KEY,
-            &serde_json::Value::String(token.to_string()),
+            &serde_json::json!({
+                "token": token,
+                "expires_at": expires_at.to_rfc3339(),
+            }),
         )
         .await
     }

@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "59";
+const UI_BUILD = "60";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -845,7 +845,11 @@ document.getElementById("login-form").addEventListener("submit", async (event) =
   try {
     await request("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        password,
+        remember: document.getElementById("login-remember").checked,
+      }),
     });
     location.assign("/webui/guide");
   } catch (error) {

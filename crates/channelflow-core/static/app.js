@@ -1922,20 +1922,26 @@ async function renderConnectionLibraries(list, connection) {
   const apiKey = config.api_key || "";
   let libraries = [];
   if (route) {
-    try {
-      const data = await request(route.base + "/libraries", {
-        method: "POST",
-        body: JSON.stringify({ connection: config, api_key: apiKey }),
-      });
-      libraries = data.libraries || [];
-    } catch (error) {
-      list.appendChild(
-        libraryCard(
-          `<p class="hint bad">${escapeHtml(connection.config.name || "connection")}: ${escapeHtml(error.message)}</p>`
-        )
-      );
-      return;
+    let data = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        data = await request(route.base + "/libraries", {
+          method: "POST",
+          body: JSON.stringify({ connection: config, api_key: apiKey }),
+        });
+        break;
+      } catch (error) {
+        if (attempt === 1) {
+          list.appendChild(
+            libraryCard(
+              `<p class="hint bad">${escapeHtml(config.name || "connection")}: ${escapeHtml(error.message)}</p>`
+            )
+          );
+          return;
+        }
+      }
     }
+    libraries = (data && data.libraries) || [];
   }
   const enabled = new Set(
     Array.isArray(config.enabled_libraries)
@@ -2682,7 +2688,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "42";
+const UI_BUILD = "43";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

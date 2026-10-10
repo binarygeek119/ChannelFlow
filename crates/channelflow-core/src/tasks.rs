@@ -217,6 +217,7 @@ pub async fn run_sync(
             db: store.plugin_database(JELLYFIN_PLUGIN).await,
             image_root: image_root.clone(),
             remaps: connection.path_remaps.clone(),
+            catalog: Some(std::sync::Arc::new(store.clone())),
         };
         tracing::info!(connection = id, kind, "library scan running");
         let report = source.sync_library(ctx).await;

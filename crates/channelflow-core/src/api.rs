@@ -104,6 +104,8 @@ pub fn router(
             get(jellyfin_sync_get).put(jellyfin_sync_put),
         )
         .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
+        .route("/api/media", get(media_catalog_list))
+        .route("/api/media/image", get(media_catalog_image))
         .route("/live/{asset}", get(live_pending))
         .fallback(spa_fallback)
         .with_state(state.clone());
@@ -1227,6 +1229,8 @@ async fn delete_connection(
         .connection_delete(id)
         .await?
         .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
+    // The connection's own catalog rows (the base Media page) go with it.
+    state.store.media_clear_connection(id).await?;
     // A media source's own rows cascade with the connection row; the sweep
     // removes the poster files of any item that then lost every source.
     if removed["kind"].as_str() == Some("jellyfin") {
@@ -1326,6 +1330,106 @@ async fn jellyfin_sync_run(
         "run": run,
         "runs": tasks::runs(&state.store).await,
     })))
+}
+
+// ── local media catalog ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct MediaCatalogQuery {
+    /// Restrict the reply to one kind: movie, series, album, artist, musicvideo.
+    #[serde(default)]
+    kind: Option<String>,
+}
+
+/// The image route's single parameter: the poster's own path.
+#[derive(Deserialize)]
+struct MediaImageQuery {
+    path: String,
+}
+
+/// The Media page's data: counts per tab plus the rows that match `kind` (or
+/// everything when no kind is given). Rows come from the core's own catalog,
+/// so the page works the same for every media source.
+async fn media_catalog_list(
+    State(state): State<AppState>,
+    Query(query): Query<MediaCatalogQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let counts = {
+        let mut counts = serde_json::Map::new();
+        for tab in ["movies", "tvshows", "music", "musicvideos"] {
+            counts.insert(tab.to_string(), serde_json::json!(0));
+        }
+        for row in &rows {
+            let kind = row["kind"].as_str().unwrap_or("");
+            let tab = match kind {
+                "movie" => "movies",
+                "series" => "tvshows",
+                "album" | "artist" => "music",
+                "musicvideo" => "musicvideos",
+                _ => continue,
+            };
+            if let Some(count) = counts.get_mut(tab).and_then(|v| v.as_i64_mut()) {
+                *count += 1;
+            }
+        }
+        counts
+    };
+    let items = match query.kind.as_deref() {
+        None => rows,
+        Some(kind) => rows
+            .into_iter()
+            .filter(|row| row["kind"].as_str() == Some(kind))
+            .collect(),
+    };
+    Ok(Json(json!({ "counts": counts, "items": items })))
+}
+
+/// Serve one poster from `<config>/Images`. The path is the absolute path a
+/// sync wrote; only files under the images root are served.
+async fn media_catalog_image(
+    State(state): State<AppState>,
+    Query(query): Query<MediaImageQuery>,
+) -> Response {
+    let path = query.path;
+    let root = state.store.images_dir();
+    let candidate = std::path::PathBuf::from(&path);
+    let ok = if candidate.is_absolute() {
+        candidate.starts_with(&root)
+    } else {
+        true
+    };
+    if !ok {
+        return (StatusCode::BAD_REQUEST, "path outside the image store").into_response();
+    }
+    let full = if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(&candidate)
+    };
+    let canonical = match full.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    if !canonical.starts_with(&root) {
+        return (StatusCode::BAD_REQUEST, "path outside the image store").into_response();
+    }
+    let bytes = match std::fs::read(&canonical) {
+        Ok(bytes) => bytes,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let content_type = canonical
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| match extension.to_ascii_lowercase().as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            "svg" => "image/svg+xml",
+            _ => "image/jpeg",
+        })
+        .unwrap_or("image/jpeg");
+    ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
 /// The streaming paths the Live TV page advertises.

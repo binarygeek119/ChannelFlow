@@ -27,6 +27,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError};
 use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
+use channelflow_plugin_api::media::{CatalogItem, MediaCatalog};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
 use chrono::Utc;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -445,6 +446,42 @@ impl Store {
         }
     }
 
+    // ── local media catalog ────────────────────────────────────────────────
+    // The Media page reads what sync put into the core's own catalog — the
+    // same rows any media source reports — so it works identically for every
+    // source without asking the live server. File: one JSON document; Postgres
+    // keeps a real `media_catalog` table.
+
+    /// Replace every catalog row for one connection + library with `items`
+    /// (the result of one sync pass).
+    pub async fn media_replace_library(
+        &self,
+        connection_id: i64,
+        library: &str,
+        items: &[CatalogItem],
+    ) -> Result<usize, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_replace_library(&self.root, connection_id, library, items),
+            Backend::Postgres(pool) => pg::media_replace_library(pool, connection_id, library, items).await,
+        }
+    }
+
+    /// Drop every catalog row for a connection (it was deleted).
+    pub async fn media_clear_connection(&self, connection_id: i64) -> Result<(), StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_clear_connection(&self.root, connection_id),
+            Backend::Postgres(pool) => pg::media_clear_connection(pool, connection_id).await,
+        }
+    }
+
+    /// Every catalog row, oldest first, for the Media page.
+    pub async fn media_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_list(&self.root),
+            Backend::Postgres(pool) => pg::media_list(pool).await,
+        }
+    }
+
     /// Where media-source plugins write posters and people images:
     /// `<config>/Images`.
     pub fn images_dir(&self) -> PathBuf {
@@ -737,6 +774,30 @@ impl Store {
         }
         tracing::info!(plugin = LEGACY_TRANSCODE_NAMESPACE, "migrated legacy transcode settings into plugin storage");
         Ok(())
+    }
+}
+
+// The core's own media catalog: media-source plugins report what they synced
+// and the base stores it (see `Store::media_*`), so the Media page is the same
+// for every source. The catalog handle is handed to syncs even though it is
+// driven by sync itself, so a plugin never needs the base's Store.
+#[async_trait]
+impl MediaCatalog for Store {
+    async fn replace_library(
+        &self,
+        connection_id: i64,
+        library: &str,
+        items: Vec<CatalogItem>,
+    ) -> Result<usize, String> {
+        self.media_replace_library(connection_id, library, &items)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn clear_connection(&self, connection_id: i64) -> Result<(), String> {
+        self.media_clear_connection(connection_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -1221,6 +1282,75 @@ mod file {
         Ok(count)
     }
 
+    // ── local media catalog ────────────────────────────────────────────────
+    // `<config>/media_catalog.json`: a flat array of the rows sync reported,
+    // oldest first. Postgres keeps the same data in `media_catalog`; the file
+    // shape matches the pg rows so the API layer is backend-agnostic.
+
+    fn media_catalog_path(root: &Path) -> PathBuf {
+        root.join("media_catalog.json")
+    }
+
+    fn read_media_catalog(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
+        let path = media_catalog_path(root);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let value: serde_json::Value = serde_json::from_str(&text)?;
+        Ok(value.as_array().cloned().unwrap_or_default())
+    }
+
+    fn write_media_catalog(
+        root: &Path,
+        rows: &[serde_json::Value],
+    ) -> Result<(), StoreError> {
+        let json = serde_json::to_string_pretty(&serde_json::Value::Array(rows.to_vec()))?;
+        write_private(&media_catalog_path(root), &json)?;
+        Ok(())
+    }
+
+    pub fn media_replace_library(
+        root: &Path,
+        connection_id: i64,
+        library: &str,
+        items: &[CatalogItem],
+    ) -> Result<usize, StoreError> {
+        let mut rows = read_media_catalog(root)?;
+        rows.retain(|row| {
+            row["connection_id"].as_i64() != Some(connection_id)
+                || row["library"].as_str() != Some(library)
+        });
+        for item in items {
+            rows.push(serde_json::json!({
+                "connection_id": connection_id,
+                "library": library,
+                "kind": item.kind,
+                "remote_id": item.remote_id,
+                "title": item.title,
+                "year": item.year,
+                "overview": item.overview,
+                "poster_path": item.poster_path,
+            }));
+        }
+        write_media_catalog(root, &rows)?;
+        Ok(items.len())
+    }
+
+    pub fn media_clear_connection(root: &Path, connection_id: i64) -> Result<(), StoreError> {
+        let rows = read_media_catalog(root)?;
+        let rows: Vec<serde_json::Value> = rows
+            .into_iter()
+            .filter(|row| row["connection_id"].as_i64() != Some(connection_id))
+            .collect();
+        write_media_catalog(root, &rows)
+    }
+
+    pub fn media_list(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
+        read_media_catalog(root)
+    }
+
     pub fn read_legacy_ai(root: &Path) -> Result<Option<serde_json::Value>, StoreError> {
         let path = root.join("ai.json");
         let text = match fs::read_to_string(&path) {
@@ -1270,6 +1400,21 @@ mod pg {
                 kind TEXT NOT NULL,
                 config JSONB NOT NULL DEFAULT '{}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )",
+            // The core's own media catalog: one row per item a media source
+            // reported during sync. Plugins never read this table — it feeds
+            // the base Media page, which must work the same for any source.
+            "CREATE TABLE IF NOT EXISTS media_catalog (
+                connection_id BIGINT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+                library TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                year INTEGER,
+                overview TEXT,
+                poster_path TEXT,
+                synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (connection_id, library, kind, remote_id)
             )",
         ] {
             sqlx::query(statement).execute(pool).await?;
@@ -1613,6 +1758,86 @@ mod pg {
             }
             None => Ok(None),
         }
+    }
+
+    // ── local media catalog ────────────────────────────────────────────────
+
+    pub async fn media_replace_library(
+        pool: &PgPool,
+        connection_id: i64,
+        library: &str,
+        items: &[CatalogItem],
+    ) -> Result<usize, StoreError> {
+        let mut tx = pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM media_catalog WHERE connection_id = $1 AND library = $2",
+        )
+        .bind(connection_id)
+        .bind(library)
+        .execute(&mut *tx)
+        .await?;
+        for item in items {
+            sqlx::query(
+                "INSERT INTO media_catalog \
+                 (connection_id, library, kind, remote_id, title, year, overview, poster_path) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            )
+            .bind(connection_id)
+            .bind(library)
+            .bind(&item.kind)
+            .bind(&item.remote_id)
+            .bind(&item.title)
+            .bind(item.year)
+            .bind(&item.overview)
+            .bind(&item.poster_path)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(items.len())
+    }
+
+    pub async fn media_clear_connection(
+        pool: &PgPool,
+        connection_id: i64,
+    ) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM media_catalog WHERE connection_id = $1")
+            .bind(connection_id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn media_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT connection_id, library, kind, remote_id, title, year, overview, \
+                    poster_path \
+             FROM media_catalog ORDER BY connection_id, library, kind, title",
+        )
+        .fetch_all(pool)
+        .await?;
+        let mut items = Vec::new();
+        for row in rows {
+            let connection_id: i64 = row.try_get("connection_id")?;
+            let library: String = row.try_get("library")?;
+            let kind: String = row.try_get("kind")?;
+            let remote_id: String = row.try_get("remote_id")?;
+            let title: String = row.try_get("title")?;
+            let year: Option<i32> = row.try_get("year")?;
+            let overview: Option<String> = row.try_get("overview")?;
+            let poster_path: Option<String> = row.try_get("poster_path")?;
+            items.push(serde_json::json!({
+                "connection_id": connection_id,
+                "library": library,
+                "kind": kind,
+                "remote_id": remote_id,
+                "title": title,
+                "year": year,
+                "overview": overview,
+                "poster_path": poster_path,
+            }));
+        }
+        Ok(items)
     }
 
     /// Drop every table this plugin created and delete its key/value rows.

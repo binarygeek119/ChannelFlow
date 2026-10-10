@@ -185,6 +185,83 @@ pub struct Library {
     pub collection_type: Option<String>,
 }
 
+/// One normalized entry in the base's own media catalog. Any media source can
+/// report the items it syncs; the base keeps them so its Media page works the
+/// same for every source without asking the live server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogItem {
+    /// Coarse kind: "movie", "series", "album", "artist" or "musicvideo".
+    /// The base's Media page groups these into Movies / TV shows / Music /
+    /// Music videos tabs.
+    pub kind: String,
+    /// The source's own stable id for the item (deduplication key).
+    pub remote_id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<String>,
+    /// Absolute path of the poster under the core's image root, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_path: Option<String>,
+    /// The library the item was synced from.
+    #[serde(default)]
+    pub library: String,
+}
+
+impl CatalogItem {
+    pub fn new(kind: &str, remote_id: &str, title: &str) -> Self {
+        Self {
+            kind: kind.to_string(),
+            remote_id: remote_id.to_string(),
+            title: title.to_string(),
+            year: None,
+            overview: None,
+            poster_path: None,
+            library: String::new(),
+        }
+    }
+
+    pub fn year(mut self, year: Option<i32>) -> Self {
+        self.year = year;
+        self
+    }
+
+    pub fn overview(mut self, overview: Option<String>) -> Self {
+        self.overview = overview;
+        self
+    }
+
+    pub fn poster_path(mut self, poster_path: Option<String>) -> Self {
+        self.poster_path = poster_path;
+        self
+    }
+
+    pub fn library(mut self, library: &str) -> Self {
+        self.library = library.to_string();
+        self
+    }
+}
+
+/// The base's local media catalog. A media-source plugin receives a handle to
+/// it during sync and reports the items it found; the base stores them in its
+/// own tables and serves them to the Media page. Implemented by the base.
+#[async_trait]
+pub trait MediaCatalog: Send + Sync {
+    /// Replace the catalog rows for one connection + library with `items`
+    /// (the result of one sync pass). Returns how many rows are stored.
+    async fn replace_library(
+        &self,
+        connection_id: i64,
+        library: &str,
+        items: Vec<CatalogItem>,
+    ) -> Result<usize, String>;
+
+    /// Remove every catalog row for a connection (the connection was deleted
+    /// or the source uninstalled).
+    async fn clear_connection(&self, connection_id: i64) -> Result<(), String>;
+}
+
 /// Everything a sync pass needs from the core.
 #[derive(Clone)]
 pub struct SyncCtx {
@@ -202,6 +279,9 @@ pub struct SyncCtx {
     pub image_root: PathBuf,
     /// The connection's path remaps, `{ from -> to }`.
     pub remaps: serde_json::Value,
+    /// The base's own media catalog; `None` when no catalog is offered (for
+    /// example a plugin-hosted sync run without a base handle).
+    pub catalog: Option<Arc<dyn MediaCatalog>>,
 }
 
 /// What a sync pass changed.

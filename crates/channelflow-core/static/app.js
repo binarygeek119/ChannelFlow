@@ -60,6 +60,7 @@ const MENU = {
   general: ["General Settings", "Server-wide defaults for how ChannelFlow runs."],
   quickpin: ["Quick Pin", "Pair a ChannelFlow app by the PIN it shows."],
   clients: ["Clients", "Players that have connected and what they're watching."],
+  clientlogs: ["Client Logs", "Diagnostics your ChannelFlow TV apps send back."],
   channels: ["Channels", "Manage Live TV channels"],
   lineups: ["Lineups", "Group channels into playlists you can hand to a player."],
   presets: ["Presets", "Reusable scheduling rules you can drop onto any channel."],
@@ -195,7 +196,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "77";
+const UI_BUILD = "78";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {

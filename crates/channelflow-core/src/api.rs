@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
     Json, Router,
 };
+use axum::extract::DefaultBodyLimit;
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -82,6 +83,13 @@ pub fn router(
         .route("/api/quickpin/pair", post(quickpin_pair))
         .route("/api/clients", get(list_clients))
         .route("/api/clients/{id}", delete(remove_client))
+        .route(
+            "/api/client-logs",
+            get(list_client_logs)
+                .post(ingest_client_logs)
+                .layer(DefaultBodyLimit::max(524_288)),
+        )
+        .route("/api/client-logs/{device_id}", get(get_client_logs_device))
         .route("/api/iptv/urls", get(iptv_urls))
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/login", post(login))
@@ -261,6 +269,7 @@ async fn require_auth(State(state): State<AppState>, request: Request, next: Nex
         || path.starts_with("/api/auth/")
         || path == "/api/health"
         || path.starts_with("/api/setup/")
+        || (path == "/api/client-logs" && request.method() == Method::POST)
     {
         return next.run(request).await;
     }
@@ -792,6 +801,83 @@ async fn iptv_urls(State(state): State<AppState>) -> Result<Json<serde_json::Val
         "client_id": client["id"],
         "urls": urls,
     })))
+}
+
+// ── client logs ───────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ClientLogsQuery {
+    #[serde(rename = "apiKey")]
+    apikey: Option<String>,
+    #[serde(default)]
+    file: Option<String>,
+    #[serde(default)]
+    tail: Option<i64>,
+}
+
+fn provided_api_key(headers: &HeaderMap, query: Option<&str>) -> String {
+    headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .or_else(|| query.map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// A TV app ships its log lines here. Authenticated with the app's API key
+/// (`X-Api-Key` header or `?apiKey=`), not the admin session.
+async fn ingest_client_logs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ClientLogsQuery>,
+    Json(input): Json<crate::client_logs::IngestRequest>,
+) -> Response {
+    let key = provided_api_key(&headers, query.apikey.as_deref());
+    if !state.store.api_key_valid(&key).await.unwrap_or(false) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid API key" })),
+        )
+            .into_response();
+    }
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    match crate::client_logs::ingest(&config_dir, &input) {
+        Ok(result) => Json(json!({ "accepted": result.accepted, "device_id": result.device_id }))
+            .into_response(),
+        Err(message) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": message })),
+        )
+            .into_response(),
+    }
+}
+
+/// The TV apps that have sent logs, newest first.
+async fn list_client_logs(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    Json(json!({ "devices": crate::client_logs::list_devices(&config_dir) }))
+}
+
+/// One app's log files and the tail of its log.
+async fn get_client_logs_device(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    Query(query): Query<ClientLogsQuery>,
+) -> Response {
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    match crate::client_logs::device_detail(
+        &config_dir,
+        &device_id,
+        query.file.as_deref(),
+        query.tail,
+    ) {
+        Some(detail) => Json(detail).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no logs for that client" })),
+        )
+            .into_response(),
+    }
 }
 
 /// Resident set size from `/proc/self/status`. Linux only, so the row simply

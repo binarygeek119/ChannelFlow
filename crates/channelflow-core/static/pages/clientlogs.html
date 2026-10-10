@@ -1,0 +1,18 @@
+<div class="panel">
+  <div class="panel-head">
+    <h2>Client Logs</h2>
+  </div>
+  <p class="hint">
+    ChannelFlow TV apps send their log lines back to the server over
+    <code>POST /api/client-logs</code>, authenticated with their own API key, one dated file per
+    day per device. Pick a device and a log file below to read what it reported.
+  </p>
+  <div class="ms-form-actions">
+    <label class="field-label" for="client-logs-device" style="display:inline-block; margin-right:0.6rem;">Device</label>
+    <select id="client-logs-device"></select>
+    <label class="field-label" for="client-logs-file" style="display:inline-block; margin:0 0.6rem 0 1rem;">Log file</label>
+    <select id="client-logs-file"></select>
+    <button type="button" class="ghost" id="clients-refresh-logs">Refresh</button>
+  </div>
+  <pre id="client-logs-view" class="client-log-viewer" aria-live="polite">No ChannelFlow TV clients have sent logs yet.</pre>
+</div>

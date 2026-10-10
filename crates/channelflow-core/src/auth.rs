@@ -47,6 +47,12 @@ pub fn verify(record: &AuthRecord, password: &str) -> bool {
     )
 }
 
+/// Re-salt and re-hash a record's password in place.
+pub fn set_password(record: &mut AuthRecord, password: &str) {
+    record.salt = new_secret();
+    record.password_hash = hash_password(&record.salt, password);
+}
+
 /// Constant-time comparison of two session tokens.
 pub fn verify_token(left: &str, right: &str) -> bool {
     constant_time_eq(left.as_bytes(), right.as_bytes())

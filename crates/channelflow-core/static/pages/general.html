@@ -24,3 +24,28 @@
     <p class="field-note" id="general-result"></p>
   </form>
 </div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Password</h2>
+  </div>
+  <p class="hint">Change the password you log in with. It needs the current one, then the new one twice.</p>
+  <form id="password-form" class="ms-form" autocomplete="off">
+    <div class="field">
+      <label class="field-label" for="pw-old">Current password</label>
+      <input id="pw-old" type="password" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label class="field-label" for="pw-new">New password</label>
+      <input id="pw-new" type="password" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label class="field-label" for="pw-new2">Confirm new password</label>
+      <input id="pw-new2" type="password" autocomplete="new-password">
+    </div>
+    <div class="ms-form-actions">
+      <button type="submit" class="primary" id="pw-save">Change password</button>
+    </div>
+    <p class="field-note" id="pw-result"></p>
+  </form>
+</div>

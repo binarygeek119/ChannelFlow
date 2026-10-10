@@ -74,6 +74,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `GET` | `/api/about` | version, build, runtime, and the host facts the About page shows |
 | `GET` | `/api/settings/general` | the public and local URLs; on first boot the local URL is detected once (from the address the request arrived on, else the host's primary interface) |
 | `PUT` | `/api/settings/general` | store the public/local URLs (each empty or `http(s)://…`) |
+| `POST` | `/api/settings/password` | change the account password (current password + new password, min 4 chars) |
 | `GET` | `/api/quickpin` | the Quick Pin relay origin and the Live TV URLs a pairing would send |
 | `POST` | `/api/quickpin/pair` | encrypt this instance's Live TV URLs with the app's PIN and hand them to the relay (`404` from the relay → `delivered:false`) |
 | `GET` | `/api/channels` | all channels, ordered by number |

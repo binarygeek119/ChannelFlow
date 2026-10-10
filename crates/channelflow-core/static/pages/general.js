@@ -38,9 +38,48 @@ async function saveGeneral(event) {
   }
 }
 
+async function changePassword(event) {
+  event.preventDefault();
+  const note = $("pw-result");
+  const oldPassword = $("pw-old").value;
+  const newPassword = $("pw-new").value;
+  const confirm = $("pw-new2").value;
+  if (!oldPassword) {
+    note.textContent = "Enter your current password.";
+    return;
+  }
+  if (newPassword.length < 4) {
+    note.textContent = "The new password must be at least 4 characters.";
+    return;
+  }
+  if (newPassword !== confirm) {
+    note.textContent = "The new passwords do not match.";
+    return;
+  }
+  const button = $("pw-save");
+  button.disabled = true;
+  note.textContent = "Saving…";
+  try {
+    await request("/api/settings/password", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+    $("pw-old").value = "";
+    $("pw-new").value = "";
+    $("pw-new2").value = "";
+    note.textContent = "Password changed.";
+  } catch (error) {
+    note.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 {
   const form = $("general-form");
   if (form) form.addEventListener("submit", saveGeneral);
+  const passwordForm = $("password-form");
+  if (passwordForm) passwordForm.addEventListener("submit", changePassword);
 }
 
 CF.define("general", { onShow: loadGeneral });

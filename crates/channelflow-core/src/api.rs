@@ -74,10 +74,8 @@ pub fn router(
         .route("/apple-touch-icon.png", get(apple_touch_icon))
         .route("/api/about", get(about))
         .route("/api/health", get(health))
-        .route(
-            "/api/settings/general",
-            get(general_settings_get).put(general_settings_put),
-        )
+        .route("/api/settings/general", get(general_settings_get).put(general_settings_put))
+        .route("/api/settings/password", post(change_password))
         .route("/api/quickpin", get(quickpin_get))
         .route("/api/quickpin/pair", post(quickpin_pair))
         .route("/api/auth/state", get(auth_state))
@@ -606,6 +604,38 @@ async fn general_settings_put(
     let settings = input.normalized();
     state.store.save_general_settings(&settings).await?;
     Ok(Json(json!({ "settings": settings })))
+}
+
+// ── password ───────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ChangePassword {
+    old_password: String,
+    new_password: String,
+}
+
+/// Change the logged-in account's password: the current one must match, then a
+/// fresh salt and hash are stored. The session token is left as-is.
+async fn change_password(
+    State(state): State<AppState>,
+    Json(input): Json<ChangePassword>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut record = state
+        .store
+        .auth_record()
+        .await?
+        .ok_or_else(|| StoreError::Plugin("there is no account yet".to_string()))?;
+    if !auth::verify(&record, &input.old_password) {
+        return Err(StoreError::Plugin("the current password is not correct".to_string()).into());
+    }
+    if input.new_password.len() < 4 {
+        return Err(
+            StoreError::Plugin("the new password must be at least 4 characters".to_string()).into(),
+        );
+    }
+    auth::set_password(&mut record, &input.new_password);
+    state.store.save_auth_record(&record).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 // ── quick pin ──────────────────────────────────────────────────────────────

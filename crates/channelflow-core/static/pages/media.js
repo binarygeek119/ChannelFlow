@@ -20,7 +20,15 @@ let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
 let mediaPageKey = "movies";
 
+function mediaTabFromPath(path) {
+  const match = path.match(/^\/webui\/media\/([^/]+)\/?$/);
+  if (!match) return null;
+  return MEDIA_TABS.some((tab) => tab.key === match[1]) ? match[1] : null;
+}
+
 async function loadMedia() {
+  // Each kind tab is its own URL (/webui/media/movies, /webui/media/tvshows…).
+  mediaPageKey = mediaTabFromPath(location.pathname) || "movies";
   renderMediaTabs();
   try {
     const data = await request("/api/media");
@@ -43,7 +51,10 @@ function renderMediaTabs() {
     button.className = "inner-tab";
     button.dataset.mediaPage = key;
     button.textContent = label;
-    button.addEventListener("click", () => renderMediaPage(key));
+    button.addEventListener("click", () => {
+      history.pushState(null, "", `/webui/media/${key}`);
+      renderMediaPage(key);
+    });
     tabs.appendChild(button);
   };
   MEDIA_TABS.forEach((tab) => add(tab.key, tab.label));

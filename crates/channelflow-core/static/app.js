@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "58";
+const UI_BUILD = "59";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -276,6 +276,7 @@ function pathForTab(key) {
 
 function tabForPath(path) {
   if (path === "/webui/library" || path.startsWith("/webui/library/")) return "jellyfin";
+  if (path === "/webui/media" || path.startsWith("/webui/media/")) return "media";
   let found = null;
   document.querySelectorAll(".drawer-nav a[data-tab]").forEach((link) => {
     if (link.getAttribute("href") === path) found = link.dataset.tab;

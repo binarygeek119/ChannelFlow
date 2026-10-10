@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=53">
+<link rel="stylesheet" href="/app.css?v=54">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -52,6 +52,20 @@
       </div>
       <div class="topbar-meta">
         <div class="topbar-actions">
+          <div class="share-menu" data-share="m3u">
+            <button type="button" class="ghost share-button">M3U <span class="caret">▾</span></button>
+            <div class="share-dropdown" hidden>
+              <button type="button" data-source="local">Copy local URL</button>
+              <button type="button" data-source="public">Copy public URL</button>
+            </div>
+          </div>
+          <div class="share-menu" data-share="xmltv">
+            <button type="button" class="ghost share-button">XMLTV <span class="caret">▾</span></button>
+            <div class="share-dropdown" hidden>
+              <button type="button" data-source="local">Copy local URL</button>
+              <button type="button" data-source="public">Copy public URL</button>
+            </div>
+          </div>
           <button type="button" id="logout" class="ghost danger">Log out</button>
         </div>
       </div>
@@ -155,6 +169,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=53"></script>
+<div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+
+<script src="/app.js?v=54"></script>
 </body>
 </html>

@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "53";
+const UI_BUILD = "54";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -375,6 +375,108 @@ window.addEventListener("popstate", () => {
   const key = tabForPath(location.pathname);
   if (key) showTab(key);
 });
+
+// --- M3U / XMLTV share menus ------------------------------------------------
+// Top-right shortcuts, on every page, that copy the playlist or guide URL for
+// the instance's local or public address (General Settings) to the clipboard.
+
+const SHARE_PATHS = { m3u: "/live/channels.m3u", xmltv: "/live/xmltv.xml" };
+
+function shareUrlFor(kind, source, settings) {
+  const raw = source === "public" ? settings.public_url : settings.local_url;
+  const base = String(raw || "").trim().replace(/\/+$/, "");
+  if (!base) return null;
+  return base + (SHARE_PATHS[kind] || "");
+}
+
+function closeShareMenus() {
+  document.querySelectorAll(".share-dropdown").forEach((menu) => {
+    menu.hidden = true;
+  });
+}
+
+// The Clipboard API needs a secure context, which plain http on a LAN is not,
+// so fall back to the old selection trick rather than leave the copy dead.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (error) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (inner) {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+}
+
+let toastTimer = null;
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  if (!toast) return;
+  clearTimeout(toastTimer);
+  toast.textContent = message;
+  toast.hidden = false;
+  toastTimer = setTimeout(() => {
+    toast.hidden = true;
+  }, 1800);
+}
+
+document.querySelectorAll(".share-menu").forEach((menu) => {
+  const button = menu.querySelector(".share-button");
+  const dropdown = menu.querySelector(".share-dropdown");
+  const kind = menu.dataset.share;
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const wasOpen = !dropdown.hidden;
+    closeShareMenus();
+    if (wasOpen) return;
+    let settings = {};
+    try {
+      settings = (await request("/api/settings/general")).settings || {};
+    } catch (error) {
+      /* options fall back to disabled */
+    }
+    dropdown.querySelectorAll("button[data-source]").forEach((option) => {
+      const source = option.dataset.source;
+      const url = shareUrlFor(kind, source, settings);
+      option.dataset.url = url || "";
+      option.disabled = !url;
+      option.title =
+        url ||
+        (source === "public"
+          ? "Set a public URL in General Settings"
+          : "Set a local URL in General Settings");
+    });
+    dropdown.hidden = false;
+  });
+  dropdown.querySelectorAll("button[data-source]").forEach((option) => {
+    option.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const url = option.dataset.url;
+      if (!url) return;
+      const ok = await copyText(url);
+      closeShareMenus();
+      showToast(
+        ok
+          ? `Copied ${kind.toUpperCase()} ${option.dataset.source} URL`
+          : "Copy failed — could not reach the clipboard."
+      );
+    });
+  });
+});
+
+document.addEventListener("click", closeShareMenus);
 
 // --- First boot: the walkthrough (and after that, the app itself) -----------
 // boot() runs once on load. No setup yet → the walkthrough at /first-time;
@@ -904,6 +1006,8 @@ Object.assign(globalThis, {
   libraryCard,
   setStatus,
   showError,
+  copyText,
+  showToast,
   CF,
   UI_BUILD,
 });

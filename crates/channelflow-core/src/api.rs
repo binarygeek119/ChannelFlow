@@ -67,6 +67,7 @@ pub fn router(
         .route("/app.css", get(css))
         .route("/app.js", get(js))
         .route("/pages/{*path}", get(page_asset))
+        .route("/logos/{name}", get(logo_badge))
         .route("/logo.png", get(logo))
         .route("/favicon.ico", get(favicon))
         .route("/favicon-32x32.png", get(favicon_32))
@@ -178,6 +179,7 @@ fn is_static_asset(path: &str) -> bool {
             | "/favicon-16x16.png"
             | "/apple-touch-icon.png"
     ) || path.starts_with("/live/")
+        || path.starts_with("/logos/")
 }
 
 fn redirect_to(path: &str) -> Response {
@@ -1677,6 +1679,30 @@ async fn page_asset(State(state): State<AppState>, Path(path): Path<String>) -> 
         _ => "application/octet-stream",
     };
     match crate::webui::read_nested(&state.store.config_dir(), &format!("pages/{path}")) {
+        Ok(body) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            axum::body::Bytes::from(body),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Serve one media-source logo from `<config>/webui/logos` (the badge images
+/// the Media page shows instead of source-name pills). Only image extensions
+/// and plain filenames are accepted.
+async fn logo_badge(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    let content_type = match name.rsplit('.').next() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    match crate::webui::read_nested(&state.store.config_dir(), &format!("logos/{name}")) {
         Ok(body) => (
             [
                 (header::CONTENT_TYPE, content_type),

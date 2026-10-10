@@ -15,6 +15,13 @@ const MEDIA_SOURCE_LABELS = {
   emby: "Emby",
   local: "Local",
 };
+// Logo images served from /logos/<name>; these replace the source pills.
+const MEDIA_SOURCE_LOGOS = {
+  jellyfin: "/logos/Jellyfin.png",
+  plex: "/logos/Plex.png",
+  emby: "/logos/Emby.png",
+  local: "/logos/LOCAL.png",
+};
 
 let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
@@ -75,10 +82,20 @@ function mediaKindLabel(kind) {
   );
 }
 
-// The distinct sources providing an item, as human labels.
-function mediaSourceLabels(item) {
+// The distinct sources providing an item. Each is a tiny logo (with the
+// human-readable name as tooltip/alt); an unknown source falls back to a pill.
+function mediaSourceBadges(item) {
   const kinds = [...new Set((item.sources || []).map((source) => source.source_kind))];
-  return kinds.map((kind) => MEDIA_SOURCE_LABELS[kind] || kind);
+  return kinds
+    .map((kind) => {
+      const label = MEDIA_SOURCE_LABELS[kind] || kind;
+      const logo = MEDIA_SOURCE_LOGOS[kind];
+      if (logo) {
+        return `<img class="media-source-logo" src="${logo}" alt="${escapeHtml(label)}" title="${escapeHtml(label)}" loading="lazy">`;
+      }
+      return `<span class="media-source-badge">${escapeHtml(label)}</span>`;
+    })
+    .join("");
 }
 
 // A Jellyfin-style poster card: a fixed-ratio poster with a hover dim + play
@@ -92,11 +109,8 @@ function mediaCard(item, shape) {
     ? `<div class="cardImage" style="background-image:url('${escapeHtml(poster)}')"></div>`
     : `<div class="cardImage cardImage-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
   const secondary = item.year ? String(item.year) : mediaKindLabel(item.kind);
-  const sources = mediaSourceLabels(item);
-  const badges = sources.length
-    ? `<div class="media-sources">${sources
-        .map((label) => `<span class="media-source-badge">${escapeHtml(label)}</span>`)
-        .join("")}</div>`
+  const badges = (item.sources || []).length
+    ? `<div class="media-sources">${mediaSourceBadges(item)}</div>`
     : "";
   card.innerHTML =
     `<div class="cardBox">` +

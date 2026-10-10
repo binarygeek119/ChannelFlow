@@ -29,6 +29,7 @@ const els = {
   tabLiveTv: $("tab-live-tv"),
   tabPlugins: $("tab-plugins"),
   tabLibrary: $("tab-library"),
+  tabMedia: $("tab-media"),
   tabTasks: $("tab-tasks"),
   pluginsRows: $("plugins-rows"),
   pluginsEmpty: $("plugins-empty"),
@@ -276,6 +277,7 @@ const MENU = {
   list: ["Lists", "Named lists of items you can reuse across channels and presets."],
   special: ["Special Presentation", "One-off scheduled events that override the normal lineup."],
   jellyfin: ["Library", "What we've picked up from your Jellyfin or Emby server."],
+  media: ["Media", "The movies, shows, albums and videos synced into ChannelFlow's own catalog."],
   commercials: ["Commercials", "Breaks, avails, and where they're allowed to land."],
   youtube: ["YouTube", "Videos pulled in from YouTube for use in breaks or blocks."],
   transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
@@ -291,6 +293,7 @@ const PANEL_FOR = {
   about: "tab-about",
   credits: "tab-credits",
   jellyfin: "tab-library",
+  media: "tab-media",
   transcode: "tab-transcode",
   livetv: "tab-live-tv",
   plugins: "tab-plugins",
@@ -1514,6 +1517,7 @@ function showTab(key) {
     els.tabLiveTv,
     els.tabPlugins,
     els.tabLibrary,
+    els.tabMedia,
     els.tabTasks,
     els.tabPlaceholder,
   ].forEach((element) => {
@@ -1536,6 +1540,7 @@ function showTab(key) {
   if (key === "livetv") loadLiveTv();
   if (key === "plugins") loadPlugins();
   if (key === "jellyfin") loadLibrary();
+  if (key === "media") loadMedia();
   if (key === "tasks") loadTasks();
 }
 
@@ -2671,34 +2676,18 @@ document.getElementById("tab-library").addEventListener("click", async (event) =
 });
 
 async function syncConnection(connection) {
-  const route = LIBRARY_ROUTES[connection.kind];
-  if (!route) throw new Error(`no sync built for ${connection.kind}`);
   const config = connection.config || {};
-  const apiKey = config.api_key || "";
-  const connectionBody = { connection: config, api_key: apiKey };
-  // Sync only the toggled-on libraries. With no stored selection every library
-  // is included; an empty stored selection means the operator turned them all
-  // off, so nothing syncs.
-  const all = (await request(route.base + "/libraries", { method: "POST", body: JSON.stringify(connectionBody) })).libraries || [];
-  const hasSelection = Array.isArray(config.enabled_libraries);
-  const preferred = new Set(hasSelection ? config.enabled_libraries : []);
-  const libraries = hasSelection
-    ? all.filter((library) => preferred.has(library.remote_id))
-    : all;
-  let imageRoot = "config/Images";
-  try {
-    const about = await request("/api/about");
-    if (about.system && about.system.configFolder) imageRoot = `${about.system.configFolder}/Images`;
-  } catch (error) { /* keep the default */ }
+  if (!LIBRARY_ROUTES[connection.kind]) throw new Error(`no sync built for ${connection.kind}`);
+
+  // Sync through the core's driver: it filters to the toggled-on libraries the
+  // same way and reports into the base's media catalog, so a manual scan also
+  // feeds the Media page.
+  const done = request("/api/tasks/jellyfin-sync/run", {
+    method: "POST",
+    body: JSON.stringify({ connection_id: connection.id }),
+  });
 
   taskPopup.show(`Syncing ${config.name || "Jellyfin"}`);
-  const done = request(route.base + "/sync", {
-    method: "POST",
-    body: JSON.stringify({ connection_id: connection.id, ...connectionBody, libraries, image_root: imageRoot }),
-  });
-  // Watch the plugin's live progress (stage + count) until the sync settles.
-  await pollSyncProgress(done);
-
   let report;
   try {
     report = await done;
@@ -2706,7 +2695,7 @@ async function syncConnection(connection) {
     taskPopup.finish(error.message || "Sync failed.", false);
     throw error;
   }
-  report = (report && report.report) || report || {};
+  report = (report && report.run) || report || {};
   taskPopup.finish(
     `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`,
     report.errors === 0
@@ -2714,23 +2703,120 @@ async function syncConnection(connection) {
   return report;
 }
 
-// Poll the plugin's /progress while the sync runs and push each snapshot into
-// the popup: "Movies · 5 of 19,328", then "TV · 1,024 of 8,412", and so on.
-// Stops the moment the sync request settles (success or failure).
-async function pollSyncProgress(done) {
-  const progressUrl = LIBRARY_ROUTES.jellyfin.base + "/progress";
-  let settled = false;
-  done.finally(() => { settled = true; });
-  while (!settled) {
-    try {
-      const data = await request(progressUrl);
-      const snapshot = (data && data.progress) || {};
-      taskPopup.progress(
-        `${snapshot.label || "Library"} · ${(Number(snapshot.current) || 0).toLocaleString()}` +
-          ` of ${(Number(snapshot.total) || 0).toLocaleString()}`
-      );
-    } catch (error) { /* a transient poll failure must not kill the sync */ }
-    await new Promise((resolve) => setTimeout(resolve, 800));
+// --- Media page ------------------------------------------------------------
+// The base's own catalog: what every media source synced, read back from the
+// database so the page is identical for Jellyfin, Emby or anything else. Each
+// kind tab shows that kind's items, laid out like the Jellyfin Library view.
+
+const MEDIA_TABS = [
+  { key: "movies", label: "Movies", kinds: ["movie"] },
+  { key: "tvshows", label: "TV Shows", kinds: ["series"] },
+  { key: "music", label: "Music", kinds: ["album", "artist"] },
+  { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"] },
+];
+let mediaItems = [];
+let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
+let mediaConnections = [];
+let mediaPageKey = "movies";
+
+async function loadMedia() {
+  renderMediaTabs();
+  try {
+    const data = await request("/api/media");
+    mediaItems = data.items || [];
+    mediaCounts = data.counts || mediaCounts;
+    mediaConnections = (await request("/api/connections")).connections || [];
+  } catch (error) {
+    mediaItems = [];
+    mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
+  }
+  renderMediaPage(mediaPageKey);
+}
+
+function renderMediaTabs() {
+  const tabs = $("media-inner-tabs");
+  if (!tabs) return;
+  tabs.textContent = "";
+  const add = (key, label) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "inner-tab";
+    button.dataset.mediaPage = key;
+    button.textContent = label;
+    button.addEventListener("click", () => renderMediaPage(key));
+    tabs.appendChild(button);
+  };
+  MEDIA_TABS.forEach((tab) => add(tab.key, tab.label));
+  tabs.querySelectorAll(".inner-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.mediaPage === mediaPageKey);
+  });
+}
+
+function connectionNameFor(id) {
+  const row = mediaConnections.find((connection) => connection.id === id);
+  return (row && row.config && row.config.name) || `connection ${id}`;
+}
+
+function mediaPosterUrl(path) {
+  if (!path) return null;
+  return `/api/media/image?path=${encodeURIComponent(path)}`;
+}
+
+function renderMediaPage(key) {
+  mediaPageKey = key;
+  renderMediaTabs();
+  document.querySelectorAll("#tab-media .library-page").forEach((page) => {
+    page.hidden = page.id !== `media-page-${key}`;
+  });
+  const spec = MEDIA_TABS.find((tab) => tab.key === key);
+  if (!spec) return;
+  const count = $(`media-count-${key}`);
+  if (count) count.textContent = `${mediaCounts[key] || 0} item(s)`;
+  const list = $(`media-list-${key}`);
+  if (!list) return;
+  list.textContent = "";
+  const rows = mediaItems.filter((item) => spec.kinds.includes(item.kind));
+  if (!rows.length) {
+    list.appendChild(
+      libraryCard(
+        '<p class="hint">Nothing synced here yet — run a library scan on the Library tab and the items appear.</p>'
+      )
+    );
+    return;
+  }
+  // One box per library, copying the Library page's group-per-connection look.
+  const byLibrary = new Map();
+  rows.forEach((item) => {
+    const groupKey = `${item.connection_id}::${item.library || ""}`;
+    if (!byLibrary.has(groupKey)) byLibrary.set(groupKey, { ...item, items: [] });
+    byLibrary.get(groupKey).items.push(item);
+  });
+  for (const [groupKey, group] of byLibrary) {
+    const box = document.createElement("div");
+    box.className = "library-box";
+    const host = connectionNameFor(group.connection_id);
+    const libraryName = escapeHtml(group.library || "Library");
+    const head = document.createElement("div");
+    head.className = "library-box-head";
+    head.innerHTML = `<h3>${escapeHtml(host)} · ${libraryName}</h3><span class="count">${group.items.length} item(s)</span>`;
+    box.appendChild(head);
+    group.items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "media-row";
+      const poster = mediaPosterUrl(item.poster_path);
+      const thumb = poster
+        ? `<img class="media-thumb" src="${escapeHtml(poster)}" alt="" loading="lazy">`
+        : '<div class="media-thumb media-thumb-missing"></div>';
+      const year = item.year ? ` <span class="media-year">(${escapeHtml(String(item.year))})</span>` : "";
+      const sub = item.kind === "artist"
+        ? '<span class="media-sub">Artist</span>'
+        : item.kind === "album"
+          ? '<span class="media-sub">Album</span>'
+          : "";
+      row.innerHTML = `${thumb}<div class="media-info"><div class="media-title">${escapeHtml(item.title)}${year}</div>${sub}</div>`;
+      box.appendChild(row);
+    });
+    list.appendChild(box);
   }
 }
 
@@ -3389,7 +3475,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "46";
+const UI_BUILD = "47";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

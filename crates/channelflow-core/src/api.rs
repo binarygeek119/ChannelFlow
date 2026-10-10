@@ -1396,14 +1396,11 @@ async fn media_catalog_image(
     let path = query.path;
     let root = state.store.images_dir();
     let candidate = std::path::PathBuf::from(&path);
-    let ok = if candidate.is_absolute() {
-        candidate.starts_with(&root)
-    } else {
-        true
+    // Only files under the images root may be served. Normalize with
+    // canonicalize() so `..`/symlink tricks cannot escape the boundary.
+    let Ok(root_canonical) = root.canonicalize() else {
+        return (StatusCode::NOT_FOUND, "images store is not ready").into_response();
     };
-    if !ok {
-        return (StatusCode::BAD_REQUEST, "path outside the image store").into_response();
-    }
     let full = if candidate.is_absolute() {
         candidate
     } else {
@@ -1413,7 +1410,7 @@ async fn media_catalog_image(
         Ok(path) => path,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
-    if !canonical.starts_with(&root) {
+    if !canonical.starts_with(&root_canonical) || !canonical.is_file() {
         return (StatusCode::BAD_REQUEST, "path outside the image store").into_response();
     }
     let bytes = match std::fs::read(&canonical) {

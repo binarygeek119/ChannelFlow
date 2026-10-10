@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=46">
+<link rel="stylesheet" href="/app.css?v=47">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -27,6 +27,7 @@
       <a href="/webui/channels" class="nav-item active" data-tab="channels" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="12" rx="2"/><path d="M7 20h10M12 8V5M9 3.5L12 5l3-1.5"/></svg><span class="nav-label">Channels</span></a>
       <a href="/webui/lineups" class="nav-item" data-tab="lineups"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg><span class="nav-label">Lineups</span></a>
       <a href="/webui/library" class="nav-item" data-tab="jellyfin"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M10 9l5 3-5 3V9z"/></svg><span class="nav-label">Library</span></a>
+      <a href="/webui/media" class="nav-item" data-tab="media"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg><span class="nav-label">Media</span></a>
 
       <div class="drawer-nav-gap" aria-hidden="true"></div>
 
@@ -795,6 +796,56 @@
         </div>
       </section>
 
+      <section id="tab-media" class="tab-panel" hidden>
+        <div class="panel">
+          <div class="inner-tabs" id="media-inner-tabs"></div>
+        </div>
+
+        <div id="media-page-movies" class="library-page">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Movies</h2>
+              <span class="count" id="media-count-movies"></span>
+            </div>
+            <p class="hint">The movies your media sources have synced, straight from ChannelFlow's own catalog.</p>
+            <div class="media-list" id="media-list-movies"></div>
+          </div>
+        </div>
+
+        <div id="media-page-tvshows" class="library-page" hidden>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>TV Shows</h2>
+              <span class="count" id="media-count-tvshows"></span>
+            </div>
+            <p class="hint">The series your media sources have synced, straight from ChannelFlow's own catalog.</p>
+            <div class="media-list" id="media-list-tvshows"></div>
+          </div>
+        </div>
+
+        <div id="media-page-music" class="library-page" hidden>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Music</h2>
+              <span class="count" id="media-count-music"></span>
+            </div>
+            <p class="hint">Albums and artists your media sources have synced, straight from ChannelFlow's own catalog.</p>
+            <div class="media-list" id="media-list-music"></div>
+          </div>
+        </div>
+
+        <div id="media-page-musicvideos" class="library-page" hidden>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Music Videos</h2>
+              <span class="count" id="media-count-musicvideos"></span>
+            </div>
+            <p class="hint">The music videos your media sources have synced, straight from ChannelFlow's own catalog.</p>
+            <div class="media-list" id="media-list-musicvideos"></div>
+          </div>
+        </div>
+      </section>
+
       <section id="tab-placeholder" class="tab-panel" hidden>
         <div class="panel">
           <div class="panel-head">
@@ -899,6 +950,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=46"></script>
+<script src="/app.js?v=47"></script>
 </body>
 </html>

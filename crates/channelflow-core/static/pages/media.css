@@ -338,3 +338,67 @@
     .media-detail-main { grid-template-columns: minmax(7rem, 10rem) 1fr; gap: 0.9rem; }
     .media-detail-info h1 { font-size: 1.25rem; }
 }
+
+/* ── Music: an artist's albums and an album's tracks ────────────────────── */
+
+.media-albums {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    gap: 1.1rem 0.8rem;
+}
+.media-album-card { min-width: 0; cursor: pointer; }
+.media-album-card.unlinked { cursor: default; opacity: 0.85; }
+.media-album-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-album-poster {
+    aspect-ratio: 1 / 1;
+    border-radius: 0.2em;
+    background-color: #242424;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+.media-album-poster-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4a4a4a;
+}
+.media-album-poster-fallback svg { width: 2.6rem; height: 2.6rem; }
+.media-album-title {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.media-album-sub {
+    font-size: 0.74rem;
+    color: var(--muted);
+}
+.media-tracks {
+    border-top: 1px solid var(--border);
+}
+.media-track-row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr auto;
+    gap: 0.7rem;
+    align-items: center;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.media-track-num {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}
+.media-track-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.media-track-time {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}

@@ -235,6 +235,15 @@ async function renderMediaItem(matchKey) {
   }
   const tabs = $("media-inner-tabs");
   if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
+  // Directly-opened item URLs may lack the catalog the tabs loaded.
+  if (!mediaItems.length) {
+    try {
+      const data = await request("/api/media");
+      mediaItems = data.items || [];
+    } catch (error) {
+      mediaItems = [];
+    }
+  }
   let item = null;
   try {
     const data = await request(`/api/media/${encodeURIComponent(matchKey)}`);
@@ -252,6 +261,9 @@ async function renderMediaItem(matchKey) {
   }
   const enriched = await fetchItemDetail(item);
   renderMediaDetail(detail, item, enriched);
+  // Music gets its own lower sections: an artist lists their albums, an
+  // album lists its tracks.
+  await renderMusicDetail(detail, item);
   mediaPageKey = mediaTabForKind(item.kind);
 }
 
@@ -406,6 +418,161 @@ function mediaCastCard(person) {
     });
   }
   return card;
+}
+
+// ── Music: artist → albums, album → tracks ───────────────────────────────
+
+const MUSIC_GRAPH = "/api/plugins/com.channelflow.jellyfin/music";
+let musicArtists = null;
+let musicAlbums = null;
+
+// "a", "the" and punctuation are ignored for matching so the base catalog's
+// titles line up with the plugin's hierarchy rows.
+function normalizeMusicName(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .replace(/^(a|an|the)/, "");
+}
+
+async function loadMusicGraph() {
+  if (musicArtists && musicAlbums) return;
+  try {
+    const [artists, albums] = await Promise.all([
+      request(`${MUSIC_GRAPH}/artists`),
+      request(`${MUSIC_GRAPH}/albums`),
+    ]);
+    musicArtists = artists.artists || [];
+    musicAlbums = albums.albums || [];
+  } catch (error) {
+    musicArtists = [];
+    musicAlbums = [];
+  }
+}
+
+// The plugin albums belonging to the artist named `name`.
+function albumsForArtist(name) {
+  const wanted = normalizeMusicName(name);
+  const artist =
+    (musicArtists || []).find((entry) => normalizeMusicName(entry.name) === wanted) ||
+    (musicArtists || []).find((entry) => {
+      const candidate = normalizeMusicName(entry.name);
+      return candidate && (candidate.includes(wanted) || wanted.includes(candidate));
+    });
+  if (!artist) return [];
+  return (musicAlbums || []).filter((album) => album.artist_id === artist.id);
+}
+
+// The plugin album row matching a title (+year), for its track list.
+function findGraphAlbum(title, year) {
+  const wanted = normalizeMusicName(title);
+  return (musicAlbums || []).find(
+    (album) =>
+      normalizeMusicName(album.title) === wanted &&
+      (year == null || !album.year || String(album.year) === String(year))
+  );
+}
+
+// The base-catalog album matching a title (+year), for its poster and link.
+function findBaseAlbum(title, year) {
+  const wanted = normalizeMusicName(title);
+  return mediaItems.find(
+    (item) =>
+      item.kind === "album" &&
+      normalizeMusicName(item.title) === wanted &&
+      (year == null || !item.year || String(item.year) === String(year))
+  );
+}
+
+function formatTrackTime(ticks) {
+  if (!ticks) return null;
+  const seconds = Math.round(ticks / 10_000_000);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function mediaAlbumCard(album, baseAlbum) {
+  const card = document.createElement("div");
+  const clickable = Boolean(baseAlbum && baseAlbum.match_key);
+  card.className = "media-album-card" + (clickable ? "" : " unlinked");
+  const poster = baseAlbum && baseAlbum.poster_path
+    ? mediaPosterUrl(baseAlbum.poster_path)
+    : null;
+  const image = poster
+    ? `<div class="media-album-poster" style="background-image:url('${escapeHtml(poster)}')"></div>`
+    : `<div class="media-album-poster media-album-poster-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9h6M9 13h6M9 17h4"/></svg></div>`;
+  card.innerHTML =
+    image +
+    `<div class="media-album-title" title="${escapeHtml(album.title || "")}">${escapeHtml(album.title || "")}</div>` +
+    (album.year ? `<div class="media-album-sub">${escapeHtml(String(album.year))}</div>` : "");
+  if (clickable) {
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    const go = () => openMediaItem(baseAlbum.match_key);
+    card.addEventListener("click", go);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+  return card;
+}
+
+function mediaTrackRow(track, index) {
+  const row = document.createElement("div");
+  row.className = "media-track-row";
+  const number =
+    track.disc_number && track.disc_number > 1
+      ? `${track.disc_number}.${track.track_number || ""}`
+      : String(track.track_number || index + 1);
+  const time = formatTrackTime(track.runtime_ticks);
+  row.innerHTML =
+    `<div class="media-track-num">${escapeHtml(number)}</div>` +
+    `<div class="media-track-title" title="${escapeHtml(track.title || "")}">${escapeHtml(track.title || "")}</div>` +
+    (time ? `<div class="media-track-time">${escapeHtml(time)}</div>` : "");
+  return row;
+}
+
+async function renderMusicDetail(detail, item) {
+  if (!detail || (item.kind !== "artist" && item.kind !== "album")) return;
+  await loadMusicGraph();
+
+  if (item.kind === "artist") {
+    const albums = albumsForArtist(item.title);
+    if (!albums.length) return;
+    const heading = document.createElement("h2");
+    heading.className = "media-detail-section";
+    heading.textContent = "Albums";
+    detail.appendChild(heading);
+    const grid = document.createElement("div");
+    grid.className = "media-albums";
+    albums.forEach((album) => grid.appendChild(mediaAlbumCard(album, findBaseAlbum(album.title, album.year))));
+    detail.appendChild(grid);
+    return;
+  }
+
+  if (item.kind === "album") {
+    const album = findGraphAlbum(item.title, item.year);
+    if (!album) return;
+    let tracks = [];
+    try {
+      const data = await request(`${MUSIC_GRAPH}/albums/${album.id}/tracks`);
+      tracks = data.tracks || [];
+    } catch (error) {
+      tracks = [];
+    }
+    if (!tracks.length) return;
+    const heading = document.createElement("h2");
+    heading.className = "media-detail-section";
+    heading.textContent = `Tracks (${tracks.length})`;
+    detail.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "media-tracks";
+    tracks.forEach((track, index) => list.appendChild(mediaTrackRow(track, index)));
+    detail.appendChild(list);
+  }
 }
 
 CF.define("media", { onShow: loadMedia });

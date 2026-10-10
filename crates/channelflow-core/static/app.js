@@ -1535,6 +1535,9 @@ function pathForTab(key) {
 }
 
 function tabForPath(path) {
+  // Library sub-paths (a source or one connection) all belong to the Library
+  // tab; its inner page follows the deep link.
+  if (path === "/webui/library" || path.startsWith("/webui/library/")) return "jellyfin";
   let found = null;
   document.querySelectorAll(".drawer-nav a[data-tab]").forEach((link) => {
     if (link.getAttribute("href") === path) found = link.dataset.tab;
@@ -1660,8 +1663,28 @@ async function loadLibrary() {
   populateConnectionKinds();
   await refreshLibraryConnections();
   renderLibraryTabs();
-  showLibraryPage(libraryPage);
+  applyLibraryPath();
   updateLibraryEmptyState();
+}
+
+// The inner Library page follows the URL: /webui/library is Connections,
+// /webui/library/<kind> the source, /webui/library/<kind>/<id> one connection.
+function applyLibraryPath() {
+  const match = location.pathname.match(/^\/webui\/library\/([^/]+)(?:\/(\d+))?$/);
+  if (match) {
+    const kind = match[1];
+    const id = match[2] ? Number(match[2]) : null;
+    const wanted = id != null ? connPageId(kind, id) : kind;
+    if (document.querySelector(`#library-inner-tabs .inner-tab[data-library-page="${wanted}"]`)) {
+      libraryPage = wanted;
+      showLibraryPage(wanted);
+      return;
+    }
+  }
+  if (location.pathname === "/webui/library") {
+    libraryPage = "connections";
+    showLibraryPage("connections");
+  }
 }
 
 async function refreshLibraryConnections() {
@@ -1707,26 +1730,44 @@ function renderLibraryTabs() {
   const tabs = $("library-inner-tabs");
   if (!tabs) return;
   tabs.textContent = "";
-  const add = (page, label) => {
+  // Each tab is a real URL under Library: Connections at /webui/library, the
+  // source at /webui/library/<kind>, and one tab per saved connection at
+  // /webui/library/<kind>/<id> - so a connection is a tab you can browse to
+  // and bookmark.
+  const add = (page, label, path) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "inner-tab";
     button.dataset.libraryPage = page;
     button.textContent = label;
-    button.addEventListener("click", () => showLibraryPage(page));
+    button.addEventListener("click", () => {
+      history.pushState(null, "", path || "/webui/library");
+      showLibraryPage(page);
+    });
     tabs.appendChild(button);
   };
-  add("connections", "Connections");
+  add("connections", "Connections", "/webui/library");
   // A per-source tab only exists once one of its connections is saved — no
-  // empty tabs for installed-but-unconfigured sources.
+  // empty tabs for installed-but-unconfigured sources. Each connection of a
+  // source then gets its own tab under it.
   librarySources.forEach((source) => {
-    if (libraryConnections.some((connection) => connection.kind === source.type_id)) {
-      add(source.type_id, source.display_name);
-    }
+    const connections = libraryConnections.filter(
+      (connection) => connection.kind === source.type_id
+    );
+    if (!connections.length) return;
+    add(source.type_id, source.display_name, `/webui/library/${source.type_id}`);
+    connections.forEach((connection) => {
+      const page = connPageId(source.type_id, connection.id);
+      add(page, (connection.config && connection.config.name) || source.display_name, `/webui/library/${source.type_id}/${connection.id}`);
+    });
   });
   tabs.querySelectorAll(".inner-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.libraryPage === libraryPage);
   });
+}
+
+function connPageId(kind, id) {
+  return `conn-${kind}-${id}`;
 }
 
 function kindPage(kind, heading) {
@@ -1756,7 +1797,43 @@ function showLibraryPage(page) {
     element.hidden = element.id !== `library-page-${page}`;
   });
   if (page === "connections") renderConnections();
+  else if (page.startsWith("conn-")) renderKindLibraryConnection(page);
   else renderKindLibraries(page);
+}
+
+// A per-connection page shows just that connection's libraries.
+function renderKindLibraryConnection(page) {
+  const rest = page.slice("conn-".length);
+  const dash = rest.lastIndexOf("-");
+  const kind = rest.slice(0, dash);
+  const id = Number(rest.slice(dash + 1));
+  const connection = libraryConnections.find(
+    (row) => row.id === id && row.kind === kind
+  );
+  const heading = connection && connection.config && connection.config.name
+    ? connection.config.name
+    : kind;
+  const pid = `library-page-${page}`;
+  let pageEl = $(pid);
+  if (!pageEl) {
+    pageEl = document.createElement("div");
+    pageEl.id = pid;
+    pageEl.className = "library-page";
+    pageEl.hidden = true;
+    pageEl.innerHTML =
+      `<div class="panel"><div class="panel-head"><h2></h2><span class="count"></span></div>` +
+      `<p class="hint">This connection's libraries. Toggle rows to include or exclude them from syncs.</p>` +
+      `<div class="library-lists"></div></div>`;
+    $("tab-library").appendChild(pageEl);
+  }
+  pageEl.querySelector("h2").textContent = heading;
+  const list = pageEl.querySelector(".library-lists");
+  list.textContent = "";
+  if (!connection) {
+    list.appendChild(libraryCard('<p class="hint">Connection removed.</p>'));
+    return;
+  }
+  renderConnectionLibraries(list, connection);
 }
 
 function renderCurrentLibraryPage() {
@@ -2727,7 +2804,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "45";
+const UI_BUILD = "46";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

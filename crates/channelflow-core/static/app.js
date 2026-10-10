@@ -1614,7 +1614,13 @@ function renderLibraryTabs() {
     tabs.appendChild(button);
   };
   add("connections", "Connections");
-  librarySources.forEach((source) => add(source.type_id, source.display_name));
+  // A per-source tab only exists once one of its connections is saved — no
+  // empty tabs for installed-but-unconfigured sources.
+  librarySources.forEach((source) => {
+    if (libraryConnections.some((connection) => connection.kind === source.type_id)) {
+      add(source.type_id, source.display_name);
+    }
+  });
   tabs.querySelectorAll(".inner-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.libraryPage === libraryPage);
   });
@@ -1630,8 +1636,8 @@ function kindPage(kind, heading) {
     page.hidden = true;
     page.innerHTML =
       `<div class="panel"><div class="panel-head"><h2></h2><span class="count"></span></div>` +
-      `<p class="hint">Connections to this media server. Test one or sync its libraries into the catalog.</p>` +
-      `<div class="ms-list"></div></div>`;
+      `<p class="hint">Sync the libraries each connection exposes. They are grouped by type; toggle a row to include or exclude that library from syncs.</p>` +
+      `<div class="library-lists"></div></div>`;
     $("tab-library").appendChild(page);
   }
   page.querySelector("h2").textContent = heading;
@@ -1647,7 +1653,7 @@ function showLibraryPage(page) {
     element.hidden = element.id !== `library-page-${page}`;
   });
   if (page === "connections") renderConnections();
-  else renderKindConnections(page);
+  else renderKindLibraries(page);
 }
 
 function renderCurrentLibraryPage() {
@@ -1723,6 +1729,7 @@ function connectionActions(card, connection) {
       if (!confirm(`Delete this connection? Its synced rows cascade and orphan posters are swept.`)) return "cancelled";
       await request(`/api/connections/${connection.id}`, { method: "DELETE" });
       await refreshLibraryConnections();
+      renderLibraryTabs();
       renderCurrentLibraryPage();
       return "deleted";
     }, () => { if (card.parentNode) card.remove(); });
@@ -1765,19 +1772,171 @@ function renderConnections() {
   libraryConnections.forEach((connection) => list.appendChild(connectionCard(connection)));
 }
 
-function renderKindConnections(kind) {
+// The grouped labels and order for Jellyfin's collection types. 3D movies
+// and regular movies both arrive as collection_type "movies", so they share
+// the Movies box.
+const LIBRARY_TYPE_LABELS = {
+  movies: "Movies",
+  tvshows: "TV shows",
+  music: "Music",
+  musicvideos: "Music videos",
+};
+const LIBRARY_TYPE_ORDER = ["movies", "tvshows", "music", "musicvideos"];
+
+function libraryTypeLabel(type) {
+  return LIBRARY_TYPE_LABELS[type] || type || "Other";
+}
+
+function libraryCard(html) {
+  const card = document.createElement("div");
+  card.className = "card section-card";
+  card.innerHTML = html;
+  return card;
+}
+
+async function renderKindLibraries(kind) {
   const page = kindPage(kind, sourceName(kind) || kind);
-  const list = page.querySelector(".ms-list");
+  const list = page.querySelector(".library-lists");
   const count = page.querySelector(".count");
   const rows = libraryConnections.filter((connection) => connection.kind === kind);
-  if (count) count.textContent = `${rows.length} connection(s)`;
   list.textContent = "";
   if (!rows.length) {
-    list.innerHTML = '<div class="card section-card"><p class="hint">No connections yet — add one on the Connections tab.</p></div>';
+    if (count) count.textContent = "";
+    list.appendChild(
+      libraryCard(
+        '<p class="hint">No connections yet — add one on the Connections tab.</p>'
+      )
+    );
     return;
   }
-  rows.forEach((connection) => list.appendChild(connectionCard(connection)));
+  if (count) count.textContent = `${rows.length} connection(s)`;
+  await Promise.all(rows.map((connection) => renderConnectionLibraries(list, connection)));
 }
+
+async function renderConnectionLibraries(list, connection) {
+  const route = LIBRARY_ROUTES[connection.kind];
+  const config = connection.config || {};
+  const apiKey = config.api_key || "";
+  let libraries = [];
+  if (route) {
+    try {
+      const data = await request(route.base + "/libraries", {
+        method: "POST",
+        body: JSON.stringify({ connection: config, api_key: apiKey }),
+      });
+      libraries = data.libraries || [];
+    } catch (error) {
+      list.appendChild(
+        libraryCard(
+          `<p class="hint bad">${escapeHtml(connection.config.name || "connection")}: ${escapeHtml(error.message)}</p>`
+        )
+      );
+      return;
+    }
+  }
+  const enabled = new Set(
+    Array.isArray(config.enabled_libraries)
+      ? config.enabled_libraries
+      : libraries.map((library) => library.remote_id)
+  );
+  const grouped = new Map();
+  for (const library of libraries) {
+    const type = library.collection_type || "other";
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type).push(library);
+  }
+  const types = [...grouped.keys()].sort((a, b) => {
+    const ia = LIBRARY_TYPE_ORDER.indexOf(a);
+    const ib = LIBRARY_TYPE_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || String(a).localeCompare(String(b));
+  });
+
+  const box = document.createElement("div");
+  box.className = "library-box";
+  const name = escapeHtml(config.name || "Connection");
+  const sync = LIBRARY_ROUTES[connection.kind]
+    ? `<button type="button" class="primary" data-lib-sync="${connection.id}">Sync now</button>`
+    : "";
+  box.innerHTML = `<div class="library-box-head"><h3>${name}</h3>${sync}</div>`;
+  if (!libraries.length) {
+    box.innerHTML +=
+      '<p class="hint">This server exposes no libraries (or the key cannot list them).</p>';
+  } else {
+    types.forEach((type) => {
+      const label = libraryTypeLabel(type);
+      box.innerHTML += `<h4 class="library-type">${escapeHtml(label)}</h4>`;
+      grouped.get(type).forEach((library) => {
+        const checked = enabled.has(library.remote_id);
+        box.innerHTML +=
+          `<div class="lib-row">
+             <span class="lib-name">${escapeHtml(library.name)}</span>
+             <label class="switch" title="${checked ? "Included in syncs" : "Excluded from syncs"}">
+               <input type="checkbox" class="lib-toggle" data-conn="${connection.id}" data-lib="${escapeHtml(library.remote_id)}" ${checked ? "checked" : ""}>
+               <span class="track"></span><span class="thumb"></span>
+             </label>
+           </div>`;
+      });
+    });
+  }
+  list.appendChild(box);
+}
+
+// A library toggle persisted to the connection, then re-renders so the tabs
+// and any syncs reflect the new selection.
+async function toggleLibrary(connectionId, remoteId, enabledNow, list) {
+  const connection = libraryConnections.find((row) => row.id === connectionId);
+  if (!connection) return;
+  const config = { ...(connection.config || {}) };
+  // Build the enabled set from what is on screen right now, so the very first
+  // toggle (before any selection was stored) starts from "all of them" rather
+  // than an empty list.
+  const toggles = [...document.querySelectorAll(`.lib-toggle[data-conn="${connectionId}"]`)];
+  config.enabled_libraries = toggles
+    .filter((toggle) => toggle.checked)
+    .map((toggle) => toggle.dataset.lib);
+  try {
+    await request(`/api/connections/${connectionId}`, {
+      method: "PUT",
+      body: JSON.stringify({ config }),
+    });
+    await refreshLibraryConnections();
+    renderLibraryTabs();
+    renderKindLibraries(connection.kind);
+  } catch (error) {
+    setCardStatus(list, { ok: false, detail: error.message });
+  }
+}
+
+// The toggles and the Sync button live on the library pages.
+document.getElementById("tab-library").addEventListener("change", (event) => {
+  const toggle = event.target.closest(".lib-toggle");
+  if (toggle) toggleLibrary(Number(toggle.dataset.conn), toggle.dataset.lib, toggle.checked, document.getElementById("tab-library"));
+});
+document.getElementById("tab-library").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-lib-sync]");
+  if (!button) return;
+  const connection = libraryConnections.find((row) => row.id === Number(button.dataset.libSync));
+  if (!connection) return;
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = "Syncing…";
+  try {
+    const report = await syncConnection(connection);
+    const note = document.createElement("p");
+    note.className = "hint" + (report.errors === 0 ? "" : " bad");
+    note.textContent =
+      `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`;
+    button.parentElement.appendChild(note);
+  } catch (error) {
+    const note = document.createElement("p");
+    note.className = "hint bad";
+    note.textContent = error.message || "Sync failed.";
+    button.parentElement.appendChild(note);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+});
 
 async function syncConnection(connection) {
   const route = LIBRARY_ROUTES[connection.kind];
@@ -1785,7 +1944,15 @@ async function syncConnection(connection) {
   const config = connection.config || {};
   const apiKey = config.api_key || "";
   const connectionBody = { connection: config, api_key: apiKey };
-  const libraries = (await request(route.base + "/libraries", { method: "POST", body: JSON.stringify(connectionBody) })).libraries || [];
+  // Sync only the toggled-on libraries. With no stored selection every library
+// is included; an empty stored selection means the operator turned them all
+// off, so nothing syncs.
+  const all = (await request(route.base + "/libraries", { method: "POST", body: JSON.stringify(connectionBody) })).libraries || [];
+  const hasSelection = Array.isArray(config.enabled_libraries);
+  const preferred = new Set(hasSelection ? config.enabled_libraries : []);
+  const libraries = hasSelection
+    ? all.filter((library) => preferred.has(library.remote_id))
+    : all;
   let imageRoot = "config/Images";
   try {
     const about = await request("/api/about");
@@ -1858,6 +2025,7 @@ async function saveConnection(event) {
     openConnectionForm(null);
     $("ms-result").textContent = "Saved.";
     await refreshLibraryConnections();
+    renderLibraryTabs();
     renderCurrentLibraryPage();
   } catch (error) {
     $("ms-result").textContent = error.message;
@@ -2273,7 +2441,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "35";
+const UI_BUILD = "37";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

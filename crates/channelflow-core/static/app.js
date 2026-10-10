@@ -111,6 +111,13 @@ async function request(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
+  // A 401 means the session is gone. Rather than leaving whatever page was
+  // open looking empty, go back through boot() to the login screen. The auth
+  // endpoints themselves are public, so this cannot loop.
+  if (response.status === 401) {
+    location.reload();
+    throw new Error("your session ended — log in again");
+  }
   if (response.status === 204) return null;
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -1541,6 +1548,7 @@ async function loadLibrary() {
   await refreshLibraryConnections();
   renderLibraryTabs();
   showLibraryPage(libraryPage);
+  updateLibraryEmptyState();
 }
 
 async function refreshLibraryConnections() {
@@ -1566,7 +1574,20 @@ function populateConnectionKinds() {
     option.textContent = source.display_name;
     select.appendChild(option);
   });
-  select.disabled = false;
+  // Disabled while no media-source plugin is installed — there is nothing to
+  // pick, and the note under the form says what to do.
+  select.disabled = librarySources.length === 0;
+}
+
+function updateLibraryEmptyState() {
+  const note = $("ms-result");
+  if (!note) return;
+  if (librarySources.length === 0) {
+    note.textContent =
+      "No media-source plugins are installed. Install one — for example the Jellyfin Media Source — from the Plugins page, then reload.";
+  } else if (note.textContent.startsWith("No media-source plugins")) {
+    note.textContent = "";
+  }
 }
 
 function renderLibraryTabs() {
@@ -2242,7 +2263,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "33";
+const UI_BUILD = "34";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

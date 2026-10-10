@@ -383,7 +383,17 @@ function renderMediaDetail(detail, item, enriched) {
   }
 
   const sources = item.sources || [];
-  const playable = sources.filter((source) => source.web_url);
+  // One play link per source kind — a catalog item can have many source rows
+  // for the same server (duplicate library scans), and each pointed at the
+  // web UI, which meant a wall of identical ▶ Play buttons.
+  const seenKinds = new Set();
+  const playable = sources.filter((source) => {
+    if (!source.web_url || !source.source_kind || seenKinds.has(source.source_kind)) {
+      return false;
+    }
+    seenKinds.add(source.source_kind);
+    return true;
+  });
   const actions = playable.length
     ? `<div class="media-detail-actions">` +
       playable

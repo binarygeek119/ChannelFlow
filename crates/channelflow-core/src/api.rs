@@ -67,6 +67,7 @@ pub fn router(
         .route("/app.css", get(css))
         .route("/app.js", get(js))
         .route("/pages/{*path}", get(page_asset))
+        .route("/plugin/{id}/web/{*path}", get(plugin_web_asset))
         .route("/logos/{name}", get(logo_badge))
         .route("/logo.png", get(logo))
         .route("/favicon.ico", get(favicon))
@@ -180,6 +181,7 @@ fn is_static_asset(path: &str) -> bool {
             | "/apple-touch-icon.png"
     ) || path.starts_with("/live/")
         || path.starts_with("/logos/")
+        || path.starts_with("/plugin/")
 }
 
 fn redirect_to(path: &str) -> Response {
@@ -1689,6 +1691,50 @@ async fn page_asset(State(state): State<AppState>, Path(path): Path<String>) -> 
             .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// Serve a web file a plugin publishes from its own folder. The plugin handed
+/// the file to its `PluginWeb` during `on_load`; the manager serves it here at
+/// `/plugin/{id}/web/{path}`. Only the exact files the plugin published are
+/// reachable, so `..`-style traversal has nothing to climb.
+async fn plugin_web_asset(
+    State(state): State<AppState>,
+    Path((id, path)): Path<(String, String)>,
+) -> Response {
+    let path = sanitize_plugin_web_path(&path);
+    let asset = match path {
+        Some(path) => state.plugins.lock().await.web_asset(&id, &path),
+        None => None,
+    };
+    match asset {
+        Some(asset) => (
+            [
+                (header::CONTENT_TYPE, asset.mime.as_str()),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            axum::body::Bytes::from(asset.bytes),
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Rebuild a plugin web path from its normal components only, so `.`-parent
+/// components and Windows prefixes are dropped rather than followed.
+fn sanitize_plugin_web_path(raw: &str) -> Option<String> {
+    use std::path::Component;
+    let mut safe = std::path::PathBuf::new();
+    for part in std::path::Path::new(raw).components() {
+        match part {
+            Component::Normal(segment) => safe.push(segment),
+            _ => return None,
+        }
+    }
+    let safe = safe.to_string_lossy().replace('\\', "/");
+    if safe.starts_with('/') || safe.contains("../") {
+        return None;
+    }
+    Some(safe)
 }
 
 /// Serve one media-source logo from `<config>/webui/logos` (the badge images

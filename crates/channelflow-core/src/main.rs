@@ -160,6 +160,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&ai_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&ai_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(ai_plugin, ai_api)
@@ -179,6 +180,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&ersatztv_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&ersatztv_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(ersatztv_plugin, ersatztv_api)
@@ -198,6 +200,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&jellyfin_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&jellyfin_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(jellyfin_plugin, jellyfin_api)
@@ -217,6 +220,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&offair_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&offair_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(offair_plugin, offair_api)
@@ -236,6 +240,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&commercialbrainz_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&commercialbrainz_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(commercialbrainz_plugin, commercialbrainz_api)
@@ -255,6 +260,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&emergency_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&emergency_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(emergency_plugin, emergency_api)
@@ -274,6 +280,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&weather_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&weather_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(weather_plugin, weather_api)
@@ -293,6 +300,7 @@ async fn main() -> Result<()> {
         logger: PluginLogger::new(&news_manifest.id),
         core: Arc::new(store.core_data()),
         database: store.plugin_database(&news_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
     };
     manager
         .add(news_plugin, news_api)

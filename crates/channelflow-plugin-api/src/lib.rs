@@ -21,6 +21,7 @@ pub mod plugin;
 pub mod storage;
 pub mod ui;
 pub mod version;
+pub mod web;
 
 pub use core::{CoreChannel, CoreData, CoreDataError, InMemoryCoreData, NoCoreData};
 pub use database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
@@ -36,3 +37,4 @@ pub use plugin::{
 pub use storage::{PluginStorage, PluginStorageError};
 pub use ui::{UiContribution, UiContributionSection};
 pub use version::compatible;
+pub use web::{PluginWeb, WebAsset};

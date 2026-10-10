@@ -15,11 +15,12 @@ use crate::database::PluginDatabase;
 use crate::manifest::PluginManifest;
 use crate::storage::PluginStorage;
 use crate::ui::UiContribution;
+use crate::web::PluginWeb;
 
 /// Plugin ABI version. The core refuses to load a plugin built against a
 /// different one, so breaking changes to this contract cannot silently break
 /// running plugins.
-pub const PLUGIN_ABI_VERSION: u32 = 1;
+pub const PLUGIN_ABI_VERSION: u32 = 2;
 
 /// Something a plugin did that the base should surface (and, at load time,
 /// refuse to run the plugin over).
@@ -92,6 +93,9 @@ pub struct PluginApi {
     pub core: Arc<dyn CoreData>,
     /// The plugin's own Postgres tables (only useful with `storage:database`).
     pub database: Arc<dyn PluginDatabase>,
+    /// Where the plugin publishes the web files it ships (served by the core
+    /// at `/plugin/{id}/web/{path}`). Register in `on_load`.
+    pub web: PluginWeb,
 }
 
 impl std::fmt::Debug for PluginApi {

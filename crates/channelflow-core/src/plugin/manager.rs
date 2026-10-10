@@ -8,7 +8,7 @@
 
 use axum::Router;
 use channelflow_plugin_api::manifest::PluginManifest;
-use channelflow_plugin_api::{Plugin, PluginApi, PluginError};
+use channelflow_plugin_api::{Plugin, PluginApi, PluginError, PluginWeb, WebAsset};
 
 /// One loaded plugin plus the state around its lifecycle.
 pub struct ManagedPlugin {
@@ -17,6 +17,9 @@ pub struct ManagedPlugin {
     /// Whether the plugin's version range covers this base. An incompatible
     /// plugin is listed (so it can be seen and updated) but can never run.
     pub compatible: bool,
+    /// The web files the plugin published during `on_load`; the core serves
+    /// them at `/plugin/{id}/web/{path}`.
+    pub web: PluginWeb,
 }
 
 impl ManagedPlugin {
@@ -78,6 +81,9 @@ impl PluginManager {
     /// ready to be enabled. Incompatibility is recorded, not fatal here — the
     /// plugin shows up in the catalog with `compatible: false`.
     pub async fn add(&mut self, mut plugin: Box<dyn Plugin>, api: PluginApi) -> Result<(), String> {
+        // The plugin fills `web` during on_load; the manager keeps the handle
+        // so it can serve what the plugin published.
+        let web = api.web.clone();
         let compatible = plugin.metadata().compatible_with(&self.base_version);
         plugin
             .on_load(api)
@@ -87,6 +93,7 @@ impl PluginManager {
             plugin,
             enabled: false,
             compatible,
+            web,
         });
         self.plugins.sort_by(|a, b| a.id().cmp(b.id()));
         Ok(())
@@ -142,6 +149,14 @@ impl PluginManager {
             .collect()
     }
 
+    /// A web file a plugin published, keyed by plugin id and path.
+    pub fn web_asset(&self, id: &str, path: &str) -> Option<WebAsset> {
+        self.plugins
+            .iter()
+            .find(|plugin| plugin.id() == id)
+            .and_then(|plugin| plugin.web.asset(path))
+    }
+
     fn find_mut(&mut self, id: &str) -> Option<&mut ManagedPlugin> {
         self.plugins.iter_mut().find(|plugin| plugin.id() == id)
     }
@@ -164,6 +179,7 @@ mod tests {
             logger: PluginLogger::new(id),
             core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
             database: std::sync::Arc::new(channelflow_plugin_api::database::NoPluginDatabase::default()),
+            web: PluginWeb::new(),
         }
     }
 

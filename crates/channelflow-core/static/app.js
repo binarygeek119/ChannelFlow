@@ -65,11 +65,9 @@ const MENU = {
   presets: ["Presets", "Reusable scheduling rules you can drop onto any channel."],
   list: ["Lists", "Named lists of items you can reuse across channels and presets."],
   special: ["Special Presentation", "One-off scheduled events that override the normal lineup."],
-  jellyfin: ["Library", "What we've picked up from your Jellyfin or Emby server."],
   media: ["Media", "The movies, shows, albums and videos synced into ChannelFlow's own catalog."],
   commercials: ["Commercials", "Breaks, avails, and where they're allowed to land."],
   youtube: ["YouTube", "Videos pulled in from YouTube for use in breaks or blocks."],
-  transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
   plugins: ["Plugins", "Loaded plugins and what each is allowed to do."],
   about: ["About", "Version, build, and where this install keeps its data."],
@@ -82,9 +80,7 @@ const PANEL_FOR = {
   channels: "tab-channels",
   about: "tab-about",
   credits: "tab-credits",
-  jellyfin: "tab-library",
   media: "tab-media",
-  transcode: "tab-transcode",
   livetv: "tab-live-tv",
   plugins: "tab-plugins",
   tasks: "tab-tasks",
@@ -107,6 +103,11 @@ const PLUGIN_PANELS = {
 // current set instead of duplicating them.
 const pluginPageKeys = new Set();
 
+// Which plugin provides each plugin-declared page key. The shell loads that
+// page's html/css/js from the plugin's own web root (`/plugin/{id}/web`),
+// never from <config>/webui.
+const pluginPageOwner = {};
+
 // Plugin-declared pages add their own drawer entries. The catalog only lists
 // installed plugins, so an AI plugin that is not installed leaves no AI tab —
 // exactly the same rule that governs the connection types.
@@ -117,6 +118,7 @@ async function loadPluginPages() {
   pluginPageKeys.forEach((key) => {
     delete MENU[key];
     delete PANEL_FOR[key];
+    delete pluginPageOwner[key];
   });
   pluginPageKeys.clear();
   let plugins;
@@ -137,6 +139,8 @@ async function loadPluginPages() {
       MENU[key] = [contribution.title || key, plugin.description || ""];
       PANEL_FOR[key] = PLUGIN_PANELS[contribution.component] || "tab-placeholder";
       pluginPageKeys.add(key);
+      // This page's files live with the plugin that contributed it.
+      pluginPageOwner[key] = plugin.id;
       const link = document.createElement("a");
       link.className = "nav-item";
       link.dataset.pluginPage = "1";
@@ -191,7 +195,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "64";
+const UI_BUILD = "65";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -205,19 +209,23 @@ window.CF = CF;
 const loadedPageScripts = new Set();
 
 async function loadPageAsset(key) {
+  // A plugin-declared page hosts its files in the plugin's own folder
+  // (/plugin/{pluginId}/web); base pages come from <config>/webui (/pages).
+  const owner = pluginPageOwner[key];
+  const base = owner ? `/plugin/${owner}/web` : "/pages";
   // CSS is a stylesheet, safe to link before the markup arrives.
   const linkId = "page-stylesheet-" + key;
   if (!$(`page-stylesheet-${key}`)) {
     const link = document.createElement("link");
     link.id = linkId;
     link.rel = "stylesheet";
-    link.href = `/pages/${key}.css?v=${UI_BUILD}`;
+    link.href = `${base}/${key}.css?v=${UI_BUILD}`;
     document.head.appendChild(link);
   }
   const sectionId = PAGE_SECTION[key] || `tab-${key}`;
   let section = $(sectionId);
   if (!section) {
-    const html = await (await fetch(`/pages/${key}.html?v=${UI_BUILD}`, { cache: "no-store" })).text();
+    const html = await (await fetch(`${base}/${key}.html?v=${UI_BUILD}`, { cache: "no-store" })).text();
     section = document.createElement("section");
     section.id = sectionId;
     section.className = "tab-panel";
@@ -231,10 +239,10 @@ async function loadPageAsset(key) {
     loadedPageScripts.add(key);
     await new Promise((resolve) => {
       const script = document.createElement("script");
-      script.src = `/pages/${key}.js?v=${UI_BUILD}`;
+      script.src = `${base}/${key}.js?v=${UI_BUILD}`;
       script.onload = resolve;
       script.onerror = () => {
-        console.warn(`could not load /pages/${key}.js`);
+        console.warn(`could not load ${base}/${key}.js`);
         resolve();
       };
       document.head.appendChild(script);

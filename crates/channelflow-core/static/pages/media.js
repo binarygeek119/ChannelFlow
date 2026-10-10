@@ -6,7 +6,7 @@
 const MEDIA_TABS = [
   { key: "movies", label: "Movies", kinds: ["movie"], shape: "portrait" },
   { key: "tvshows", label: "TV Shows", kinds: ["series"], shape: "portrait" },
-  { key: "music", label: "Music", kinds: ["album", "artist"], shape: "square" },
+  { key: "music", label: "Music", kinds: ["album", "artist"], shape: "portrait" },
   { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"], shape: "portrait" },
 ];
 const MEDIA_SOURCE_LABELS = {

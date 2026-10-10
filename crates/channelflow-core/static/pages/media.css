@@ -1,7 +1,6 @@
-/* Media page: a Jellyfin-style library view. Each source library is a section
-   with a header and a responsive grid of poster cards (portrait 2:3 posters for
-   movies / shows / music videos, square art for music), matching jellyfin-web's
-   cardbuilder card.scss. */
+/* Media page: a Jellyfin-style library view. Every card is the same portrait
+   size on every kind tab; artwork is scaled to fit that frame (contain, never
+   cropped), so album and artist art match the movie and show posters. */
 
 .jf-library { margin: 0 0 2.2rem; }
 
@@ -80,7 +79,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-size: cover;
+    /* contain keeps every image scaled to match the uniform card instead of
+       cropping square art against a portrait frame */
+    background-size: contain;
     background-repeat: no-repeat;
     background-position: center;
     border-radius: 0.2em;

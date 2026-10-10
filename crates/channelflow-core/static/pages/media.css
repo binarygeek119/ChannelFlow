@@ -33,8 +33,11 @@
     flex-wrap: wrap;
 }
 
-/* Card boxes are grid cells: even poster columns, Jellyfin's ~0.6em gutter. */
-.jf-library .itemsContainer {
+/* Card boxes are grid cells: even poster columns, Jellyfin's ~0.6em gutter.
+   The Media page's own grid lives under .media-list; the .jf-library scope is
+   for any embedded library view. Both get the same even columns. */
+.jf-library .itemsContainer,
+.media-list .itemsContainer {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 1.1rem 0.7rem;
@@ -79,9 +82,9 @@
     left: 0;
     right: 0;
     bottom: 0;
-    /* contain keeps every image scaled to match the uniform card instead of
-       cropping square art against a portrait frame */
-    background-size: contain;
+    /* cover fills the (uniform) card frame exactly, so every card shows its
+       artwork at the same size instead of letterboxing shorter art smaller */
+    background-size: cover;
     background-repeat: no-repeat;
     background-position: center;
     border-radius: 0.2em;

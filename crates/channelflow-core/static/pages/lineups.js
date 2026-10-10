@@ -1,0 +1,1 @@
+CF.define("lineups", {});

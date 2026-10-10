@@ -1,0 +1,4 @@
+
+.credits-list { margin: 0.5rem 0 0; padding-left: 1.15rem; }
+.credits-list li { margin: 0.4rem 0; line-height: 1.45; }
+.credits-list a { color: var(--accent-hover); }

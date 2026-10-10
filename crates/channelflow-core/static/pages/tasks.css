@@ -1,0 +1,7 @@
+/* Tasks page */
+.field-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.jf-mode { margin: 0.35rem 0; }
+.task-runs { margin-top: 1rem; }
+.task-runs h4 { margin: 0 0 0.4rem; font-size: 0.9rem; }
+.task-run { display: flex; gap: 0.6rem; flex-wrap: wrap; font-size: 0.82rem; color: var(--muted); padding: 0.35rem 0; border-top: 1px solid var(--border); }
+.task-run-trigger { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.7rem; }

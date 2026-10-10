@@ -1,0 +1,41 @@
+<div class="panel">
+          <div class="panel-head">
+            <h2>Weather</h2>
+          </div>
+          <p class="hint">
+            Weather channels render a WeatherStar loop. Choose the look, the weather source, the default
+            location, the units, and which screens play in the loop. The test resolves the location and reports
+            the current forecast.
+          </p>
+          <form id="weather-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label" for="wx-variant">WeatherStar look</label>
+              <select id="wx-variant"></select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="wx-source">Weather source</label>
+              <select id="wx-source"></select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="wx-location">Location</label>
+              <input id="wx-location" type="text" placeholder="ZIP, city, or lat,lon">
+            </div>
+            <div class="field">
+              <label class="field-label" for="wx-units">Units</label>
+              <select id="wx-units"></select>
+            </div>
+            <div class="field">
+              <span class="field-label">Screens</span>
+              <div id="wx-screens"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="wx-wide169"><input id="wx-wide169" type="checkbox" checked> Use the wide layout for 16:9 weather channels</label>
+            </div>
+            <div class="ms-form-actions">
+              <button type="button" class="ghost" id="wx-test">Test weather source</button>
+              <button type="submit" class="primary" id="wx-save">Save</button>
+            </div>
+            <p class="field-note" id="wx-result"></p>
+          </form>
+        </div>
+      </section>

@@ -1,0 +1,39 @@
+<div class="panel">
+          <div class="panel-head">
+            <h2>Off Air</h2>
+            <span class="count" id="ebs-count"></span>
+          </div>
+          <p class="hint">
+            Off Air plays when a channel has no scheduled media, when playback fails, or when a weather
+            capture errors. Choose the video and the audio independently — color bars with a beep, or a slate
+            with background music.
+          </p>
+          <form id="ebs-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label" for="ebs-display-mode">Off-air video</label>
+              <select id="ebs-display-mode"></select>
+            </div>
+            <div class="field" id="ebs-slate-field">
+              <label class="field-label" for="ebs-slate-variant">Slate style</label>
+              <select id="ebs-slate-variant"></select>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ebs-audio-mode">Off-air audio</label>
+              <select id="ebs-audio-mode"></select>
+            </div>
+            <div class="field" id="ebs-music-source-field">
+              <label class="field-label" for="ebs-music-source">Music source</label>
+              <select id="ebs-music-source"></select>
+            </div>
+            <div class="field" id="ebs-music-library-field">
+              <label class="field-label" for="ebs-music-library">Music library</label>
+              <input id="ebs-music-library" type="text" placeholder="e.g. Chill">
+            </div>
+            <div class="ms-form-actions">
+              <button type="submit" class="primary" id="ebs-save">Save</button>
+            </div>
+            <p class="field-note" id="ebs-result"></p>
+          </form>
+          <p class="hint">Playout is not built yet, so these settings are stored for when it lands.</p>
+        </div>
+      </section>

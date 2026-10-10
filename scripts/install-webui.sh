@@ -16,6 +16,8 @@ if [ ! -d "$SRC" ]; then
 fi
 
 mkdir -p "$CONFIG/webui"
-cp -f "$SRC"/* "$CONFIG/webui/"
+# The UI is a shell (index.html/app.css/app.js) plus per-page folders; copy the
+# whole tree so `pages/<name>.{html,css,js}` land beside the shell.
+cp -rf "$SRC"/. "$CONFIG/webui/"
 echo "web UI installed into $CONFIG/webui/"
-ls -1 "$CONFIG/webui"
+find "$CONFIG/webui" -type f | sed "s#^$CONFIG/webui/##" | sort

@@ -1,0 +1,63 @@
+<div class="card section-card">
+          <h2>Plugins</h2>
+          <p class="hint">
+            Features that used to be built into ChannelFlow now live in plugins. <strong>Installed</strong>
+            shows what this instance runs — update or remove them here. <strong>Store</strong> lists what the
+            <a href="https://github.com/binarygeek119/ChannelFlow-Plugins" target="_blank" rel="noopener">ChannelFlow-Plugins</a>
+            repository offers.
+          </p>
+          <nav class="inner-tabs" id="plugins-tabs" role="tablist" aria-label="Plugins">
+            <button type="button" class="inner-tab active" data-plugins-tab="installed" role="tab" aria-selected="true">Installed</button>
+            <button type="button" class="inner-tab" data-plugins-tab="store" role="tab" aria-selected="false">Store</button>
+          </nav>
+
+          <div id="plugins-installed">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plugin</th>
+                  <th>Category</th>
+                  <th>Version</th>
+                  <th>Permissions</th>
+                  <th>Health</th>
+                  <th class="actions"></th>
+                </tr>
+              </thead>
+              <tbody id="plugins-rows"></tbody>
+            </table>
+            <p class="empty" id="plugins-empty" hidden>No plugins installed — open the Store tab to add one.</p>
+          </div>
+
+          <div id="plugins-store" hidden>
+            <p class="hint" id="plugins-store-note"></p>
+            <div class="plugin-grid" id="plugins-store-grid"></div>
+            <p class="empty" id="plugins-store-empty" hidden></p>
+          </div>
+        </div>
+
+        <dialog id="plugin-remove" class="settings-dialog">
+          <h3>Remove plugin</h3>
+          <p id="plugin-remove-name" class="plugin-remove-name"></p>
+          <p class="hint">
+            Take the plugin out of ChannelFlow. You can also choose what happens to the data it stored —
+            its database tables and saved settings.
+          </p>
+          <ul class="credits-list">
+            <li>
+              <strong>Drop data</strong> — deletes the plugin's tables and its saved settings. Any
+              information the plugin kept — transcoding overrides, change history, API keys — is
+              <em>permanently lost</em>, and reinstalling starts from scratch.
+            </li>
+            <li>
+              <strong>Keep data</strong> — leaves the tables and settings in the database. They simply
+              sit unused; reinstalling the plugin picks up where you left off.
+            </li>
+          </ul>
+          <div class="actions">
+            <button type="button" id="plugin-remove-drop" class="primary">Remove and drop data</button>
+            <button type="button" id="plugin-remove-keep" class="ghost">Remove and keep data</button>
+            <button type="button" id="plugin-remove-cancel" class="ghost">Cancel</button>
+          </div>
+          <p class="hint" id="plugin-remove-note"></p>
+        </dialog>
+      </section>

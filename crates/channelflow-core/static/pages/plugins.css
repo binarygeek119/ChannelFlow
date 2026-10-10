@@ -1,0 +1,45 @@
+
+/* --- Plugin store --- */
+
+.plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+.plugin-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--page-bg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.plugin-banner {
+    width: 100%;
+    height: 96px;
+    object-fit: cover;
+    display: block;
+    background: var(--card-bg);
+}
+.plugin-banner-empty {
+    background: linear-gradient(135deg, var(--card-bg), var(--drawer-bg));
+}
+.plugin-card-body { padding: 0.7rem 0.85rem 0.85rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.plugin-card-body h4 { margin: 0; font-size: 1rem; }
+.plugin-card-meta { margin: 0; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.plugin-card-actions { margin-top: 0.5rem; }
+.plugin-perms { margin: 0; font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+.plugin-perms code, td.perms code {
+    display: inline-block;
+    margin: 0 0.15rem 0.15rem 0;
+    padding: 0.05rem 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    color: var(--text);
+}
+.plugin-perms-unknown { font-style: italic; }
+td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; }
+
+.plugin-remove-name { font-weight: 600; margin: 0.2rem 0 0.6rem; }

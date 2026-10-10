@@ -1,0 +1,71 @@
+<div class="card section-card">
+          <h2>AI</h2>
+          <p class="hint">
+            ChannelFlow can talk to more than one OpenAI-compatible endpoint. Each provider is a tab
+            below; the app tries them in priority order — lowest number first — and moves on to the
+            next when one cannot be reached. <strong>New provider</strong> adds another.
+          </p>
+          <nav class="inner-tabs" id="ai-tabs" role="tablist" aria-label="AI providers"></nav>
+          <form class="settings-group" onsubmit="return false">
+            <div class="field">
+              <label class="field-label" for="ai-name">Name</label>
+              <input id="ai-name" type="text" autocomplete="off" spellcheck="false" placeholder="OpenAI">
+              <small class="field-hint">The tab's title. Must not repeat another provider's.</small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-priority">Priority</label>
+              <input id="ai-priority" type="number" min="0" step="1" inputmode="numeric">
+              <small class="field-hint">Lowest number is tried first. Must not repeat another provider's.</small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-base-url">API URL</label>
+              <input id="ai-base-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1">
+              <small class="field-hint">The API root, ending in <code>/v1</code>. Point it at any OpenAI-compatible server.</small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-api-key">API key</label>
+              <span class="key-row">
+                <input id="ai-api-key" type="password" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-…">
+                <button type="button" id="ai-key-reveal" class="ghost">Show</button>
+                <button type="button" id="ai-key-clear" class="ghost" hidden>Remove</button>
+              </span>
+              <small class="field-hint" id="ai-key-hint"></small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-chat-model">Chat model</label>
+              <input id="ai-chat-model" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini">
+              <small class="field-hint">The chat engine, for the lineup and guide text generation that arrives with playout.</small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-tts-model">TTS model</label>
+              <input id="ai-tts-model" type="text" autocomplete="off" spellcheck="false" placeholder="tts-1">
+              <small class="field-hint">The speech engine to ask for.</small>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ai-voice">Voice</label>
+              <input id="ai-voice" type="text" autocomplete="off" spellcheck="false" placeholder="nova">
+              <small class="field-hint">The voice id to speak with.</small>
+            </div>
+          </form>
+          <div class="actions">
+            <button type="button" id="ai-save" class="primary">Add provider</button>
+            <button type="button" id="ai-test" class="ghost">Test AI</button>
+            <button type="button" id="ai-delete" class="ghost danger" hidden>Delete provider</button>
+          </div>
+          <p class="hint" id="ai-note"></p>
+          <div id="ai-test-result" class="test-result" hidden></div>
+        </div>
+
+        <div class="card section-card">
+          <h3>Failover order</h3>
+          <p class="hint">
+            Providers are tried in this order. The first that answers is the one the app uses; the
+            rest are only contacted when the ones above them cannot be reached.
+          </p>
+          <ol class="failover-list" id="ai-failover"></ol>
+          <div class="actions">
+            <button type="button" id="ai-test-all" class="ghost">Test failover</button>
+          </div>
+          <div id="ai-failover-result" class="test-result" hidden></div>
+        </div>
+      </section>

@@ -1,0 +1,21 @@
+
+.about-hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.35rem; }
+.about-hero img { width: 220px; height: auto; max-width: 100%; border-radius: 0; object-fit: contain; background: transparent; }
+.about-hero h2 { margin: 0 0 0.25rem; }
+.about-dl { display: grid; margin: 0.75rem 0 0; }
+.about-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+    gap: 0.35rem 1rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.about-row dt { color: var(--muted); font-size: 0.85rem; }
+.about-row dd { margin: 0; font-size: 0.92rem; word-break: break-word; }
+.about-row a { color: var(--accent-hover); }
+
+@media (max-width: 840px) {
+    .about-hero { flex-direction: column; align-items: flex-start; }
+    .about-hero img { width: auto; max-width: 180px; }
+    .about-row { grid-template-columns: 1fr; gap: 0.15rem; }
+}

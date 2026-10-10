@@ -1,0 +1,83 @@
+/* --- Live TV --- */
+
+.live-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 0.75rem;
+}
+.live-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    min-width: 0;
+    padding: 0.85rem;
+    background: var(--drawer-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.live-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+.live-card-head h3 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.live-num {
+    flex: 0 0 auto;
+    min-width: 1.9rem;
+    padding: 0.15rem 0.4rem;
+    text-align: center;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.live-url {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+.live-url code {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.4rem 0.55rem;
+    background: var(--page-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.live-url button {
+    flex: 0 0 auto;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+.live-links { display: grid; gap: 0.75rem; }
+.live-link {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: var(--drawer-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.live-link-text { display: flex; flex-direction: column; gap: 0.1rem; }
+.live-link-label { font-size: 0.85rem; font-weight: 700; }
+

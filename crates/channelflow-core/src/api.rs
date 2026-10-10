@@ -66,6 +66,7 @@ pub fn router(
         .route("/first-time", get(index))
         .route("/app.css", get(css))
         .route("/app.js", get(js))
+        .route("/pages/{*path}", get(page_asset))
         .route("/logo.png", get(logo))
         .route("/favicon.ico", get(favicon))
         .route("/favicon-32x32.png", get(favicon_32))
@@ -1502,6 +1503,34 @@ async fn css(State(state): State<AppState>) -> Response {
 
 async fn js(State(state): State<AppState>) -> Response {
     webui_file(&state, "text/javascript; charset=utf-8", "app.js")
+}
+
+/// Serve one per-page asset (`pages/<name>.<ext>`) from `<config>/webui`. The
+/// wildcard path is confined to the `pages/` directory, so a page can ship its
+/// own JS, CSS, HTML or images without exposing the rest of the config tree.
+async fn page_asset(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    let content_type = match path.rsplit('.').next() {
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => "application/octet-stream",
+    };
+    match crate::webui::read_nested(&state.store.config_dir(), &format!("pages/{path}")) {
+        Ok(body) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            axum::body::Bytes::from(body),
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// Serve one web-ui asset from `<config>/webui`. The bytes may change when the

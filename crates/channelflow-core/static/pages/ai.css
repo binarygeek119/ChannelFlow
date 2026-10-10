@@ -1,0 +1,45 @@
+
+/* An input with a button beside it — the API key's Show/Hide and Remove. */
+.key-row { display: flex; gap: 0.45rem; align-items: stretch; }
+.key-row input { flex: 1 1 auto; min-width: 0; }
+.key-row button { font-size: 0.8rem; padding: 0 0.7rem; white-space: nowrap; }
+
+
+/* --- AI connection test --- */
+
+.test-result {
+    margin-top: 0.9rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--page-bg);
+}
+.test-result.ok { border-color: rgba(34, 197, 94, 0.55); }
+.test-result.bad { border-color: rgba(239, 68, 68, 0.55); }
+.test-head { margin: 0 0 0.5rem; font-size: 0.9rem; font-weight: 600; }
+.test-result.ok .test-head { color: var(--ok); }
+.test-result.bad .test-head { color: var(--danger); }
+.test-probe { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.15rem 0; }
+.test-name {
+    flex: 0 0 4.2rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+}
+.test-detail { font-size: 0.82rem; overflow-wrap: anywhere; }
+.test-detail.ok { color: var(--ok); }
+.test-detail.bad { color: var(--danger); }
+
+/* --- AI provider tabs and failover list --- */
+
+
+.failover-list {
+    margin: 0 0 0.9rem;
+    padding-left: 1.3rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+.failover-list li { padding: 0.12rem 0; }
+.failover-list li.empty { list-style: none; margin-left: -1.3rem; }

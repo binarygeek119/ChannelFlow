@@ -1,0 +1,76 @@
+<div class="panel">
+          <div class="panel-head">
+            <h2>Tasks</h2>
+          </div>
+          <p class="hint">Scheduled jobs like library scans and cache cleanup.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Library scan</h2>
+          </div>
+          <p class="hint">
+            Syncs the Jellyfin libraries you toggled on in the Library page. It runs daily on the
+            server's clock, or on the crontab you give it instead.
+          </p>
+          <form id="jellyfin-task-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label">
+                <input type="checkbox" id="jf-task-enabled" checked> Task enabled
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule</label>
+              <div class="field-row">
+                <label class="jf-mode">Daily at</label>
+                <input type="time" id="jf-task-time" value="03:00">
+              </div>
+            </div>
+            <div class="ms-form-actions">
+              <button type="submit" class="primary" id="jf-task-save">Save schedule</button>
+              <button type="button" class="ghost" id="jf-task-run">Run now</button>
+            </div>
+            <p class="hint" id="jf-task-note"></p>
+          </form>
+          <div class="task-runs" id="jf-task-runs"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Maintenance</h2>
+          </div>
+          <p class="hint">
+            One-off jobs you run yourself — these are not on a timer.
+          </p>
+          <div class="actions">
+            <button type="button" class="ghost" id="maintenance-rebuild-playouts">Rebuild All Playouts</button>
+            <button type="button" class="ghost" id="maintenance-clear-guide">Clear Guide Data</button>
+          </div>
+          <p class="hint" id="maintenance-note"></p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Catalog cleanup</h2>
+          </div>
+          <p class="hint">
+            Items removed from a media server are marked <strong>missing</strong> first. After the
+            grace period the cleanup task deletes them. Manage removals from
+            <strong>Library → Removed items</strong>.
+          </p>
+          <div class="field-row">
+            <label class="field-label" for="catalog-grace">Grace period (days)</label>
+            <input type="number" id="catalog-grace" min="0" step="1" value="14">
+            <button type="button" class="ghost" id="catalog-save-grace">Save Grace Period</button>
+          </div>
+          <div class="field-row">
+            <label class="field-label"><input type="checkbox" id="catalog-daily-enabled" checked> Run daily at</label>
+            <input type="time" id="catalog-daily-time" value="04:00">
+          </div>
+          <div class="actions">
+            <button type="button" class="ghost" id="catalog-run">Run Catalog Cleanup</button>
+            <button type="button" class="ghost" id="catalog-scan">Scan Local Files</button>
+          </div>
+          <p class="hint" id="catalog-note"></p>
+        </div>
+      </section>

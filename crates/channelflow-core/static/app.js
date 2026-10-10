@@ -22,6 +22,7 @@ const els = {
   tabAi: $("tab-ai"),
   tabEbs: $("tab-ebs"),
   tabCommercialbrainz: $("tab-commercialbrainz"),
+  tabEmergency: $("tab-emergency"),
   tabTranscode: $("tab-transcode"),
   tabLiveTv: $("tab-live-tv"),
   tabPlugins: $("tab-plugins"),
@@ -277,7 +278,6 @@ const MENU = {
   youtube: ["YouTube", "Videos pulled in from YouTube for use in breaks or blocks."],
   weather: ["Weather", "Forecasts, alerts, and the crawl that runs over programming."],
   news: ["News", "News bumps, tickers, and insert clips."],
-  emergency: ["Emergency Broadcast System", "The EBS slate, header, and attention tones."],
   transcode: ["Transcode", "How ChannelFlow asks ErsatzTV next to encode each channel."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
   plugins: ["Plugins", "Loaded plugins and what each is allowed to do."],
@@ -305,6 +305,7 @@ const PLUGIN_PANELS = {
   AiPage: "tab-ai",
   OffAirPage: "tab-ebs",
   CommercialBrainzPage: "tab-commercialbrainz",
+  EmergencyPage: "tab-emergency",
 };
 
 // The ids of plugin-declared pages added to the drawer. Tracked so a rebuild
@@ -1504,6 +1505,7 @@ function showTab(key) {
     els.tabAi,
     els.tabEbs,
     els.tabCommercialbrainz,
+    els.tabEmergency,
     els.tabTranscode,
     els.tabLiveTv,
     els.tabPlugins,
@@ -1523,6 +1525,7 @@ function showTab(key) {
   if (key === "ai") loadAi();
   if (key === "ebs") loadOffAir();
   if (key === "commercialbrainz") loadCommercialBrainz();
+  if (key === "emergency") loadEmergency();
   if (key === "transcode") loadTranscode();
   if (key === "livetv") loadLiveTv();
   if (key === "plugins") loadPlugins();
@@ -1546,6 +1549,106 @@ function tabForPath(path) {
     if (link.getAttribute("href") === path) found = link.dataset.tab;
   });
   return found;
+}
+
+// --- Emergency Broadcast System (plugin: com.channelflow.emergency) --------
+// The Emergency tab is the plugin's page contribution; the shell renders its
+// alert-overlay settings and posts them back, and can test what an active
+// alert would do.
+const EMERGENCY_API = "/api/plugins/com.channelflow.emergency";
+
+function emergencyDisplayLabel(value) {
+  const labels = {
+    off: "Off",
+    cutin: "Switch to the alerts screen every so often",
+    ticker: "Scrolling alert text at the bottom",
+  };
+  return labels[value] || String(value);
+}
+
+function syncEmergencyFields() {
+  const cutin = $("alert-display") && $("alert-display").value === "cutin";
+  const interval = $("alert-cutin-fields");
+  const duration = $("alert-cutin-duration-field");
+  if (interval) interval.hidden = !cutin;
+  if (duration) duration.hidden = !cutin;
+}
+
+function fillEmergencyDisplay(selected) {
+  const select = $("alert-display");
+  if (!select) return;
+  select.textContent = "";
+  ["off", "cutin", "ticker"].forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = emergencyDisplayLabel(value);
+    select.appendChild(option);
+  });
+  if (selected) select.value = selected;
+}
+
+function collectEmergencySettings() {
+  return {
+    alert_display: $("alert-display").value,
+    cutin_interval_minutes: Number($("alert-cutin-interval").value) || 15,
+    cutin_duration_seconds: Number($("alert-cutin-duration").value) || 20,
+  };
+}
+
+async function loadEmergency() {
+  try {
+    const data = await request(EMERGENCY_API + "/");
+    const settings = data.settings || {};
+    fillEmergencyDisplay(settings.alert_display);
+    const interval = $("alert-cutin-interval");
+    if (interval) interval.value = settings.cutin_interval_minutes;
+    const duration = $("alert-cutin-duration");
+    if (duration) duration.value = settings.cutin_duration_seconds;
+    syncEmergencyFields();
+    $("alert-result").textContent = "";
+  } catch (error) {
+    $("alert-result").textContent = error.message;
+  }
+}
+
+async function saveEmergency(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  const save = $("alert-save");
+  if (save) save.disabled = true;
+  try {
+    await request(EMERGENCY_API + "/", { method: "PUT", body: JSON.stringify(collectEmergencySettings()) });
+    if ($("alert-result")) $("alert-result").textContent = "Saved.";
+    syncEmergencyFields();
+  } catch (error) {
+    if ($("alert-result")) $("alert-result").textContent = error.message;
+  } finally {
+    if (save) save.disabled = false;
+  }
+}
+
+async function testEmergency() {
+  const test = $("alert-test");
+  if (test) test.disabled = true;
+  try {
+    // Save first so the test describes what the form holds.
+    await request(EMERGENCY_API + "/", { method: "PUT", body: JSON.stringify(collectEmergencySettings()) });
+    const data = await request(EMERGENCY_API + "/test");
+    const result = data.result || {};
+    $("alert-result").textContent = result.detail || (result.ok ? "OK" : "Off");
+  } catch (error) {
+    $("alert-result").textContent = error.message;
+  } finally {
+    if (test) test.disabled = false;
+  }
+}
+
+{
+  const form = $("alert-form");
+  if (form) form.addEventListener("submit", saveEmergency);
+  const test = $("alert-test");
+  if (test) test.addEventListener("click", testEmergency);
+  const display = $("alert-display");
+  if (display) display.addEventListener("change", syncEmergencyFields);
 }
 
 // --- CommercialBrainz (plugin: com.channelflow.commercialbrainz) -----------

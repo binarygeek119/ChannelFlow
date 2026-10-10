@@ -240,6 +240,25 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the CommercialBrainz plugin: {error}"))?;
 
+    // The Emergency Broadcast System plugin owns the weather-alert overlay
+    // settings; its page contribution draws its tab.
+    let emergency_plugin = channelflow_plugin_emergency::plugin();
+    let emergency_manifest = emergency_plugin.metadata().clone();
+    let emergency_api = PluginApi {
+        id: emergency_manifest.id.clone(),
+        storage: store.plugin_storage(&emergency_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&emergency_manifest.id),
+        logger: PluginLogger::new(&emergency_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&emergency_manifest.id).await,
+    };
+    manager
+        .add(emergency_plugin, emergency_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Emergency plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

@@ -2688,6 +2688,10 @@ async function syncConnection(connection) {
   });
 
   taskPopup.show(`Syncing ${config.name || "Jellyfin"}`);
+  // The plugin's progress slot is process-wide, so it reports a core-driven
+  // scan too; watch it until the request settles.
+  await pollSyncProgress(done);
+
   let report;
   try {
     report = await done;
@@ -2701,6 +2705,26 @@ async function syncConnection(connection) {
     report.errors === 0
   );
   return report;
+}
+
+// Poll the plugin's /progress while the sync runs and push each snapshot into
+// the popup: "Movies · 5 of 19,328", then "TV · 1,024 of 8,412", and so on.
+// Stops the moment the sync request settles (success or failure).
+async function pollSyncProgress(done) {
+  const progressUrl = LIBRARY_ROUTES.jellyfin.base + "/progress";
+  let settled = false;
+  done.finally(() => { settled = true; });
+  while (!settled) {
+    try {
+      const data = await request(progressUrl);
+      const snapshot = (data && data.progress) || {};
+      taskPopup.progress(
+        `${snapshot.label || "Library"} · ${(Number(snapshot.current) || 0).toLocaleString()}` +
+          ` of ${(Number(snapshot.total) || 0).toLocaleString()}`
+      );
+    } catch (error) { /* a transient poll failure must not kill the sync */ }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
 }
 
 // --- Media page ------------------------------------------------------------
@@ -3475,7 +3499,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "47";
+const UI_BUILD = "48";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

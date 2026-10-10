@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "61";
+const UI_BUILD = "62";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -246,6 +246,12 @@ async function loadPageAsset(key) {
 async function showTab(key) {
   const entry = MENU[key];
   if (!entry) return;
+
+  // The Media tab's default view is the Movies kind tab; a bare /webui/media
+  // URL (typed in, or a stale bookmark) gets normalized to /webui/media/movies.
+  if (key === "media" && (location.pathname === "/webui/media" || location.pathname === "/webui/media/")) {
+    history.replaceState(null, "", "/webui/media/movies");
+  }
 
   document.querySelectorAll(".drawer-nav a").forEach((link) => {
     const active = link.dataset.tab === key;

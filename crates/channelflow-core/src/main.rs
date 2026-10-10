@@ -308,6 +308,26 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the News plugin: {error}"))?;
 
+    // The Presets plugin offers the ready-made Binarygeek119 lineup; its page
+    // contribution draws the Presets tab. It only reads core channels.
+    let presets_plugin = channelflow_plugin_presets::plugin();
+    let presets_manifest = presets_plugin.metadata().clone();
+    let presets_api = PluginApi {
+        id: presets_manifest.id.clone(),
+        storage: store.plugin_storage(&presets_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&presets_manifest.id),
+        logger: PluginLogger::new(&presets_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&presets_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(presets_plugin, presets_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Presets plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

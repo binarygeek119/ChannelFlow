@@ -97,6 +97,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/connections` | add a connection for a media source; `400` if the kind is not registered |
 | `PUT` | `/api/connections/{id}` | update a connection's config |
 | `DELETE` | `/api/connections/{id}` | remove a connection; a media source's rows cascade and its orphan posters are swept |
+| `POST` | `/api/connections/{id}/test` | have the connection's media source test it (reachable, key accepted, or what failed) |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
 | `PUT` | `/api/plugins/com.channelflow.ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |

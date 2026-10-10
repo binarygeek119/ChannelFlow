@@ -323,7 +323,11 @@ async function loadPluginPages() {
   }
   const nav = document.getElementById("drawer-nav");
   if (!nav) return;
-  const fragment = document.createDocumentFragment();
+  // Collect plugin pages with the placement a plugin may declare. A page
+  // contribution can carry `order` (a number; lower sorts first, default 100)
+  // and `section` ("top"/"main" pins it into the top nav group; anything else
+  // lands just above the Transcode utility page).
+  const pageLinks = [];
   plugins.forEach((plugin) => {
     (plugin.ui_contributions || []).forEach((contribution) => {
       if (!contribution || contribution.type !== "page") return;
@@ -352,16 +356,27 @@ async function loadPluginPages() {
         history.pushState(null, "", contribution.path || `/webui/${key}`);
         showTab(key);
       });
-      fragment.appendChild(link);
+      pageLinks.push({
+        link,
+        title: label.textContent,
+        order: Number(contribution.order) || 100,
+        top: contribution.section === "top" || contribution.section === "main",
+      });
     });
   });
-  // Plugin pages sit just above the Transcode tool page; the AI tab is a
-  // plugin page, so it appears above Transcode and only while installed.
-  const transcodeAnchor = nav.querySelector('[data-tab="transcode"]');
-  if (transcodeAnchor && fragment.childNodes.length) {
-    nav.insertBefore(fragment, transcodeAnchor);
-  } else {
-    nav.appendChild(fragment);
+  // Stable sort: declared order first, then the label.
+  pageLinks.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+  // Pinned-to-top pages go into the first nav group, in order; the rest sit
+  // just above the Transcode utility page, also in order.
+  const firstGap = nav.querySelector(".drawer-nav-gap");
+  for (const entry of pageLinks) {
+    if (entry.top && firstGap) {
+      nav.insertBefore(entry.link, firstGap);
+    } else {
+      const transcodeAnchor = nav.querySelector('[data-tab="transcode"]');
+      if (transcodeAnchor) nav.insertBefore(entry.link, transcodeAnchor);
+      else nav.appendChild(entry.link);
+    }
   }
   // Plugin pages load asynchronously; a deep link to one can only be resolved
   // once its drawer entry exists.
@@ -2227,7 +2242,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "32";
+const UI_BUILD = "33";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

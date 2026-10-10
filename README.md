@@ -119,6 +119,8 @@ The **Plugins** page has two tabs. **Installed** lists what the instance runs: t
 
 Installing a plugin that is part of this build simply enables it. Installing one that is not downloads the zip for the host's platform, verifies its sha256 against the manifest, extracts it, and stages it under `<config>/plugins/.installed/` — it starts once dynamic loading lands. Either way it leaves the Store and appears under Installed.
 
+**Plugin pages and where they land in the nav.** A plugin's `plugin.json` can contribute a drawer tab with a `page` entry in `ui_contributions` — `{ "type": "page", "id": "ai", "title": "AI", "path": "/ai", "component": "AiPage" }`. Two optional fields place it: `"section": "top"` (or `"main"`) puts the tab in the top navigation group, anything else leaves it just above the Transcode utility page; and `"order"` (a number; lower first, default `100`) sorts multiple plugin tabs within their group. The tab only exists while the plugin is installed, and install/remove rebuilds the nav immediately.
+
 Removing asks first, because it can be destructive: **drop data** erases the plugin's rows and the tables it created (its key/value storage and every `cf_{plugin}_*` table), so any settings or history it kept are permanently gone; **keep data** leaves them in the database for a reinstall to pick up. The plugin's own storage and tables are otherwise untouched.
 
 ### AI settings

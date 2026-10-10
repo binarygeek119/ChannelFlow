@@ -21,6 +21,7 @@ use crate::media::MediaSources;
 use crate::model::{Channel, NewChannel, UpdateChannel};
 use crate::plugin::{repo, PluginManager};
 use crate::store::{Store, StoreError};
+use crate::tasks;
 
 /// Facts about the running process that only `main` can know: where the config
 /// directory is, what port is bound, and when the process started.
@@ -98,6 +99,11 @@ pub fn router(
         .route("/api/connections", get(list_connections).post(create_connection))
         .route("/api/connections/{id}", put(update_connection).delete(delete_connection))
         .route("/api/connections/{id}/test", post(test_connection))
+        .route(
+            "/api/tasks/jellyfin-sync",
+            get(jellyfin_sync_get).put(jellyfin_sync_put),
+        )
+        .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
         .route("/live/{asset}", get(live_pending))
         .fallback(spa_fallback)
         .with_state(state.clone());
@@ -211,10 +217,6 @@ async fn no_store(request: Request, next: Next) -> Response {
     }
     response
 }
-
-/// One session-create at a time, so the first burst of API calls after a page
-/// load all receive the same cookie instead of overwriting each other.
-static SESSION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     headers
@@ -1260,6 +1262,70 @@ async fn test_connection(
     })?;
     let result = source.test_connection(&config, &config.api_key).await;
     Ok(Json(json!({ "id": id, "kind": kind, "result": result })))
+}
+
+// ── tasks ──────────────────────────────────────────────────────────────────
+
+/// The Jellyfin library-scan task's configuration and recent runs.
+async fn jellyfin_sync_get(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({
+        "config": tasks::load(&state.store).await,
+        "runs": tasks::runs(&state.store).await,
+    })))
+}
+
+async fn jellyfin_sync_put(
+    State(state): State<AppState>,
+    Json(config): Json<tasks::SyncConfig>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if tasks::cron_expression(&config.schedule).is_none() {
+        let message = if config.schedule.mode == "cron" {
+            "enter a crontab expression like 0 3 * * *"
+        } else {
+            "enter a daily time like 03:00"
+        };
+        return Err(StoreError::Plugin(message.to_string()).into());
+    }
+    tasks::save(&state.store, &config).await?;
+    Ok(Json(json!({
+        "config": config,
+        "runs": tasks::runs(&state.store).await,
+    })))
+}
+
+#[derive(Deserialize)]
+struct TaskRunBody {
+    #[serde(default)]
+    connection_id: Option<i64>,
+}
+
+/// Run the library scan now. With a `connection_id` it scans that one
+/// connection (a library toggled on in the Library page) and is tagged
+/// accordingly.
+async fn jellyfin_sync_run(
+    State(state): State<AppState>,
+    Json(body): Json<TaskRunBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let trigger = if body.connection_id.is_some() {
+        "library"
+    } else {
+        "manual"
+    };
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    let run = tasks::run_sync(
+        &state.store,
+        &state.media,
+        &config_dir,
+        trigger,
+        body.connection_id,
+    )
+    .await?;
+    Ok(Json(json!({
+        "run": run,
+        "runs": tasks::runs(&state.store).await,
+    })))
 }
 
 /// The streaming paths the Live TV page advertises.

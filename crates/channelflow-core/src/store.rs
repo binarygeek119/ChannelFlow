@@ -274,6 +274,21 @@ impl Store {
         }
     }
 
+    /// Task configuration and history, in the core's own namespace beside
+    /// auth and the plugin registry.
+    pub async fn task_get(&self, key: &str) -> Result<Option<serde_json::Value>, StoreError> {
+        self.plugin_get(CORE_NAMESPACE, &format!("task_{key}")).await
+    }
+
+    pub async fn task_set(
+        &self,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        self.plugin_set(CORE_NAMESPACE, &format!("task_{key}"), value)
+            .await
+    }
+
     /// The storage handle passed to a plugin, scoped to its id.
     pub fn plugin_storage(&self, namespace: &str) -> Arc<dyn PluginStorage> {
         Arc::new(NamespacedStorage {

@@ -17,6 +17,7 @@ license = "MIT"
 [workspace.dependencies]
 axum = { version = "0.8", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "charset", "json"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }

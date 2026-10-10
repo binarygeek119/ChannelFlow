@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=37">
+<link rel="stylesheet" href="/app.css?v=38">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -376,6 +376,48 @@
         <div id="transcode-groups" class="settings"></div>
       </section>
 
+      <section id="tab-tasks" class="tab-panel" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Tasks</h2>
+          </div>
+          <p class="hint">Scheduled jobs like library scans and cache cleanup.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Library scan</h2>
+          </div>
+          <p class="hint">
+            Syncs the Jellyfin libraries you toggled on in the Library page. It runs daily on the
+            server's clock, or on the crontab you give it instead.
+          </p>
+          <form id="jellyfin-task-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label">
+                <input type="checkbox" id="jf-task-enabled" checked> Task enabled
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule</label>
+              <div class="field-row">
+                <label class="jf-mode"><input type="radio" name="jf-schedule-mode" value="daily" checked> Daily at</label>
+                <input type="time" id="jf-task-time" value="03:00">
+              </div>
+              <p class="jf-mode"><label><input type="radio" name="jf-schedule-mode" value="cron"> Crontab (overrides daily)</label></p>
+              <input type="text" id="jf-task-cron" placeholder="0 3 * * *" spellcheck="false">
+              <small class="field-hint">A crontab expression like <code>0 3 * * *</code> (03:00 every day) replaces the daily time.</small>
+            </div>
+            <div class="ms-form-actions">
+              <button type="submit" class="primary" id="jf-task-save">Save schedule</button>
+              <button type="button" class="ghost" id="jf-task-run">Run now</button>
+            </div>
+            <p class="hint" id="jf-task-note"></p>
+          </form>
+          <div class="task-runs" id="jf-task-runs"></div>
+        </div>
+      </section>
+
       <section id="tab-live-tv" class="tab-panel" hidden>
         <div class="panel">
           <div class="panel-head">
@@ -598,6 +640,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=37"></script>
+<script src="/app.js?v=38"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@ mod media;
 mod model;
 mod plugin;
 mod store;
+mod tasks;
 mod webui;
 
 use std::net::SocketAddr;
@@ -279,9 +280,35 @@ async fn main() -> Result<()> {
         listen_port: bound.port(),
         started,
     };
+    let media_sources = Arc::new(media_sources);
+
+    // The scheduler: every half minute, run the Jellyfin library scan when its
+    // daily/cron schedule is due. It talks to the store and the plugins
+    // directly, so it needs no browser.
+    {
+        let store = store.clone();
+        let media = media_sources.clone();
+        let config_dir = config.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(30));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let config = tasks::load(&store).await;
+                if tasks::is_due(&store, &config, chrono::Utc::now()).await {
+                    if let Err(error) =
+                        tasks::run_sync(&store, &media, &config_dir, "schedule", None).await
+                    {
+                        tracing::warn!(%error, "scheduled Jellyfin scan failed");
+                    }
+                }
+            }
+        });
+    }
+
     axum::serve(
         listener,
-        api::router(store, about, plugins, Arc::new(media_sources), http, plugin_routers),
+        api::router(store, about, plugins, media_sources, http, plugin_routers),
     )
     .await?;
     Ok(())

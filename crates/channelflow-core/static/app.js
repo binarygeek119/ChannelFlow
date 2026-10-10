@@ -25,6 +25,7 @@ const els = {
   tabLiveTv: $("tab-live-tv"),
   tabPlugins: $("tab-plugins"),
   tabLibrary: $("tab-library"),
+  tabTasks: $("tab-tasks"),
   pluginsRows: $("plugins-rows"),
   pluginsEmpty: $("plugins-empty"),
   pluginsInstalled: $("plugins-installed"),
@@ -293,6 +294,7 @@ const PANEL_FOR = {
   transcode: "tab-transcode",
   livetv: "tab-live-tv",
   plugins: "tab-plugins",
+  tasks: "tab-tasks",
 };
 
 // Plugin page components this shell knows how to render, mapped to the panel
@@ -1504,6 +1506,7 @@ function showTab(key) {
     els.tabLiveTv,
     els.tabPlugins,
     els.tabLibrary,
+    els.tabTasks,
     els.tabPlaceholder,
   ].forEach((element) => {
     element.hidden = element.id !== panel;
@@ -1521,6 +1524,7 @@ function showTab(key) {
   if (key === "livetv") loadLiveTv();
   if (key === "plugins") loadPlugins();
   if (key === "jellyfin") loadLibrary();
+  if (key === "tasks") loadTasks();
 }
 
 function pathForTab(key) {
@@ -2001,6 +2005,14 @@ async function toggleLibrary(connectionId, remoteId, enabledNow, list) {
     await refreshLibraryConnections();
     renderLibraryTabs();
     renderKindLibraries(connection.kind);
+    // A library that just got turned on starts the scan for this connection,
+    // so the toggled-on libraries sync right away.
+    if (enabledNow) {
+      request("/api/tasks/jellyfin-sync/run", {
+        method: "POST",
+        body: JSON.stringify({ connection_id: connectionId }),
+      }).catch((error) => setCardStatus(list, { ok: false, detail: error.message }));
+    }
   } catch (error) {
     setCardStatus(list, { ok: false, detail: error.message });
   }
@@ -2063,6 +2075,106 @@ async function syncConnection(connection) {
   });
   return report.report || report;
 }
+
+// --- Tasks: the Jellyfin library scan -------------------------------------
+
+function setTaskNote(message, bad) {
+  const note = $("jf-task-note");
+  if (!note) return;
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+async function loadTasks() {
+  try {
+    const data = await request("/api/tasks/jellyfin-sync");
+    renderJellyfinTask(data.config || {}, data.runs || []);
+  } catch (error) {
+    setTaskNote("Could not load the library scan task: " + error.message, true);
+  }
+}
+
+function renderJellyfinTask(config, runs) {
+  const enabled = config.enabled !== false;
+  const schedule = config.schedule || {};
+  const mode = schedule.mode === "cron" ? "cron" : "daily";
+  $("jf-task-enabled").checked = enabled;
+  const radio = document.querySelector(`input[name="jf-schedule-mode"][value="${mode}"]`);
+  if (radio) radio.checked = true;
+  $("jf-task-time").value = schedule.daily_time || "03:00";
+  $("jf-task-cron").value = schedule.cron || "";
+  renderTaskRuns(runs);
+}
+
+function renderTaskRuns(runs) {
+  const box = $("jf-task-runs");
+  if (!box) return;
+  if (!runs.length) {
+    box.innerHTML =
+      '<p class="hint">No runs yet — the daily timer (or Run now) fills this in.</p>';
+    return;
+  }
+  box.innerHTML =
+    "<h4>Recent runs</h4>" +
+    runs
+      .map((run) => {
+        const when = run.at ? new Date(run.at).toLocaleString() : "?";
+        return `<div class="task-run"><span class="task-run-when">${escapeHtml(when)}</span>
+          <span class="task-run-trigger">${escapeHtml(run.trigger || "?")}</span>
+          <span>${escapeHtml(String(run.added))} added · ${escapeHtml(String(run.updated))} updated · ${escapeHtml(String(run.errors))} errors · ${escapeHtml(String(run.connections))} connection(s)</span></div>`;
+      })
+      .join("");
+}
+
+$("jellyfin-task-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const enabled = $("jf-task-enabled").checked;
+  const mode = (document.querySelector('input[name="jf-schedule-mode"]:checked') || {}).value || "daily";
+  const schedule = {
+    mode,
+    daily_time: $("jf-task-time").value || "03:00",
+    cron: $("jf-task-cron").value.trim(),
+  };
+  const save = $("jf-task-save");
+  save.disabled = true;
+  try {
+    const data = await request("/api/tasks/jellyfin-sync", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, schedule }),
+    });
+    renderJellyfinTask(data.config || {}, data.runs || []);
+    setTaskNote("Schedule saved.", false);
+  } catch (error) {
+    setTaskNote(error.message, true);
+  } finally {
+    save.disabled = false;
+  }
+});
+
+$("jf-task-run").addEventListener("click", async () => {
+  const button = $("jf-task-run");
+  button.disabled = true;
+  button.textContent = "Running…";
+  setTaskNote("");
+  try {
+    const data = await request("/api/tasks/jellyfin-sync/run", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    renderTaskRuns(data.runs || []);
+    const run = data.run || {};
+    setTaskNote(
+      `Ran ${run.connections || 0} connection(s): ${run.added || 0} added · ${run.updated || 0} updated · ${run.removed || 0} removed · ${run.errors || 0} errors`,
+      (run.errors || 0) > 0
+    );
+  } catch (error) {
+    setTaskNote(error.message || "Could not run the scan.", true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Run now";
+  }
+});
 
 // --- connection form ---
 
@@ -2540,7 +2652,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "37";
+const UI_BUILD = "38";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

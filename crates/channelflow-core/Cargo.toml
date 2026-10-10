@@ -17,6 +17,7 @@ async-trait = "0.1"
 axum.workspace = true
 chrono.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
+cron.workspace = true
 # The SDK is fetched the same way the plugin repo fetches it — by git from
 # this repo's own branch — so there is exactly one channelflow-plugin-api in
 # the dependency graph and core's Plugin trait is the plugin's Plugin trait.

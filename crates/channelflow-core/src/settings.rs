@@ -18,6 +18,10 @@ pub struct GeneralSettings {
     pub public_url: String,
     #[serde(default)]
     pub local_url: String,
+    /// IANA time zone id (e.g. `America/New_York`) the TV Guide shows times
+    /// in. Empty means "the server's own zone".
+    #[serde(default)]
+    pub timezone: String,
 }
 
 impl GeneralSettings {
@@ -25,6 +29,7 @@ impl GeneralSettings {
     pub fn normalized(mut self) -> Self {
         self.public_url = normalize(&self.public_url);
         self.local_url = normalize(&self.local_url);
+        self.timezone = self.timezone.trim().to_string();
         self
     }
 }
@@ -131,10 +136,12 @@ mod tests {
         let s = GeneralSettings {
             public_url: " https://example.com/ ".to_string(),
             local_url: "http://192.168.1.2:8097/".to_string(),
+            timezone: " America/New_York ".to_string(),
         }
         .normalized();
         assert_eq!(s.public_url, "https://example.com");
         assert_eq!(s.local_url, "http://192.168.1.2:8097");
+        assert_eq!(s.timezone, "America/New_York");
         assert!(is_valid_url(""));
         assert!(is_valid_url("http://x"));
         assert!(is_valid_url("HTTPS://x"));

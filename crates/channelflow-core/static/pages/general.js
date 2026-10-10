@@ -1,6 +1,47 @@
 // General Settings: the public and local URLs. The local URL is detected once
 // on first boot (server side) and stored; this page loads the stored value and
-// lets the operator override it, and set the public URL by hand.
+// lets the operator override it, and set the public URL by hand. It also sets
+// the time zone the TV Guide shows times in.
+
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+// The full IANA zone list comes from the browser; the current value is always
+// present even when the browser does not enumerate it.
+function fillTimeZones(selected) {
+  const select = $("general-timezone");
+  if (!select) return;
+  let zones = [];
+  try {
+    zones = Intl.supportedValuesOf("timeZone") || [];
+  } catch (error) {
+    zones = [];
+  }
+  select.textContent = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "Server default";
+  select.appendChild(auto);
+  zones.forEach((zone) => {
+    const option = document.createElement("option");
+    option.value = zone;
+    option.textContent = zone.replace(/_/g, " ");
+    select.appendChild(option);
+  });
+  const value = selected || browserTimeZone();
+  if (value && !zones.includes(value)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }
+  select.value = value;
+}
 
 async function loadGeneral() {
   try {
@@ -8,6 +49,7 @@ async function loadGeneral() {
     const settings = data.settings || {};
     $("general-local-url").value = settings.local_url || "";
     $("general-public-url").value = settings.public_url || "";
+    fillTimeZones(settings.timezone || "");
     $("general-result").textContent = "";
   } catch (error) {
     $("general-result").textContent = error.message;
@@ -25,11 +67,13 @@ async function saveGeneral(event) {
       body: JSON.stringify({
         public_url: $("general-public-url").value.trim(),
         local_url: $("general-local-url").value.trim(),
+        timezone: $("general-timezone").value,
       }),
     });
     const settings = data.settings || {};
     $("general-local-url").value = settings.local_url || "";
     $("general-public-url").value = settings.public_url || "";
+    fillTimeZones(settings.timezone || "");
     $("general-result").textContent = "Saved.";
   } catch (error) {
     $("general-result").textContent = error.message;

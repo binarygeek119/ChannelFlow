@@ -199,6 +199,7 @@ mod tests {
         let settings = GeneralSettings {
             local_url: "http://192.168.1.7:8097".to_string(),
             public_url: "https://cf.example.com".to_string(),
+            timezone: String::new(),
         };
         let local = payload(&settings, true, "");
         assert_eq!(local["m3u"], "http://192.168.1.7:8097/live/channels.m3u");
@@ -213,6 +214,7 @@ mod tests {
         let settings = GeneralSettings {
             local_url: "http://192.168.1.7:8097".to_string(),
             public_url: "".to_string(),
+            timezone: String::new(),
         };
         let keyed = payload(&settings, true, "abc123");
         assert_eq!(keyed["m3u"], "http://192.168.1.7:8097/live/channels.m3u?apiKey=abc123");
@@ -224,6 +226,7 @@ mod tests {
         let settings = GeneralSettings {
             local_url: "http://192.168.1.7:8097".to_string(),
             public_url: "https://cf.example.com".to_string(),
+            timezone: String::new(),
         };
         assert!(primary_is_local(&settings, Some("192.168.1.7:8097")));
         assert!(primary_is_local(&settings, Some("localhost:8097")));

@@ -2176,6 +2176,23 @@ $("jf-task-run").addEventListener("click", async () => {
   }
 });
 
+// Maintenance jobs are user-triggered one-offs. They are stubbed for now —
+// the buttons exist and say so until they are wired to real work.
+for (const [id, label] of [
+  ["maintenance-rebuild-playouts", "Rebuild All Playouts"],
+  ["maintenance-clear-guide", "Clear Guide Data"],
+]) {
+  const button = document.getElementById(id);
+  if (!button) continue;
+  button.addEventListener("click", () => {
+    const note = document.getElementById("maintenance-note");
+    if (note) {
+      note.hidden = false;
+      note.textContent = `${label} is not wired up yet.`;
+    }
+  });
+}
+
 // --- connection form ---
 
 function linesToRemaps(text) {
@@ -2652,7 +2669,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "38";
+const UI_BUILD = "39";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

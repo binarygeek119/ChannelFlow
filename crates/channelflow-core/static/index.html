@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=38">
+<link rel="stylesheet" href="/app.css?v=39">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -416,6 +416,20 @@
           </form>
           <div class="task-runs" id="jf-task-runs"></div>
         </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Maintenance</h2>
+          </div>
+          <p class="hint">
+            One-off jobs you run yourself — these are not on a timer.
+          </p>
+          <div class="actions">
+            <button type="button" class="ghost" id="maintenance-rebuild-playouts">Rebuild All Playouts</button>
+            <button type="button" class="ghost" id="maintenance-clear-guide">Clear Guide Data</button>
+          </div>
+          <p class="hint" id="maintenance-note"></p>
+        </div>
       </section>
 
       <section id="tab-live-tv" class="tab-panel" hidden>
@@ -640,6 +654,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=38"></script>
+<script src="/app.js?v=39"></script>
 </body>
 </html>

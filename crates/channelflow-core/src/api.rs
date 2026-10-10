@@ -2170,10 +2170,11 @@ async fn tv_episode_image(
         .into_response()
 }
 
-/// A map from a source's remote id to the catalog `match_key` of the item it
-/// belongs to. Plugin pages (a person's filmography, say) use it to link their
-/// own rows into the Media catalog's item pages. Keyed
-/// `"<source_kind>:<connection_id>:<remote_id>"`.
+/// A map from a source's remote id to the catalog item it belongs to. Plugin
+/// pages (a person's filmography, say) use it to link their own rows into the
+/// Media catalog's item pages and to borrow the catalog's poster. Keyed
+/// `"<source_kind>:<connection_id>:<remote_id>"`; each value is
+/// `{ match_key, poster_path, title, year, kind }`.
 async fn media_source_index(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -2195,7 +2196,13 @@ async fn media_source_index(
             }
             index.insert(
                 format!("{kind}:{connection_id}:{remote_id}"),
-                serde_json::json!(match_key),
+                serde_json::json!({
+                    "match_key": match_key,
+                    "poster_path": item["poster_path"],
+                    "title": item["title"],
+                    "year": item["year"],
+                    "kind": item["kind"],
+                }),
             );
         }
     }

@@ -201,6 +201,25 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Jellyfin plugin: {error}"))?;
 
+    // The Off Air plugin owns the settings for what plays on dead air; its
+    // page contribution is what draws the Off Air tab in the nav.
+    let offair_plugin = channelflow_plugin_offair::plugin();
+    let offair_manifest = offair_plugin.metadata().clone();
+    let offair_api = PluginApi {
+        id: offair_manifest.id.clone(),
+        storage: store.plugin_storage(&offair_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&offair_manifest.id),
+        logger: PluginLogger::new(&offair_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&offair_manifest.id).await,
+    };
+    manager
+        .add(offair_plugin, offair_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Off Air plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

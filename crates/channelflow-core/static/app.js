@@ -63,7 +63,6 @@ const MENU = {
   clientlogs: ["Client Logs", "Diagnostics your ChannelFlow TV apps send back."],
   channels: ["Channels", "Manage Live TV channels"],
   lineups: ["Lineups", "Group channels into playlists you can hand to a player."],
-  list: ["Lists", "Named lists of items you can reuse across channels and presets."],
   special: ["Special Presentation", "One-off scheduled events that override the normal lineup."],
   media: ["Media", "The movies, shows, albums and videos synced into ChannelFlow's own catalog."],
   commercials: ["Commercials", "Breaks, avails, and where they're allowed to land."],
@@ -195,7 +194,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "80";
+const UI_BUILD = "81";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {

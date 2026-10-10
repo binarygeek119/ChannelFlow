@@ -328,6 +328,26 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Presets plugin: {error}"))?;
 
+    // The Lists plugin owns named collections of catalog items; its page
+    // contribution draws the Lists tab.
+    let lists_plugin = channelflow_plugin_lists::plugin();
+    let lists_manifest = lists_plugin.metadata().clone();
+    let lists_api = PluginApi {
+        id: lists_manifest.id.clone(),
+        storage: store.plugin_storage(&lists_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&lists_manifest.id),
+        logger: PluginLogger::new(&lists_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&lists_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(lists_plugin, lists_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Lists plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

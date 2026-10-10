@@ -36,6 +36,7 @@ channelflow-plugin-emergency = { git = "https://github.com/binarygeek119/Channel
 channelflow-plugin-weather = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-news = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 channelflow-plugin-presets = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
+channelflow-plugin-lists = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

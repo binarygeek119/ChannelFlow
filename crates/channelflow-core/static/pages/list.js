@@ -1,1 +1,0 @@
-CF.define("list", {});

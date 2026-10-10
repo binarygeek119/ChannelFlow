@@ -1562,18 +1562,27 @@ async fn media_catalog_image(
     let Ok(root_canonical) = root.canonicalize() else {
         return (StatusCode::NOT_FOUND, "images store is not ready").into_response();
     };
-    let full = if candidate.is_absolute() {
-        candidate
+    // Two spellings reach here: paths relative to the images root (the form
+    // plugins now record, e.g. `posters/Movies/x.jpg`) and older
+    // working-dir-relative paths (`./config/Images/posters/Movies/x.jpg`).
+    // Try the images-root spelling first, then the working-directory one.
+    let spellings: Vec<std::path::PathBuf> = if candidate.is_absolute() {
+        vec![candidate]
     } else {
-        root.join(&candidate)
+        vec![root.join(&candidate), candidate]
     };
-    let canonical = match full.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    };
-    if !canonical.starts_with(&root_canonical) || !canonical.is_file() {
-        return (StatusCode::BAD_REQUEST, "path outside the image store").into_response();
+    let mut canonical = None;
+    for spelling in &spellings {
+        if let Ok(resolved) = spelling.canonicalize() {
+            if resolved.starts_with(&root_canonical) && resolved.is_file() {
+                canonical = Some(resolved);
+                break;
+            }
+        }
     }
+    let Some(canonical) = canonical else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     let bytes = match std::fs::read(&canonical) {
         Ok(bytes) => bytes,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),

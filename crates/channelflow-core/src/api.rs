@@ -113,6 +113,7 @@ pub fn router(
         .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
         .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
+        .route("/api/media/source-index", get(media_source_index))
         .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
         .route("/live/{asset}", get(live_pending))
@@ -1626,6 +1627,38 @@ async fn enrich_source_web_urls(
         }
     }
     Ok(())
+}
+
+/// A map from a source's remote id to the catalog `match_key` of the item it
+/// belongs to. Plugin pages (a person's filmography, say) use it to link their
+/// own rows into the Media catalog's item pages. Keyed
+/// `"<source_kind>:<connection_id>:<remote_id>"`.
+async fn media_source_index(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let mut index = serde_json::Map::new();
+    for item in &rows {
+        let Some(match_key) = item["match_key"].as_str() else {
+            continue;
+        };
+        let Some(sources) = item["sources"].as_array() else {
+            continue;
+        };
+        for source in sources {
+            let kind = source["source_kind"].as_str().unwrap_or("");
+            let connection_id = source["connection_id"].as_i64().unwrap_or(0);
+            let remote_id = source["remote_id"].as_str().unwrap_or("");
+            if kind.is_empty() || remote_id.is_empty() {
+                continue;
+            }
+            index.insert(
+                format!("{kind}:{connection_id}:{remote_id}"),
+                serde_json::json!(match_key),
+            );
+        }
+    }
+    Ok(Json(json!({ "index": index })))
 }
 
 /// Serve one poster from `<config>/Images`. The path is the absolute path a

@@ -387,6 +387,24 @@ function mediaCastCard(person) {
     `</div>` +
     `<div class="media-cast-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>` +
     (person.character ? `<div class="media-cast-role">${escapeHtml(person.character)}</div>` : "");
+  // Clicking a cast member opens their page (the People tab) listing every
+  // title they appear in.
+  if (name) {
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.title = `See everything with ${name}`;
+    const open = () => {
+      history.pushState(null, "", `/webui/people/${encodeURIComponent(name)}`);
+      showTab("people");
+    };
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  }
   return card;
 }
 

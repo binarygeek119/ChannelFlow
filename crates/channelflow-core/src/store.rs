@@ -60,6 +60,11 @@ const INSTALLED_KEY: &str = "installed";
 const PLUGIN_REGISTRY_KEY: &str = "plugin_registry";
 const AUTH_KEY: &str = "auth";
 const SESSION_KEY: &str = "auth_session";
+/// The instance's own API key: one shared secret for the Jellyfin plugin and
+/// generic IPTV URLs.
+const SERVER_API_KEY: &str = "api_key";
+/// The paired ChannelFlow TV apps, each with its own random API key.
+const PAIRED_CLIENTS: &str = "paired_clients";
 /// How long a login stays valid with no activity. It slides forward on every
 /// authenticated request, so an in-use session does not expire mid-use; a
 /// session idle for this long needs a fresh login.
@@ -629,6 +634,91 @@ impl Store {
         self.plugin_delete(CORE_NAMESPACE, SESSION_KEY).await
     }
 
+    // ── API keys ──────────────────────────────────────────────────────────
+
+    /// The instance's shared server API key, generated once and kept.
+    pub async fn server_api_key(&self) -> Result<String, StoreError> {
+        if let Some(serde_json::Value::String(key)) =
+            self.plugin_get(CORE_NAMESPACE, SERVER_API_KEY).await?
+        {
+            if !key.is_empty() {
+                return Ok(key);
+            }
+        }
+        let key = random_api_key();
+        self.plugin_set(
+            CORE_NAMESPACE,
+            SERVER_API_KEY,
+            &serde_json::Value::String(key.clone()),
+        )
+        .await?;
+        Ok(key)
+    }
+
+    /// Every paired client (their full keys included; callers show only a hint).
+    pub async fn client_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        Ok(self
+            .plugin_get(CORE_NAMESPACE, PAIRED_CLIENTS)
+            .await?
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default())
+    }
+
+    /// Pair a new client: mint it a fresh random API key and record it.
+    pub async fn client_issue(
+        &self,
+        label: &str,
+    ) -> Result<serde_json::Value, StoreError> {
+        let mut clients = self.client_list().await?;
+        let client = serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "api_key": random_api_key(),
+            "label": label,
+            "created_at": Utc::now().to_rfc3339(),
+            "last_seen_at": serde_json::Value::Null,
+        });
+        clients.push(client.clone());
+        self.plugin_set(
+            CORE_NAMESPACE,
+            PAIRED_CLIENTS,
+            &serde_json::Value::Array(clients),
+        )
+        .await?;
+        Ok(client)
+    }
+
+    /// Revoke a client by id. `true` when one was removed.
+    pub async fn client_remove(&self, id: &str) -> Result<bool, StoreError> {
+        let mut clients = self.client_list().await?;
+        let before = clients.len();
+        clients.retain(|client| client["id"].as_str() != Some(id));
+        if clients.len() == before {
+            return Ok(false);
+        }
+        self.plugin_set(
+            CORE_NAMESPACE,
+            PAIRED_CLIENTS,
+            &serde_json::Value::Array(clients),
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// Whether `key` is the server key or any paired client's key.
+    pub async fn api_key_valid(&self, key: &str) -> Result<bool, StoreError> {
+        if key.is_empty() {
+            return Ok(false);
+        }
+        if keys_equal(key, &self.server_api_key().await?) {
+            return Ok(true);
+        }
+        Ok(self
+            .client_list()
+            .await?
+            .iter()
+            .any(|client| keys_equal(key, client["api_key"].as_str().unwrap_or(""))))
+    }
+
     /// A file in the config directory that says the walkthrough has already
     /// been finished. It outlives a backend switch, so a completed install can
     /// never be shown the walkthrough again just because the database was
@@ -1084,6 +1174,27 @@ fn match_key(kind: &str, match_id: Option<&str>, title: &str, year: Option<i32>)
         .filter(|c| c.is_alphanumeric())
         .collect();
     format!("{kind}:{normalized}:{}", year.unwrap_or(0))
+}
+
+/// A random 64-character hex API key (32 random bytes).
+pub fn random_api_key() -> String {
+    let mut bytes = Vec::with_capacity(32);
+    bytes.extend_from_slice(Uuid::new_v4().as_bytes());
+    bytes.extend_from_slice(Uuid::new_v4().as_bytes());
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Constant-time string equality, so key checks do not leak length-by-length.
+pub fn keys_equal(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in left.iter().zip(right) {
+        diff |= a ^ b;
+    }
+    diff == 0
 }
 
 /// The file backend. Writing goes through a temp file plus rename, so a

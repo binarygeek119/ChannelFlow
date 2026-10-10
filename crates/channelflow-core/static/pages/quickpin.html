@@ -4,9 +4,9 @@
   </div>
   <p class="hint">
     On the ChannelFlow app, start pairing to get an 8-character PIN. Type it here and pair.
-    ChannelFlow encrypts this instance's Live TV URLs with that PIN and hands the ciphertext to the
-    relay, which forwards it to the waiting app — the relay never sees the key or the URLs, and this
-    server never stores the PIN.
+    ChannelFlow gives the app its own random API key, encrypts this instance's Live TV URLs
+    (carrying that key) with the PIN, and hands the ciphertext to the relay, which forwards it to
+    the waiting app — the relay never sees the key or the URLs, and this server never stores the PIN.
   </p>
   <p class="hint">Relay: <code id="qp-server"></code></p>
   <form id="quickpin-form" class="ms-form" autocomplete="off">

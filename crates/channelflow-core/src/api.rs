@@ -80,6 +80,9 @@ pub fn router(
         .route("/api/settings/password", post(change_password))
         .route("/api/quickpin", get(quickpin_get))
         .route("/api/quickpin/pair", post(quickpin_pair))
+        .route("/api/clients", get(list_clients))
+        .route("/api/clients/{id}", delete(remove_client))
+        .route("/api/iptv/urls", get(iptv_urls))
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -678,7 +681,7 @@ fn resolve_pin_server() -> String {
 /// that pairing would send (so the admin can see them first).
 async fn quickpin_get(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let settings = state.store.general_settings().await?;
-    let urls = crate::quickpin::payload(&settings, true);
+    let urls = crate::quickpin::payload(&settings, true, "");
     Ok(Json(json!({
         "server": resolve_pin_server(),
         "urls": urls,
@@ -691,8 +694,9 @@ struct QuickPinPair {
 }
 
 /// Encrypt this instance's Live TV URLs with the app's PIN and hand the
-/// ciphertext to the relay. The relay forwards it to the waiting app; `404`
-/// from the relay means the PIN was unknown, expired, or already used.
+/// ciphertext to the relay. The app is paired with its own fresh random API
+/// key, which the URLs carry. `404` from the relay means the PIN was unknown,
+/// expired, or already used — the just-issued key is then thrown away.
 async fn quickpin_pair(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -711,14 +715,83 @@ async fn quickpin_pair(
     }
     let host = headers.get(header::HOST).and_then(|value| value.to_str().ok());
     let primary_local = crate::quickpin::primary_is_local(&settings, host);
-    let payload = crate::quickpin::payload(&settings, primary_local);
+    let client = state.store.client_issue("Paired app").await?;
+    let api_key = client["api_key"].as_str().unwrap_or("").to_string();
+    let payload = crate::quickpin::payload(&settings, primary_local, &api_key);
     let plaintext = serde_json::to_vec(&payload).map_err(StoreError::Json)?;
     let ciphertext = crate::quickpin::encrypt(&input.pin, &plaintext)
         .map_err(|error| StoreError::Plugin(format!("could not encrypt the pairing details: {error}")))?;
     let delivered = crate::quickpin::deliver(&state.http, &server, &input.pin, &ciphertext)
         .await
         .map_err(StoreError::Plugin)?;
+    if !delivered {
+        // No app was waiting: drop the key we just minted for it.
+        let id = client["id"].as_str().unwrap_or("").to_string();
+        let _ = state.store.client_remove(&id).await;
+    }
     Ok(Json(json!({ "delivered": delivered, "server": server })))
+}
+
+/// A masked API key: enough to tell two apart, never the whole secret.
+fn key_hint(key: &str) -> String {
+    if key.len() <= 10 {
+        return "••••".to_string();
+    }
+    format!("{}…{}", &key[..6], &key[key.len() - 4..])
+}
+
+/// The paired clients, newest first, with only key hints (never full keys).
+async fn list_clients(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let mut clients = state.store.client_list().await?;
+    clients.sort_by(|a, b| {
+        b["created_at"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(a["created_at"].as_str().unwrap_or(""))
+    });
+    let list: Vec<serde_json::Value> = clients
+        .iter()
+        .map(|client| {
+            json!({
+                "id": client["id"],
+                "label": client["label"],
+                "key_hint": key_hint(client["api_key"].as_str().unwrap_or("")),
+                "created_at": client["created_at"],
+                "last_seen_at": client["last_seen_at"],
+            })
+        })
+        .collect();
+    let server_hint = key_hint(&state.store.server_api_key().await?);
+    Ok(Json(json!({
+        "clients": list,
+        "server_key_hint": server_hint,
+    })))
+}
+
+/// Revoke a paired client; its API key stops working at once.
+async fn remove_client(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    if state.store.client_remove(&id).await? {
+        Ok(Json(json!({ "ok": true })).into_response())
+    } else {
+        Ok((StatusCode::NOT_FOUND, Json(json!({ "error": "no such client" }))).into_response())
+    }
+}
+
+/// Issue a fresh random key and return the Live TV URLs that carry it. Each
+/// call is a new key, so every copied playlist URL is its own revocable client.
+async fn iptv_urls(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let client = state.store.client_issue("Playlist URL").await?;
+    let api_key = client["api_key"].as_str().unwrap_or("").to_string();
+    let settings = state.store.general_settings().await?;
+    let urls = crate::quickpin::payload(&settings, true, &api_key);
+    Ok(Json(json!({
+        "api_key": api_key,
+        "client_id": client["id"],
+        "urls": urls,
+    })))
 }
 
 /// Resident set size from `/proc/self/status`. Linux only, so the row simply
@@ -1984,11 +2057,33 @@ async fn media_catalog_image(
 ///
 /// Only port `8097` is published and the encoder listens inside the container
 /// on another port, so every URL the page shows is written against ChannelFlow's
-/// own origin. Until the playout milestone produces those streams these paths
-/// answer `503` with a sentence rather than `404`: a player pointed at one gets
-/// an honest "not yet" instead of "no such thing", and the milestone repoints
-/// these at ErsatzTV next without the page changing.
-async fn live_pending() -> Response {
+/// own origin. These paths require an API key (the server key or a paired
+/// client's), presented as `?apiKey=` or `X-Api-Key`. Until the playout
+/// milestone produces the streams they answer `503` with a sentence rather than
+/// `404`: a player pointed at one gets an honest "not yet" instead of "no such
+/// thing".
+async fn live_pending(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ApiKeyQuery>,
+) -> Response {
+    let provided = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+        .or(query.apikey.clone())
+        .unwrap_or_default();
+    if !state.store.api_key_valid(&provided).await.unwrap_or(false) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            "A valid API key is required (add ?apiKey=… to the URL).\n",
+        )
+            .into_response();
+    }
     (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
@@ -1998,6 +2093,12 @@ async fn live_pending() -> Response {
         "Live video arrives with the playout milestone — ChannelFlow is not encoding yet.\n",
     )
         .into_response()
+}
+
+#[derive(Deserialize)]
+struct ApiKeyQuery {
+    #[serde(rename = "apiKey")]
+    apikey: Option<String>,
 }
 
 // The web UI is served from <config>/webui — plain files this binary loads,
@@ -2222,6 +2323,7 @@ mod tests {
             logger: PluginLogger::new(&manifest.id),
             core: std::sync::Arc::new(channelflow_plugin_api::core::NoCoreData::default()),
             database: std::sync::Arc::new(channelflow_plugin_api::database::NoPluginDatabase::default()),
+            web: channelflow_plugin_api::PluginWeb::new(),
         };
         manager.add(plugin, api).await.expect("load AI plugin");
         manager.enable(&manifest.id).await.expect("enable AI plugin");

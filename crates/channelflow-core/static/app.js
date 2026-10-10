@@ -195,7 +195,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "73";
+const UI_BUILD = "74";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -479,13 +479,30 @@ document.querySelectorAll(".share-menu").forEach((menu) => {
   dropdown.querySelectorAll("button[data-source]").forEach((option) => {
     option.addEventListener("click", async (event) => {
       event.stopPropagation();
-      const url = option.dataset.url;
-      if (!url) return;
-      const ok = await copyText(url);
+      const source = option.dataset.source;
+      // Every copy mints a fresh random API key and copies a URL that carries
+      // it, so each playlist/guide URL is its own revocable client.
+      let url = "";
+      try {
+        const data = await request("/api/iptv/urls");
+        const urls = data.urls || {};
+        if (kind === "m3u") {
+          url = source === "public" ? urls.m3uPublic : urls.m3uLocal;
+        } else {
+          url = source === "public" ? urls.xmltvPublic : urls.xmltvLocal;
+        }
+      } catch (error) {
+        url = "";
+      }
       closeShareMenus();
+      if (!url) {
+        showToast(`Set a ${source} URL in General Settings first`);
+        return;
+      }
+      const ok = await copyText(url);
       showToast(
         ok
-          ? `Copied ${kind.toUpperCase()} ${option.dataset.source} URL`
+          ? `Copied ${kind.toUpperCase()} ${source} URL (new API key)`
           : "Copy failed — could not reach the clipboard."
       );
     });

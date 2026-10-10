@@ -62,14 +62,26 @@ fn base_url(value: &str) -> Option<String> {
 }
 
 /// The six-key JSON the app decrypts. `primary_local` puts the local pair in
-/// `m3u`/`xmltv`; the public pair goes there otherwise.
-pub fn payload(settings: &GeneralSettings, primary_local: bool) -> serde_json::Value {
+/// `m3u`/`xmltv`; the public pair goes there otherwise. `api_key` is appended
+/// as `?apiKey=` when set, so the app's player authenticates with its own key.
+pub fn payload(settings: &GeneralSettings, primary_local: bool, api_key: &str) -> serde_json::Value {
     let local = base_url(&settings.local_url);
     let public = base_url(&settings.public_url);
-    let local_m3u = local.as_ref().map(|base| format!("{base}/live/channels.m3u"));
-    let local_xmltv = local.as_ref().map(|base| format!("{base}/live/xmltv.xml"));
-    let public_m3u = public.as_ref().map(|base| format!("{base}/live/channels.m3u"));
-    let public_xmltv = public.as_ref().map(|base| format!("{base}/live/xmltv.xml"));
+    let keyed = |base: &str| {
+        let url = format!("{base}/live/channels.m3u");
+        let xmltv = format!("{base}/live/xmltv.xml");
+        (append_key(url, api_key), append_key(xmltv, api_key))
+    };
+    let local_urls = local.as_deref().map(keyed);
+    let public_urls = public.as_deref().map(keyed);
+    let (local_m3u, local_xmltv) = match &local_urls {
+        Some((m3u, xmltv)) => (Some(m3u.clone()), Some(xmltv.clone())),
+        None => (None, None),
+    };
+    let (public_m3u, public_xmltv) = match &public_urls {
+        Some((m3u, xmltv)) => (Some(m3u.clone()), Some(xmltv.clone())),
+        None => (None, None),
+    };
     let (m3u, xmltv) = if primary_local {
         (
             local_m3u.clone().or_else(|| public_m3u.clone()),
@@ -89,6 +101,20 @@ pub fn payload(settings: &GeneralSettings, primary_local: bool) -> serde_json::V
         "m3uLocal": local_m3u.unwrap_or_default(),
         "xmltvLocal": local_xmltv.unwrap_or_default(),
     })
+}
+
+/// Append `?apiKey=<key>` (or `&`) when a key is set. Keys are hex, so no
+/// escaping is needed.
+pub fn append_key(mut url: String, api_key: &str) -> String {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return url;
+    }
+    let separator = if url.contains('?') { '&' } else { '?' };
+    url.push(separator);
+    url.push_str("apiKey=");
+    url.push_str(api_key);
+    url
 }
 
 /// The host part of a URL or Host header, lowercased, without scheme/port.
@@ -174,12 +200,23 @@ mod tests {
             local_url: "http://192.168.1.7:8097".to_string(),
             public_url: "https://cf.example.com".to_string(),
         };
-        let local = payload(&settings, true);
+        let local = payload(&settings, true, "");
         assert_eq!(local["m3u"], "http://192.168.1.7:8097/live/channels.m3u");
         assert_eq!(local["m3uPublic"], "https://cf.example.com/live/channels.m3u");
-        let public = payload(&settings, false);
+        let public = payload(&settings, false, "");
         assert_eq!(public["m3u"], "https://cf.example.com/live/channels.m3u");
         assert_eq!(public["xmltvLocal"], "http://192.168.1.7:8097/live/xmltv.xml");
+    }
+
+    #[test]
+    fn payload_appends_the_api_key() {
+        let settings = GeneralSettings {
+            local_url: "http://192.168.1.7:8097".to_string(),
+            public_url: "".to_string(),
+        };
+        let keyed = payload(&settings, true, "abc123");
+        assert_eq!(keyed["m3u"], "http://192.168.1.7:8097/live/channels.m3u?apiKey=abc123");
+        assert_eq!(keyed["xmltvLocal"], "http://192.168.1.7:8097/live/xmltv.xml?apiKey=abc123");
     }
 
     #[test]

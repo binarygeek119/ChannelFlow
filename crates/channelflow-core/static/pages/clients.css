@@ -1,1 +1,25 @@
-/* page styles live here */
+/* Clients page: the paired apps / playlist URLs table. */
+#clients-table { margin: 0.4rem 0 0.8rem; overflow-x: auto; }
+#clients-table .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+#clients-table .data-table th,
+#clients-table .data-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+#clients-table .data-table th {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+#clients-table code {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+#clients-server-key { color: var(--muted); }

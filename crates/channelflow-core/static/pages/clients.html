@@ -1,7 +1,17 @@
 <div class="panel">
   <div class="panel-head">
     <h2>Clients</h2>
+    <span class="count" id="clients-count"></span>
   </div>
-  <p class="hint">Players that have connected and what they're watching.</p>
-  <p class="empty">Carried over from ChannelFlow 1.0.0 for layout only. Nothing is wired up yet.</p>
+  <p class="hint">
+    Every ChannelFlow TV app and every copied playlist URL pairs with its own random API key.
+    Remove a client to destroy that key — the next time it connects it cannot, and it drops this
+    server from its list.
+  </p>
+  <p class="hint">Server API key (for the Jellyfin plugin and generic URLs): <code id="clients-server-key">••••</code></p>
+  <div class="ms-form-actions">
+    <button type="button" class="ghost" id="clients-refresh">Refresh</button>
+  </div>
+  <div id="clients-table"></div>
+  <p class="field-note" id="clients-note"></p>
 </div>

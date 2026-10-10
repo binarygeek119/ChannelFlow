@@ -105,6 +105,7 @@ pub fn router(
             get(jellyfin_sync_get).put(jellyfin_sync_put),
         )
         .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
+        .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
         .route("/api/media/image", get(media_catalog_image))
         .route("/live/{asset}", get(live_pending))
@@ -1331,6 +1332,13 @@ async fn jellyfin_sync_run(
         "run": run,
         "runs": tasks::runs(&state.store).await,
     })))
+}
+
+/// Whether a background task is running right now. The web UI asks this on
+/// (re)load so a task that outlived its tab (or the whole page) brings its
+/// progress popup back; nothing running means no popup.
+async fn tasks_running() -> Json<serde_json::Value> {
+    Json(json!({ "task": tasks::running() }))
 }
 
 // ── local media catalog ────────────────────────────────────────────────────

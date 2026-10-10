@@ -5,6 +5,7 @@
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::{Mutex, OnceLock};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -160,6 +161,55 @@ pub async fn is_due(store: &Store, config: &SyncConfig, now: DateTime<Utc>) -> b
 /// Sync every connection (or one), each with the libraries toggled on for it.
 /// A connection with no stored selection syncs all of its libraries.
 pub async fn run_sync(
+    store: &Store,
+    media: &MediaSources,
+    config_dir: &Path,
+    trigger: &str,
+    only_connection: Option<i64>,
+) -> Result<SyncRun, StoreError> {
+    // A sync can outlive the tab that started it, so mark it running in a
+    // process-wide slot the web UI can read on (re)load; clear it however the
+    // sync ends. The slot is in-memory, so a server restart leaves nothing
+    // stale behind.
+    set_running(Some(RunningTask {
+        kind: "jellyfin-sync".to_string(),
+        title: "Jellyfin library scan".to_string(),
+        started_at: Utc::now(),
+        progress_url: Some(format!("/api/plugins/{JELLYFIN_PLUGIN}/progress")),
+    }));
+    let outcome = run_sync_inner(store, media, config_dir, trigger, only_connection).await;
+    set_running(None);
+    outcome
+}
+
+/// One running background task, as the web UI's popup needs it: a title to
+/// show immediately and, when the source exposes one, a JSON-returning URL that
+/// yields `{ progress: { label, current, total } }` for the live detail line.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunningTask {
+    pub kind: String,
+    pub title: String,
+    pub started_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress_url: Option<String>,
+}
+
+fn running_slot() -> &'static Mutex<Option<RunningTask>> {
+    static SLOT: OnceLock<Mutex<Option<RunningTask>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+/// The task running right now, if any. Read by `GET /api/tasks/running` so a
+/// reload (or a fresh browser) can bring the popup back.
+pub fn running() -> Option<RunningTask> {
+    running_slot().lock().unwrap().clone()
+}
+
+fn set_running(task: Option<RunningTask>) {
+    *running_slot().lock().unwrap() = task;
+}
+
+async fn run_sync_inner(
     store: &Store,
     media: &MediaSources,
     config_dir: &Path,

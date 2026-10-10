@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "50";
+const UI_BUILD = "51";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -392,6 +392,49 @@ function showApp() {
   document.getElementById("app-shell").hidden = false;
   loadPluginPages();
   showTab(tabForPath(location.pathname) || "guide");
+  // A task can outlive the page that started it; bring its popup back.
+  watchRunningTask();
+}
+
+// If a background task is still running (a scan started before this page load),
+// show the popup and keep it current until the task ends. No running task means
+// no popup at all.
+async function watchRunningTask() {
+  let task = null;
+  try {
+    task = (await request("/api/tasks/running")).task;
+  } catch (error) {
+    return;
+  }
+  if (!task) return;
+  taskPopup.show(task.title || "Task running");
+  const progressUrl = task.progress_url;
+  // Poll until the server says nothing is running any more.
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    let current = null;
+    try {
+      current = (await request("/api/tasks/running")).task;
+    } catch (error) {
+      current = null;
+    }
+    if (!current) {
+      taskPopup.finish("Finished.", true);
+      return;
+    }
+    if (progressUrl) {
+      try {
+        const snapshot = (await request(progressUrl)).progress || {};
+        taskPopup.progress(
+          `${snapshot.label || current.title} · ` +
+            `${Number(snapshot.current || 0).toLocaleString()} of ` +
+            `${Number(snapshot.total || 0).toLocaleString()}`
+        );
+      } catch (error) {
+        /* a transient poll failure must not hide a running task */
+      }
+    }
+  }
 }
 
 function showLogin(note) {

@@ -43,7 +43,9 @@ curl -X POST http://localhost:8097/api/plugins/install \
   -d '{"url":"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/manifest.json","id":"com.channelflow.ai"}'
 ```
 
-**Media sources** are plugins that implement the SDK's `MediaSource` contract on top of the usual `Plugin` lifecycle. The first is **Jellyfin**: a `jellyfin` connection form, library sync into its own tables (dedup by title:year:type), per-version file selection, posters under `<config>/Images/posters/…`, and `channelflow_plugin_v1` as its ABI entrypoint. The core registers these sources (so `POST /api/connections` only accepts known kinds), stores the connections, and drives sync in a later milestone.
+**Media sources** are plugins that implement the SDK's `MediaSource` contract on top of the usual `Plugin` lifecycle. The first is **Jellyfin**: a `jellyfin` connection form, library sync into its own tables (dedup by title:year:type), per-version file selection, posters under `<config>/Images/posters/…`, and `channelflow_plugin_v1` as its ABI entrypoint. The core registers these sources (so `POST /api/connections` only accepts known kinds), stores the connections, and drives sync.
+
+During a sync a source also reports the items it found (movies, series, albums, artists, music videos) through the SDK's `MediaCatalog` handle, and the base stores them in its **own** catalog (a `media_catalog` table on Postgres, `media_catalog.json` on files). The **Media** page reads that catalog — not the live server — so it works the same for every source: **Movies / TV Shows / Music / Music Videos** tabs, each grouped by the source library, at `/webui/media`.
 
 Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 
@@ -98,6 +100,8 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `PUT` | `/api/connections/{id}` | update a connection's config |
 | `DELETE` | `/api/connections/{id}` | remove a connection; a media source's rows cascade and its orphan posters are swept |
 | `POST` | `/api/connections/{id}/test` | have the connection's media source test it (reachable, key accepted, or what failed) |
+| `GET` | `/api/media` | the base's own media catalog: per-tab counts and the rows for an optional `?kind=` (movie, series, album, artist, musicvideo) |
+| `GET` | `/api/media/image?path=…` | a poster from `<config>/Images`; paths outside the image store are refused |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
 | `PUT` | `/api/plugins/com.channelflow.ai/providers/{id}` | partial update; an omitted `api_key` keeps the stored one, an empty one clears it |

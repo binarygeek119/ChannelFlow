@@ -60,6 +60,10 @@ const INSTALLED_KEY: &str = "installed";
 const PLUGIN_REGISTRY_KEY: &str = "plugin_registry";
 const AUTH_KEY: &str = "auth";
 const SESSION_KEY: &str = "auth_session";
+/// How long a login stays valid with no activity. It slides forward on every
+/// authenticated request, so an in-use session does not expire mid-use; a
+/// session idle for this long needs a fresh login.
+pub const SESSION_TTL_HOURS: i64 = 6;
 const RESET_KEY: &str = "auth_reset";
 const RESET_AT_KEY: &str = "auth_reset_at";
 const DATABASE_URL_KEY: &str = "database_url";
@@ -580,19 +584,29 @@ impl Store {
     /// session lives a fixed six hours from login; after that a stale cookie is
     /// simply not a session.
     pub async fn session_valid(&self, token: &str) -> Result<bool, StoreError> {
-        match self.plugin_get(CORE_NAMESPACE, SESSION_KEY).await? {
-            Some(serde_json::Value::Object(map)) => {
-                let stored = map.get("token").and_then(serde_json::Value::as_str);
-                let expires_at = map
-                    .get("expires_at")
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-                    .map(|value| value.with_timezone(&Utc));
-                let expired = expires_at.is_some_and(|expires| Utc::now() >= expires);
-                Ok(stored.is_some_and(|stored| crate::auth::verify_token(token, stored)) && !expired)
-            }
-            _ => Ok(false),
+        let value = match self.plugin_get(CORE_NAMESPACE, SESSION_KEY).await? {
+            Some(serde_json::Value::Object(map)) => map,
+            _ => return Ok(false),
+        };
+        let stored = match value.get("token").and_then(serde_json::Value::as_str) {
+            Some(stored) if crate::auth::verify_token(token, stored) => stored.to_string(),
+            _ => return Ok(false),
+        };
+        let expires_at = value
+            .get("expires_at")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc));
+        if expires_at.is_some_and(|expires| Utc::now() >= expires) {
+            return Ok(false);
         }
+        // Sliding window: every authenticated request pushes the idle timeout
+        // forward, so an in-use login never expires mid-session. A login goes
+        // stale only after SESSION_TTL_HOURS with no activity at all.
+        let _ = self
+            .save_session(&stored, Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS))
+            .await;
+        Ok(true)
     }
 
     pub async fn save_session(

@@ -48,6 +48,13 @@ pub struct Connection {
     /// Defaults to verifying TLS; turn off for self-signed test servers.
     #[serde(default = "default_true")]
     pub verify_tls: bool,
+    /// The server's own identity (e.g. Jellyfin's `Id`), captured when the
+    /// connection is tested and used to deep-link into the server's web UI.
+    #[serde(default)]
+    pub server_id: Option<String>,
+    /// The server's display name, captured the same way.
+    #[serde(default)]
+    pub server_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -63,6 +70,8 @@ impl Default for Connection {
             path_remaps: serde_json::json!({}),
             sync_user_id: None,
             verify_tls: true,
+            server_id: None,
+            server_name: None,
         }
     }
 }
@@ -328,6 +337,24 @@ pub trait MediaSource: Send + Sync {
     /// Sync the chosen libraries. Implementations update their own database
     /// tables, write images, and report what changed.
     async fn sync_library(&self, ctx: SyncCtx) -> SyncReport;
+
+    /// Identity metadata about the connected server, when the source can say
+    /// (e.g. Jellyfin's `{ "server_id": …, "server_name": … }`). The base
+    /// stores it on the connection so deep links and labels can use it.
+    async fn server_info(
+        &self,
+        _connection: &Connection,
+        _api_key: &str,
+    ) -> Option<serde_json::Value> {
+        None
+    }
+
+    /// A deep link straight to this item on the connected server's web UI
+    /// (for example Jellyfin's `…/web/index.html#!/details?id=…`). The Media
+    /// page's play button opens it. `None` when the source has no such link.
+    fn item_web_url(&self, _connection: &Connection, _remote_id: &str) -> Option<String> {
+        None
+    }
 
     /// Extra API routes mounted under `/api/plugins/{id}`, if any.
     fn routes(&self) -> Option<Router> {

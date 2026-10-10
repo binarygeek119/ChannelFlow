@@ -23,6 +23,7 @@ const els = {
   tabTranscode: $("tab-transcode"),
   tabLiveTv: $("tab-live-tv"),
   tabPlugins: $("tab-plugins"),
+  tabLibrary: $("tab-library"),
   pluginsRows: $("plugins-rows"),
   pluginsEmpty: $("plugins-empty"),
   pluginsInstalled: $("plugins-installed"),
@@ -281,6 +282,7 @@ const PANEL_FOR = {
   channels: "tab-channels",
   about: "tab-about",
   credits: "tab-credits",
+  jellyfin: "tab-library",
   transcode: "tab-transcode",
   livetv: "tab-live-tv",
   plugins: "tab-plugins",
@@ -1467,6 +1469,7 @@ function showTab(key) {
     els.tabTranscode,
     els.tabLiveTv,
     els.tabPlugins,
+    els.tabLibrary,
     els.tabPlaceholder,
   ].forEach((element) => {
     element.hidden = element.id !== panel;
@@ -1482,6 +1485,7 @@ function showTab(key) {
   if (key === "transcode") loadTranscode();
   if (key === "livetv") loadLiveTv();
   if (key === "plugins") loadPlugins();
+  if (key === "jellyfin") loadLibrary();
 }
 
 function pathForTab(key) {
@@ -1497,6 +1501,344 @@ function tabForPath(path) {
     if (link.getAttribute("href") === path) found = link.dataset.tab;
   });
   return found;
+}
+
+// --- Library (media connections) -------------------------------------------
+// The Library tab copies 1.0.0's connections screen: a Connections inner tab
+// (add/edit/test/delete servers) plus one inner tab per installed media
+// source, whose servers carry a sync. Only installed plugins offer tabs.
+
+const LIBRARY_ROUTES = {
+  jellyfin: { base: "/api/plugins/com.channelflow.jellyfin" },
+};
+let librarySources = [];
+let libraryPage = "connections";
+let libraryConnections = [];
+let connectionEditingId = null;
+
+async function loadLibrary() {
+  try {
+    librarySources = (await request("/api/mediasources")).sources || [];
+  } catch (error) {
+    librarySources = [];
+  }
+  populateConnectionKinds();
+  await refreshLibraryConnections();
+  renderLibraryTabs();
+  showLibraryPage(libraryPage);
+}
+
+async function refreshLibraryConnections() {
+  try {
+    libraryConnections = (await request("/api/connections")).connections || [];
+  } catch (error) {
+    libraryConnections = [];
+  }
+}
+
+function sourceName(kind) {
+  const source = librarySources.find((entry) => entry.type_id === kind);
+  return source ? source.display_name : kind;
+}
+
+function populateConnectionKinds() {
+  const select = $("ms-kind");
+  if (!select) return;
+  select.textContent = "";
+  librarySources.forEach((source) => {
+    const option = document.createElement("option");
+    option.value = source.type_id;
+    option.textContent = source.display_name;
+    select.appendChild(option);
+  });
+  select.disabled = false;
+}
+
+function renderLibraryTabs() {
+  const tabs = $("library-inner-tabs");
+  if (!tabs) return;
+  tabs.textContent = "";
+  const add = (page, label) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "inner-tab";
+    button.dataset.libraryPage = page;
+    button.textContent = label;
+    button.addEventListener("click", () => showLibraryPage(page));
+    tabs.appendChild(button);
+  };
+  add("connections", "Connections");
+  librarySources.forEach((source) => add(source.type_id, source.display_name));
+  tabs.querySelectorAll(".inner-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.libraryPage === libraryPage);
+  });
+}
+
+function kindPage(kind, heading) {
+  const id = `library-page-${kind}`;
+  let page = $(id);
+  if (!page) {
+    page = document.createElement("div");
+    page.id = id;
+    page.className = "library-page";
+    page.hidden = true;
+    page.innerHTML =
+      `<div class="panel"><div class="panel-head"><h2></h2><span class="count"></span></div>` +
+      `<p class="hint">Connections to this media server. Test one or sync its libraries into the catalog.</p>` +
+      `<div class="ms-list"></div></div>`;
+    $("tab-library").appendChild(page);
+  }
+  page.querySelector("h2").textContent = heading;
+  return page;
+}
+
+function showLibraryPage(page) {
+  libraryPage = page;
+  document.querySelectorAll("#library-inner-tabs .inner-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.libraryPage === page);
+  });
+  document.querySelectorAll("#tab-library .library-page").forEach((element) => {
+    element.hidden = element.id !== `library-page-${page}`;
+  });
+  if (page === "connections") renderConnections();
+  else renderKindConnections(page);
+}
+
+function renderCurrentLibraryPage() {
+  showLibraryPage(libraryPage);
+}
+
+function setCardStatus(card, result) {
+  const status = card.querySelector(".ms-status");
+  if (!status) return;
+  const ok = result && result.ok;
+  status.className = "ms-status" + (ok ? " ok" : " bad");
+  status.textContent = result.detail || (ok ? "OK" : "Failed");
+}
+
+function restoreButton(button) {
+  button.textContent = button.dataset.label || button.textContent;
+}
+
+function connectionActions(card, connection) {
+  const actions = document.createElement("div");
+  actions.className = "ms-actions";
+
+  const run = async (button, busyLabel, work, done) => {
+    button.disabled = true;
+    button.textContent = busyLabel;
+    try {
+      done(await work());
+    } catch (error) {
+      setCardStatus(card, { ok: false, detail: error.message });
+      restoreButton(button);
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  if (LIBRARY_ROUTES[connection.kind]) {
+    const sync = document.createElement("button");
+    sync.type = "button";
+    sync.className = "primary";
+    sync.dataset.label = "Sync now";
+    sync.textContent = "Sync now";
+    sync.onclick = () =>
+      run(sync, "Syncing…", () => syncConnection(connection), (report) => {
+        setCardStatus(card, {
+          ok: report.errors === 0,
+          detail: `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`,
+        });
+        restoreButton(sync);
+      });
+    actions.appendChild(sync);
+  }
+
+  const test = document.createElement("button");
+  test.type = "button";
+  test.dataset.label = "Test";
+  test.textContent = "Test";
+  test.onclick = () =>
+    run(test, "Testing…",
+      async () => (await request(`/api/connections/${connection.id}/test`, { method: "POST" })).result,
+      (result) => { setCardStatus(card, result); restoreButton(test); });
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.dataset.label = "Edit";
+  edit.textContent = "Edit";
+  edit.onclick = () => openConnectionForm(connection);
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "danger";
+  remove.dataset.label = "Delete";
+  remove.textContent = "Delete";
+  remove.onclick = () =>
+    run(remove, "Deleting…", async () => {
+      if (!confirm(`Delete this connection? Its synced rows cascade and orphan posters are swept.`)) return "cancelled";
+      await request(`/api/connections/${connection.id}`, { method: "DELETE" });
+      await refreshLibraryConnections();
+      renderCurrentLibraryPage();
+      return "deleted";
+    }, () => { if (card.parentNode) card.remove(); });
+  actions.append(test, edit, remove);
+  return actions;
+}
+
+function connectionCard(connection) {
+  const card = document.createElement("div");
+  card.className = "ms-card";
+  const config = connection.config || {};
+  const head = document.createElement("div");
+  head.className = "ms-card-head";
+  const title = document.createElement("h4");
+  title.textContent = config.name || "(unnamed connection)";
+  const kind = document.createElement("span");
+  kind.className = "ms-kind";
+  kind.textContent = sourceName(connection.kind) || connection.kind;
+  head.append(title, kind);
+  const meta = document.createElement("div");
+  meta.className = "ms-meta";
+  meta.innerHTML =
+    `<span>${escapeHtml(config.url || "no URL")}</span>` +
+    (config.enabled === false ? `<span class="ms-status">disabled</span>` : "") +
+    `<span class="ms-status">Not tested</span>`;
+  card.append(head, meta, connectionActions(card, connection));
+  return card;
+}
+
+function renderConnections() {
+  const list = $("ms-connection-list");
+  if (!list) return;
+  const count = $("ms-count");
+  if (count) count.textContent = `${libraryConnections.length} connection(s)`;
+  list.textContent = "";
+  if (!libraryConnections.length) {
+    list.innerHTML = '<div class="card section-card"><p class="hint">No media server connections yet. Add one below.</p></div>';
+    return;
+  }
+  libraryConnections.forEach((connection) => list.appendChild(connectionCard(connection)));
+}
+
+function renderKindConnections(kind) {
+  const page = kindPage(kind, sourceName(kind) || kind);
+  const list = page.querySelector(".ms-list");
+  const count = page.querySelector(".count");
+  const rows = libraryConnections.filter((connection) => connection.kind === kind);
+  if (count) count.textContent = `${rows.length} connection(s)`;
+  list.textContent = "";
+  if (!rows.length) {
+    list.innerHTML = '<div class="card section-card"><p class="hint">No connections yet — add one on the Connections tab.</p></div>';
+    return;
+  }
+  rows.forEach((connection) => list.appendChild(connectionCard(connection)));
+}
+
+async function syncConnection(connection) {
+  const route = LIBRARY_ROUTES[connection.kind];
+  if (!route) throw new Error(`no sync built for ${connection.kind}`);
+  const config = connection.config || {};
+  const apiKey = config.api_key || "";
+  const connectionBody = { connection: config, api_key: apiKey };
+  const libraries = (await request(route.base + "/libraries", { method: "POST", body: JSON.stringify(connectionBody) })).libraries || [];
+  let imageRoot = "config/Images";
+  try {
+    const about = await request("/api/about");
+    if (about.system && about.system.configFolder) imageRoot = `${about.system.configFolder}/Images`;
+  } catch (error) { /* keep the default */ }
+  const report = await request(route.base + "/sync", {
+    method: "POST",
+    body: JSON.stringify({ connection_id: connection.id, ...connectionBody, libraries, image_root: imageRoot }),
+  });
+  return report.report || report;
+}
+
+// --- connection form ---
+
+function linesToRemaps(text) {
+  const remaps = {};
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*(\S+)\s*->\s*(\S+)\s*$/);
+    if (match) remaps[match[1]] = match[2];
+  });
+  return remaps;
+}
+
+function remapsToLines(remaps) {
+  if (!remaps || typeof remaps !== "object") return "";
+  return Object.entries(remaps).map(([from, to]) => `${from} -> ${to}`).join("\n");
+}
+
+function currentFormConfig() {
+  return {
+    name: $("ms-name").value.trim(),
+    url: $("ms-url").value.trim(),
+    api_key: $("ms-api-key").value.trim(),
+    path_remaps: linesToRemaps($("ms-remaps").value),
+    verify_tls: $("ms-verify-tls").checked,
+    enabled: $("ms-enabled").checked,
+  };
+}
+
+function openConnectionForm(connection) {
+  connectionEditingId = connection ? connection.id : null;
+  $("ms-form-title").textContent = connection ? "Edit connection" : "Add connection";
+  const config = (connection && connection.config) || {};
+  $("ms-kind").value = connection ? connection.kind : (librarySources[0] && librarySources[0].type_id) || "";
+  $("ms-kind").disabled = !!connection;
+  $("ms-name").value = config.name || "";
+  $("ms-url").value = config.url || "";
+  $("ms-api-key").value = config.api_key || "";
+  $("ms-remaps").value = remapsToLines(config.path_remaps);
+  $("ms-verify-tls").checked = config.verify_tls !== false;
+  $("ms-enabled").checked = config.enabled !== false;
+  $("ms-test").hidden = !connection;
+  $("ms-cancel").hidden = !connection;
+  $("ms-result").textContent = "";
+  $("ms-form").scrollIntoView({ block: "nearest" });
+  $("ms-name").focus();
+}
+
+async function saveConnection(event) {
+  event.preventDefault();
+  const kind = $("ms-kind").value;
+  const config = currentFormConfig();
+  const save = $("ms-save");
+  save.disabled = true;
+  try {
+    await request(connectionEditingId ? `/api/connections/${connectionEditingId}` : "/api/connections", {
+      method: connectionEditingId ? "PUT" : "POST",
+      body: JSON.stringify(connectionEditingId ? { config } : { kind, config }),
+    });
+    openConnectionForm(null);
+    $("ms-result").textContent = "Saved.";
+    await refreshLibraryConnections();
+    renderCurrentLibraryPage();
+  } catch (error) {
+    $("ms-result").textContent = error.message;
+  } finally {
+    save.disabled = false;
+  }
+}
+
+async function testConnectionForm() {
+  if (!connectionEditingId) return;
+  try {
+    await request(`/api/connections/${connectionEditingId}`, { method: "PUT", body: JSON.stringify({ config: currentFormConfig() }) });
+    const data = await request(`/api/connections/${connectionEditingId}/test`, { method: "POST" });
+    const result = data.result || {};
+    $("ms-result").textContent = `${result.ok ? "OK" : "Failed"}: ${result.detail || ""}`;
+  } catch (error) {
+    $("ms-result").textContent = error.message;
+  }
+}
+
+{
+  const form = $("ms-form");
+  if (form) form.addEventListener("submit", saveConnection);
+  const test = $("ms-test");
+  if (test) test.addEventListener("click", testConnectionForm);
+  const cancel = $("ms-cancel");
+  if (cancel) cancel.addEventListener("click", () => openConnectionForm(null));
 }
 
 document.querySelectorAll(".drawer-nav a").forEach((link) => {

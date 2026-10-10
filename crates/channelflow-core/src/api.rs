@@ -97,6 +97,7 @@ pub fn router(
         .route("/api/mediasources", get(list_media_sources))
         .route("/api/connections", get(list_connections).post(create_connection))
         .route("/api/connections/{id}", put(update_connection).delete(delete_connection))
+        .route("/api/connections/{id}/test", post(test_connection))
         .route("/live/{asset}", get(live_pending))
         .fallback(spa_fallback)
         .with_state(state.clone());
@@ -1155,6 +1156,32 @@ async fn delete_connection(
         });
     }
     Ok(Json(json!({ "removed": removed })))
+}
+
+/// Ask the connection's media-source plugin to test it: the server is
+/// reachable, the key is accepted, or what went wrong — shaped for the
+/// connections screen.
+async fn test_connection(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let registry = state.store.plugin_registry().await?;
+    let installed = |plugin_id: &str| registry.get(plugin_id).is_some();
+    let connections = state.store.connection_list().await?;
+    let row = connections
+        .iter()
+        .find(|connection| connection["id"].as_i64() == Some(id))
+        .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
+    let kind = row["kind"].as_str().unwrap_or_default().to_string();
+    let config: channelflow_plugin_api::media::Connection =
+        serde_json::from_value(row["config"].clone()).map_err(|error| {
+            StoreError::Plugin(format!("connection {id} has an invalid config: {error}"))
+        })?;
+    let source = state.media.find_installed(&kind, &installed).ok_or_else(|| {
+        StoreError::Plugin(format!("no media source {:?} is installed", kind))
+    })?;
+    let result = source.test_connection(&config, &config.api_key).await;
+    Ok(Json(json!({ "id": id, "kind": kind, "result": result })))
 }
 
 /// The streaming paths the Live TV page advertises.

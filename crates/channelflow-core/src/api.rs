@@ -1369,8 +1369,10 @@ async fn media_catalog_list(
                 "musicvideo" => "musicvideos",
                 _ => continue,
             };
-            if let Some(count) = counts.get_mut(tab).and_then(|v| v.as_i64_mut()) {
-                *count += 1;
+            if let Some(count) = counts.get_mut(tab) {
+                *count = serde_json::Value::Number(serde_json::Number::from(
+                    count.as_i64().unwrap_or(0) + 1,
+                ));
             }
         }
         counts

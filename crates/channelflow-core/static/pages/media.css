@@ -402,3 +402,66 @@
     font-variant-numeric: tabular-nums;
     font-size: 0.85rem;
 }
+
+/* ── Music videos: the frame screenshot and artist → videos ─────────────── */
+
+.media-detail-video {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 0.4rem;
+    background-size: cover;
+    background-position: center;
+    background-color: #141414;
+    box-shadow: 0 0.25em 1em rgba(0, 0, 0, 0.5);
+    margin-bottom: 1.2rem;
+}
+
+.media-artist-link {
+    margin: 1.2rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.media-artist-link button {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+}
+.media-artist-link button:hover { color: var(--accent-hover); }
+
+.media-videos {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 1.1rem 0.8rem;
+}
+.media-video-card { min-width: 0; cursor: pointer; }
+.media-video-card.unlinked { cursor: default; opacity: 0.85; }
+.media-video-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-video-poster {
+    aspect-ratio: 16 / 9;
+    border-radius: 0.25em;
+    background-color: #141414;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+.media-video-poster-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4a4a4a;
+}
+.media-video-poster-fallback svg { width: 2.2rem; height: 2.2rem; }
+.media-video-title {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.media-video-sub {
+    font-size: 0.74rem;
+    color: var(--muted);
+}

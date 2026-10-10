@@ -313,9 +313,17 @@ function renderMediaDetail(detail, item, enriched) {
   detail.appendChild(mediaDetailBackBar(item.kind));
 
   const poster = mediaPosterUrl(item.poster_path);
-  const posterEl = poster
-    ? `<div class="media-detail-poster" style="background-image:url('${escapeHtml(poster)}')"></div>`
-    : `<div class="media-detail-poster media-detail-poster-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
+  // A music video's stored image is a frame of the actual video, so it is
+  // shown as a wide "screenshot" instead of a portrait poster.
+  const isVideo = item.kind === "musicvideo";
+  const videoPreview =
+    isVideo && poster
+      ? `<div class="media-detail-video" style="background-image:url('${escapeHtml(poster)}')"></div>`
+      : "";
+  const posterEl =
+    !isVideo && poster
+      ? `<div class="media-detail-poster" style="background-image:url('${escapeHtml(poster)}')"></div>`
+      : `<div class="media-detail-poster media-detail-poster-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
 
   // Metadata chips: year • runtime • rating • genres • studios • official rating.
   const meta = [];
@@ -351,6 +359,7 @@ function renderMediaDetail(detail, item, enriched) {
     : "";
 
   detail.innerHTML =
+    videoPreview +
     `<div class="media-detail-main">` +
       posterEl +
       `<div class="media-detail-info">` +
@@ -425,6 +434,7 @@ function mediaCastCard(person) {
 const MUSIC_GRAPH = "/api/plugins/com.channelflow.jellyfin/music";
 let musicArtists = null;
 let musicAlbums = null;
+let musicVideos = null;
 
 // "a", "the" and punctuation are ignored for matching so the base catalog's
 // titles line up with the plugin's hierarchy rows.
@@ -436,17 +446,20 @@ function normalizeMusicName(name) {
 }
 
 async function loadMusicGraph() {
-  if (musicArtists && musicAlbums) return;
+  if (musicArtists && musicAlbums && musicVideos) return;
   try {
-    const [artists, albums] = await Promise.all([
+    const [artists, albums, videos] = await Promise.all([
       request(`${MUSIC_GRAPH}/artists`),
       request(`${MUSIC_GRAPH}/albums`),
+      request(`${MUSIC_GRAPH}/videos`),
     ]);
     musicArtists = artists.artists || [];
     musicAlbums = albums.albums || [];
+    musicVideos = videos.videos || [];
   } catch (error) {
     musicArtists = [];
     musicAlbums = [];
+    musicVideos = [];
   }
 }
 
@@ -535,21 +548,100 @@ function mediaTrackRow(track, index) {
   return row;
 }
 
+// The plugin video row matching a title (+year).
+function findGraphVideo(title, year) {
+  const wanted = normalizeMusicName(title);
+  return (musicVideos || []).find(
+    (video) =>
+      normalizeMusicName(video.title) === wanted &&
+      (year == null || !video.year || String(video.year) === String(year))
+  );
+}
+
+// The base-catalog music video matching a title (+year), for its poster/link.
+function findBaseVideo(title, year) {
+  const wanted = normalizeMusicName(title);
+  return mediaItems.find(
+    (item) =>
+      item.kind === "musicvideo" &&
+      normalizeMusicName(item.title) === wanted &&
+      (year == null || !item.year || String(item.year) === String(year))
+  );
+}
+
+// The plugin videos belonging to an artist (by the plugin artist id).
+function videosForArtistId(artistId, excludeId) {
+  return (musicVideos || []).filter(
+    (video) => video.artist_id === artistId && video.id !== excludeId
+  );
+}
+
+function musicVideoCard(video, baseVideo) {
+  const card = document.createElement("div");
+  const clickable = Boolean(baseVideo && baseVideo.match_key);
+  card.className = "media-video-card" + (clickable ? "" : " unlinked");
+  const poster = baseVideo && baseVideo.poster_path
+    ? mediaPosterUrl(baseVideo.poster_path)
+    : null;
+  const image = poster
+    ? `<div class="media-video-poster" style="background-image:url('${escapeHtml(poster)}')"></div>`
+    : `<div class="media-video-poster media-video-poster-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
+  card.innerHTML =
+    image +
+    `<div class="media-video-title" title="${escapeHtml(video.title || "")}">${escapeHtml(video.title || "")}</div>` +
+    (video.year ? `<div class="media-video-sub">${escapeHtml(String(video.year))}</div>` : "");
+  if (clickable) {
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    const go = () => openMediaItem(baseVideo.match_key);
+    card.addEventListener("click", go);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        go();
+      }
+    });
+  }
+  return card;
+}
+
 async function renderMusicDetail(detail, item) {
-  if (!detail || (item.kind !== "artist" && item.kind !== "album")) return;
+  if (!detail || (item.kind !== "artist" && item.kind !== "album" && item.kind !== "musicvideo")) return;
   await loadMusicGraph();
 
   if (item.kind === "artist") {
     const albums = albumsForArtist(item.title);
-    if (!albums.length) return;
-    const heading = document.createElement("h2");
-    heading.className = "media-detail-section";
-    heading.textContent = "Albums";
-    detail.appendChild(heading);
-    const grid = document.createElement("div");
-    grid.className = "media-albums";
-    albums.forEach((album) => grid.appendChild(mediaAlbumCard(album, findBaseAlbum(album.title, album.year))));
-    detail.appendChild(grid);
+    if (albums.length) {
+      const heading = document.createElement("h2");
+      heading.className = "media-detail-section";
+      heading.textContent = "Albums";
+      detail.appendChild(heading);
+      const grid = document.createElement("div");
+      grid.className = "media-albums";
+      albums.forEach((album) => grid.appendChild(mediaAlbumCard(album, findBaseAlbum(album.title, album.year))));
+      detail.appendChild(grid);
+    }
+    // The artist's music videos (geared for video files, like the albums).
+    let artist = (musicArtists || []).find((entry) => normalizeMusicName(entry.name) === normalizeMusicName(item.title));
+    if (!artist) {
+      artist = (musicArtists || []).find((entry) => {
+        const candidate = normalizeMusicName(entry.name);
+        return candidate && (candidate.includes(normalizeMusicName(item.title)) || normalizeMusicName(item.title).includes(candidate));
+      });
+    }
+    if (artist) {
+      const videos = videosForArtistId(artist.id);
+      if (videos.length) {
+        const heading = document.createElement("h2");
+        heading.className = "media-detail-section";
+        heading.textContent = "Videos";
+        detail.appendChild(heading);
+        const grid = document.createElement("div");
+        grid.className = "media-videos";
+        videos.forEach((video) => grid.appendChild(musicVideoCard(video, findBaseVideo(video.title, video.year))));
+        detail.appendChild(grid);
+      }
+    }
     return;
   }
 
@@ -572,7 +664,51 @@ async function renderMusicDetail(detail, item) {
     list.className = "media-tracks";
     tracks.forEach((track, index) => list.appendChild(mediaTrackRow(track, index)));
     detail.appendChild(list);
+    return;
   }
+
+  if (item.kind === "musicvideo") {
+    const video = findGraphVideo(item.title, item.year);
+    if (!video) return;
+    // The video's artist (link to their page) and the artist's other videos.
+    let artist = (musicArtists || []).find((entry) => entry.id === video.artist_id);
+    if (!artist) {
+      artist = (musicArtists || []).find((entry) => {
+        const candidate = normalizeMusicName(entry.name);
+        const wanted = normalizeMusicName(video.artist_name || "");
+        return candidate && wanted && (candidate === wanted || candidate.includes(wanted) || wanted.includes(candidate));
+      });
+    }
+    const baseArtist = artist ? findBaseArtist(artist.name) : null;
+    if (baseArtist) {
+      const link = document.createElement("div");
+      link.className = "media-artist-link";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = artist.name;
+      button.addEventListener("click", () => openMediaItem(baseArtist.match_key));
+      link.appendChild(document.createTextNode("Artist: "));
+      link.appendChild(button);
+      detail.appendChild(link);
+    }
+    const more = artist ? videosForArtistId(artist.id, video.id) : [];
+    if (more.length) {
+      const heading = document.createElement("h2");
+      heading.className = "media-detail-section";
+      heading.textContent = `More from ${escapeHtml(artist.name)}`;
+      detail.appendChild(heading);
+      const grid = document.createElement("div");
+      grid.className = "media-videos";
+      more.forEach((other) => grid.appendChild(musicVideoCard(other, findBaseVideo(other.title, other.year))));
+      detail.appendChild(grid);
+    }
+  }
+}
+
+// The base-catalog artist matching a plugin artist name, for page links.
+function findBaseArtist(name) {
+  const wanted = normalizeMusicName(name);
+  return mediaItems.find((item) => item.kind === "artist" && normalizeMusicName(item.title) === wanted);
 }
 
 CF.define("media", { onShow: loadMedia });

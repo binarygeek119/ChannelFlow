@@ -8,16 +8,12 @@
     relay, which forwards it to the waiting app — the relay never sees the key or the URLs, and this
     server never stores the PIN.
   </p>
+  <p class="hint">Relay: <code id="qp-server"></code></p>
   <form id="quickpin-form" class="ms-form" autocomplete="off">
     <div class="field">
       <label class="field-label" for="qp-pin">Pairing PIN</label>
       <input id="qp-pin" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" maxlength="12">
       <span class="field-hint">Shown on the app while it waits; case and dashes do not matter.</span>
-    </div>
-    <div class="field">
-      <label class="field-label" for="qp-server">Pin server</label>
-      <input id="qp-server" type="url" placeholder="https://channelflow.duckdns.org">
-      <span class="field-hint">The relay the app is talking to.</span>
     </div>
     <div class="ms-form-actions">
       <button type="submit" class="primary" id="qp-pair">Pair app</button>

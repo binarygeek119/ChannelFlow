@@ -65,8 +65,6 @@ const RESET_AT_KEY: &str = "auth_reset_at";
 const DATABASE_URL_KEY: &str = "database_url";
 /// The General Settings document (public and local URLs).
 const GENERAL_KEY: &str = "general";
-/// The Quick Pin relay origin.
-const QUICKPIN_KEY: &str = "quickpin";
 
 /// Storage failures, kept distinct from `anyhow` so the API layer can turn
 /// `NotFound` into 404, `DuplicateNumber` into 409 and `Invalid` into 400
@@ -310,23 +308,6 @@ impl Store {
     ) -> Result<(), StoreError> {
         let value = serde_json::to_value(settings)?;
         self.plugin_set(CORE_NAMESPACE, GENERAL_KEY, &value).await
-    }
-
-    /// The Quick Pin relay origin, if the operator has set one. The API falls
-    /// back to `CHANNELFLOW_PIN_SERVER` and then the default origin.
-    pub async fn quickpin_server(&self) -> Result<Option<String>, StoreError> {
-        match self.plugin_get(CORE_NAMESPACE, QUICKPIN_KEY).await? {
-            Some(serde_json::Value::String(server)) => Ok(Some(server)),
-            Some(serde_json::Value::Object(map)) => {
-                Ok(map.get("server").and_then(|v| v.as_str()).map(str::to_string))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    pub async fn save_quickpin_server(&self, server: &str) -> Result<(), StoreError> {
-        let value = serde_json::json!({ "server": server });
-        self.plugin_set(CORE_NAMESPACE, QUICKPIN_KEY, &value).await
     }
 
     /// The storage handle passed to a plugin, scoped to its id.

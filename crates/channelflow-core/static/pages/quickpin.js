@@ -5,7 +5,8 @@
 async function loadQuickPin() {
   try {
     const data = await request("/api/quickpin");
-    $("qp-server").value = data.server || "";
+    const relay = document.getElementById("qp-server");
+    if (relay) relay.textContent = data.server || "";
     const urls = data.urls || {};
     $("qp-local-m3u").textContent = urls.m3uLocal || "not set";
     $("qp-local-xmltv").textContent = urls.xmltvLocal || "not set";
@@ -19,7 +20,6 @@ async function loadQuickPin() {
 async function pairQuickPin(event) {
   event.preventDefault();
   const pin = $("qp-pin").value.trim();
-  const server = $("qp-server").value.trim();
   const button = $("qp-pair");
   if (!pin) {
     $("qp-result").textContent = "Enter the PIN shown on the app.";
@@ -30,7 +30,7 @@ async function pairQuickPin(event) {
   try {
     const data = await request("/api/quickpin/pair", {
       method: "POST",
-      body: JSON.stringify({ pin, server }),
+      body: JSON.stringify({ pin }),
     });
     await loadQuickPin();
     if (data.delivered) {

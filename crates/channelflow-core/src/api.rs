@@ -610,15 +610,9 @@ async fn general_settings_put(
 
 // ── quick pin ──────────────────────────────────────────────────────────────
 
-/// The resolved relay origin: a saved value, else `CHANNELFLOW_PIN_SERVER`,
-/// else the default deployment.
-async fn resolve_pin_server(state: &AppState) -> String {
-    if let Ok(Some(server)) = state.store.quickpin_server().await {
-        let server = server.trim().to_string();
-        if !server.is_empty() {
-            return server;
-        }
-    }
+/// The relay origin: the fixed default, overridable only server-side with
+/// `CHANNELFLOW_PIN_SERVER` (the Quick Pin page cannot change it).
+fn resolve_pin_server() -> String {
     std::env::var("CHANNELFLOW_PIN_SERVER")
         .ok()
         .map(|server| server.trim().to_string())
@@ -632,7 +626,7 @@ async fn quickpin_get(State(state): State<AppState>) -> Result<Json<serde_json::
     let settings = state.store.general_settings().await?;
     let urls = crate::quickpin::payload(&settings, true);
     Ok(Json(json!({
-        "server": resolve_pin_server(&state).await,
+        "server": resolve_pin_server(),
         "urls": urls,
     })))
 }
@@ -640,8 +634,6 @@ async fn quickpin_get(State(state): State<AppState>) -> Result<Json<serde_json::
 #[derive(Deserialize)]
 struct QuickPinPair {
     pin: String,
-    #[serde(default)]
-    server: Option<String>,
 }
 
 /// Encrypt this instance's Live TV URLs with the app's PIN and hand the
@@ -655,13 +647,7 @@ async fn quickpin_pair(
     if !crate::quickpin::is_valid_pin(&input.pin) {
         return Err(StoreError::Invalid("enter the 8-character PIN shown on the app").into());
     }
-    let server = match input.server.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(server) => {
-            state.store.save_quickpin_server(server).await?;
-            server.to_string()
-        }
-        None => resolve_pin_server(&state).await,
-    };
+    let server = resolve_pin_server();
     let settings = state.store.general_settings().await?;
     if settings.local_url.trim().is_empty() && settings.public_url.trim().is_empty() {
         return Err(StoreError::Invalid(

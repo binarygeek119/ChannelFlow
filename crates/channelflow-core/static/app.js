@@ -1855,7 +1855,7 @@ function connectionCard(connection) {
   const meta = document.createElement("div");
   meta.className = "ms-meta";
   meta.innerHTML =
-    `<span>${escapeHtml(config.url || "no URL")}</span>` +
+    `<a href="${escapeHtml(config.url || "#")}" target="_blank" rel="noopener" class="ms-url">${escapeHtml(config.url || "no URL")}</a>` +
     (config.enabled === false ? `<span class="ms-status">disabled</span>` : "") +
     `<span class="ms-status">Not tested</span>`;
   card.append(head, meta, connectionActions(card, connection));
@@ -1966,7 +1966,11 @@ async function renderConnectionLibraries(list, connection) {
   const sync = LIBRARY_ROUTES[connection.kind]
     ? `<button type="button" class="primary" data-lib-sync="${connection.id}">Sync now</button>`
     : "";
-  box.innerHTML = `<div class="library-box-head"><h3>${name}</h3>${sync}</div>`;
+  const browse = config.url
+    ? `<a href="${escapeHtml(config.url)}" target="_blank" rel="noopener" class="link">Browse server</a>`
+    : "";
+  box.innerHTML =
+    `<div class="library-box-head"><h3>${name}</h3><div class="libbox-actions">${browse}${sync}</div></div>`;
   if (!libraries.length) {
     box.innerHTML +=
       '<p class="hint">This server exposes no libraries (or the key cannot list them).</p>';
@@ -2723,7 +2727,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "44";
+const UI_BUILD = "45";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

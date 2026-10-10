@@ -602,6 +602,9 @@ td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; }
 .library-box { border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; background: var(--card-bg); }
 .library-box-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.35rem; }
 .library-box-head h3 { margin: 0; font-size: 1rem; }
+.libbox-actions { display: flex; align-items: center; gap: 0.6rem; }
+.ms-url { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+.ms-url:hover { text-decoration: underline; }
 .library-type { margin: 0.6rem 0 0.15rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .lib-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.4rem 0; border-top: 1px solid var(--border); }
 .lib-name { font-size: 0.9rem; }

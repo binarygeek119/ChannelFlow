@@ -194,7 +194,7 @@ pub struct CatalogItem {
     /// The base's Media page groups these into Movies / TV shows / Music /
     /// Music videos tabs.
     pub kind: String,
-    /// The source's own stable id for the item (deduplication key).
+    /// The source's own stable id for the item (deduplication within a source).
     pub remote_id: String,
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,6 +207,11 @@ pub struct CatalogItem {
     /// The library the item was synced from.
     #[serde(default)]
     pub library: String,
+    /// Cross-source identity (e.g. `"imdb:tt1375666"` or `"tmdb:27205"`), used
+    /// by the base to recognise the same media coming from another source. When
+    /// absent the base matches on kind + title + year.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_id: Option<String>,
 }
 
 impl CatalogItem {
@@ -219,6 +224,7 @@ impl CatalogItem {
             overview: None,
             poster_path: None,
             library: String::new(),
+            match_id: None,
         }
     }
 
@@ -239,6 +245,11 @@ impl CatalogItem {
 
     pub fn library(mut self, library: &str) -> Self {
         self.library = library.to_string();
+        self
+    }
+
+    pub fn match_id(mut self, match_id: Option<String>) -> Self {
+        self.match_id = match_id;
         self
     }
 }

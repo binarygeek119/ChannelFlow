@@ -163,3 +163,20 @@
     color: var(--muted);
     padding-top: 0.1em;
 }
+
+/* Source badges: which media source(s) provide an item. */
+.media-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.3rem 2px 0;
+}
+.media-source-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+}

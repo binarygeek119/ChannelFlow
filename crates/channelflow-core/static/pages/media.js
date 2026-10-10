@@ -1,7 +1,7 @@
 // Media page: what every media source synced, read from ChannelFlow's own
-// catalog. Each kind tab lists its source libraries the way Jellyfin's web UI
-// shows a library — a header naming the library, then a responsive grid of
-// poster cards — rather than a flat list.
+// catalog. The catalog is one entry per media, so a film that is in both
+// Jellyfin and Plex is one card showing both sources. Each kind tab lists its
+// items the way Jellyfin's web UI shows a library — a responsive poster grid.
 
 const MEDIA_TABS = [
   { key: "movies", label: "Movies", kinds: ["movie"], shape: "portrait" },
@@ -9,9 +9,15 @@ const MEDIA_TABS = [
   { key: "music", label: "Music", kinds: ["album", "artist"], shape: "square" },
   { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"], shape: "portrait" },
 ];
+const MEDIA_SOURCE_LABELS = {
+  jellyfin: "Jellyfin",
+  plex: "Plex",
+  emby: "Emby",
+  local: "Local",
+};
+
 let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
-let mediaConnections = [];
 let mediaPageKey = "movies";
 
 async function loadMedia() {
@@ -20,7 +26,6 @@ async function loadMedia() {
     const data = await request("/api/media");
     mediaItems = data.items || [];
     mediaCounts = data.counts || mediaCounts;
-    mediaConnections = (await request("/api/connections")).connections || [];
   } catch (error) {
     mediaItems = [];
     mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
@@ -47,11 +52,6 @@ function renderMediaTabs() {
   });
 }
 
-function connectionNameFor(id) {
-  const row = mediaConnections.find((connection) => connection.id === id);
-  return (row && row.config && row.config.name) || `connection ${id}`;
-}
-
 function mediaPosterUrl(path) {
   if (!path) return null;
   return `/api/media/image?path=${encodeURIComponent(path)}`;
@@ -64,8 +64,14 @@ function mediaKindLabel(kind) {
   );
 }
 
+// The distinct sources providing an item, as human labels.
+function mediaSourceLabels(item) {
+  const kinds = [...new Set((item.sources || []).map((source) => source.source_kind))];
+  return kinds.map((kind) => MEDIA_SOURCE_LABELS[kind] || kind);
+}
+
 // A Jellyfin-style poster card: a fixed-ratio poster with a hover dim + play
-// badge, and the title/year beneath.
+// badge, the title/year beneath, and a badge per source that provides it.
 function mediaCard(item, shape) {
   const card = document.createElement("div");
   card.className = "card jf-card";
@@ -75,6 +81,12 @@ function mediaCard(item, shape) {
     ? `<div class="cardImage" style="background-image:url('${escapeHtml(poster)}')"></div>`
     : `<div class="cardImage cardImage-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
   const secondary = item.year ? String(item.year) : mediaKindLabel(item.kind);
+  const sources = mediaSourceLabels(item);
+  const badges = sources.length
+    ? `<div class="media-sources">${sources
+        .map((label) => `<span class="media-source-badge">${escapeHtml(label)}</span>`)
+        .join("")}</div>`
+    : "";
   card.innerHTML =
     `<div class="cardBox">` +
       `<div class="cardScalable">` +
@@ -89,6 +101,7 @@ function mediaCard(item, shape) {
       `<div class="cardFooter">` +
         `<div class="cardText cardText-first">${escapeHtml(item.title)}</div>` +
         `<div class="cardText cardText-secondary">${escapeHtml(secondary)}</div>` +
+        badges +
       `</div>` +
     `</div>`;
   return card;
@@ -116,31 +129,12 @@ function renderMediaPage(key) {
     );
     return;
   }
-  // One Jellyfin-style library section per source library.
-  const byLibrary = new Map();
-  items.forEach((item) => {
-    const groupKey = `${item.connection_id}::${item.library || ""}`;
-    if (!byLibrary.has(groupKey)) byLibrary.set(groupKey, { items: [], library: item.library, connection_id: item.connection_id });
-    byLibrary.get(groupKey).items.push(item);
-  });
-  for (const group of byLibrary.values()) {
-    const section = document.createElement("section");
-    section.className = "jf-library";
-    const source = connectionNameFor(group.connection_id);
-    const heading = group.library ? escapeHtml(group.library) : "Library";
-    section.innerHTML =
-      `<div class="jf-library-head">` +
-        `<h3>${heading}</h3>` +
-        `<span class="jf-library-meta">${escapeHtml(source)} · ${group.items.length} item(s)</span>` +
-      `</div>`;
-    const grid = document.createElement("div");
-    grid.className = "itemsContainer vertical-wrap";
-    group.items
-      .sort((a, b) => String(a.title).localeCompare(String(b.title)))
-      .forEach((item) => grid.appendChild(mediaCard(item, spec.shape)));
-    section.appendChild(grid);
-    host.appendChild(section);
-  }
+  const grid = document.createElement("div");
+  grid.className = "itemsContainer vertical-wrap";
+  items
+    .sort((a, b) => String(a.title).localeCompare(String(b.title)))
+    .forEach((item) => grid.appendChild(mediaCard(item, spec.shape)));
+  host.appendChild(grid);
 }
 
 CF.define("media", { onShow: loadMedia });

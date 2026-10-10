@@ -467,26 +467,36 @@ impl Store {
     }
 
     // ── local media catalog ────────────────────────────────────────────────
-    // The Media page reads what sync put into the core's own catalog — the
-    // same rows any media source reports — so it works identically for every
-    // source without asking the live server. File: one JSON document; Postgres
-    // keeps a real `media_catalog` table.
+    // The base owns one catalog for every media source. A plugin reports the
+    // items it synced for a connection + library; the core merges them into one
+    // entry per media — matched by a provider id when given, else kind + title
+    // + year — and records which sources provide it, so a film that is in both
+    // Jellyfin and Plex is a single item with two sources.
 
-    /// Replace every catalog row for one connection + library with `items`
-    /// (the result of one sync pass).
+    /// Replace the catalog *sources* for one connection + library with `items`
+    /// (the result of one sync pass for that library).
     pub async fn media_replace_library(
         &self,
         connection_id: i64,
         library: &str,
         items: &[CatalogItem],
     ) -> Result<usize, StoreError> {
+        let source_kind = self
+            .connection_kind(connection_id)
+            .await?
+            .unwrap_or_else(|| "source".to_string());
         match &self.snapshot().await {
-            Backend::Files => file::media_replace_library(&self.root, connection_id, library, items),
-            Backend::Postgres(pool) => pg::media_replace_library(pool, connection_id, library, items).await,
+            Backend::Files => {
+                file::media_replace_library(&self.root, connection_id, &source_kind, library, items)
+            }
+            Backend::Postgres(pool) => {
+                pg::media_replace_library(pool, connection_id, &source_kind, library, items).await
+            }
         }
     }
 
-    /// Drop every catalog row for a connection (it was deleted).
+    /// Drop every catalog source for a connection (it was deleted) and prune
+    /// any media left with no sources.
     pub async fn media_clear_connection(&self, connection_id: i64) -> Result<(), StoreError> {
         match &self.snapshot().await {
             Backend::Files => file::media_clear_connection(&self.root, connection_id),
@@ -494,12 +504,22 @@ impl Store {
         }
     }
 
-    /// Every catalog row, oldest first, for the Media page.
+    /// Every catalog item with its sources, for the Media page.
     pub async fn media_list(&self) -> Result<Vec<serde_json::Value>, StoreError> {
         match &self.snapshot().await {
             Backend::Files => file::media_list(&self.root),
             Backend::Postgres(pool) => pg::media_list(pool).await,
         }
+    }
+
+    /// The kind (jellyfin / plex / emby / local / …) of a connection.
+    pub async fn connection_kind(&self, id: i64) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .connection_list()
+            .await?
+            .into_iter()
+            .find(|row| row["id"].as_i64() == Some(id))
+            .and_then(|row| row["kind"].as_str().map(str::to_string)))
     }
 
     /// Where media-source plugins write posters and people images:
@@ -1019,6 +1039,21 @@ impl PluginStorage for NamespacedStorage {
     }
 }
 
+/// The identity the base matches a media item on, so the same title from two
+/// sources is one catalog entry. A provider id (e.g. `imdb:tt1375666`) wins;
+/// otherwise kind + normalized title + year.
+fn match_key(kind: &str, match_id: Option<&str>, title: &str, year: Option<i32>) -> String {
+    if let Some(id) = match_id.map(str::trim).filter(|id| !id.is_empty()) {
+        return format!("{kind}:{}", id.to_ascii_lowercase());
+    }
+    let normalized: String = title
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    format!("{kind}:{normalized}:{}", year.unwrap_or(0))
+}
+
 /// The file backend. Writing goes through a temp file plus rename, so a
 /// crash halfway never leaves a half-written document behind.
 mod file {
@@ -1303,9 +1338,10 @@ mod file {
     }
 
     // ── local media catalog ────────────────────────────────────────────────
-    // `<config>/media_catalog.json`: a flat array of the rows sync reported,
-    // oldest first. Postgres keeps the same data in `media_catalog`; the file
-    // shape matches the pg rows so the API layer is backend-agnostic.
+    // `<config>/media_catalog.json`: `{ "items": [ { match_key, kind, title,
+    // year, overview, poster_path, sources: [ { source_kind, connection_id,
+    // library, remote_id, poster_path } ] } ] }`. Postgres keeps the same data
+    // in `media_items` + `media_item_sources`.
 
     fn media_catalog_path(root: &Path) -> PathBuf {
         root.join("media_catalog.json")
@@ -1319,52 +1355,106 @@ mod file {
             Err(error) => return Err(error.into()),
         };
         let value: serde_json::Value = serde_json::from_str(&text)?;
-        Ok(value.as_array().cloned().unwrap_or_default())
+        Ok(value
+            .get("items")
+            .and_then(|items| items.as_array())
+            .cloned()
+            .unwrap_or_default())
     }
 
-    fn write_media_catalog(
-        root: &Path,
-        rows: &[serde_json::Value],
-    ) -> Result<(), StoreError> {
-        let json = serde_json::to_string_pretty(&serde_json::Value::Array(rows.to_vec()))?;
+    fn write_media_catalog(root: &Path, items: &[serde_json::Value]) -> Result<(), StoreError> {
+        let json = serde_json::to_string_pretty(&serde_json::json!({ "items": items }))?;
         write_private(&media_catalog_path(root), &json)?;
         Ok(())
+    }
+
+    fn has_sources(entry: &serde_json::Value) -> bool {
+        entry["sources"]
+            .as_array()
+            .is_some_and(|sources| !sources.is_empty())
     }
 
     pub fn media_replace_library(
         root: &Path,
         connection_id: i64,
+        source_kind: &str,
         library: &str,
         items: &[CatalogItem],
     ) -> Result<usize, StoreError> {
-        let mut rows = read_media_catalog(root)?;
-        rows.retain(|row| {
-            row["connection_id"].as_i64() != Some(connection_id)
-                || row["library"].as_str() != Some(library)
-        });
+        let mut catalog = read_media_catalog(root)?;
+        for entry in catalog.iter_mut() {
+            if let Some(sources) = entry.get_mut("sources").and_then(serde_json::Value::as_array_mut) {
+                sources.retain(|source| {
+                    !(source["source_kind"].as_str() == Some(source_kind)
+                        && source["connection_id"].as_i64() == Some(connection_id)
+                        && source["library"].as_str() == Some(library))
+                });
+            }
+        }
         for item in items {
-            rows.push(serde_json::json!({
+            let key = super::match_key(&item.kind, item.match_id.as_deref(), &item.title, item.year);
+            let source = serde_json::json!({
+                "source_kind": source_kind,
                 "connection_id": connection_id,
                 "library": library,
-                "kind": item.kind,
                 "remote_id": item.remote_id,
-                "title": item.title,
-                "year": item.year,
-                "overview": item.overview,
                 "poster_path": item.poster_path,
-            }));
+            });
+            match catalog
+                .iter_mut()
+                .find(|entry| entry["match_key"].as_str() == Some(key.as_str()))
+            {
+                Some(entry) => {
+                    entry["title"] = serde_json::json!(item.title);
+                    if item.year.is_some() {
+                        entry["year"] = serde_json::json!(item.year);
+                    }
+                    if item.overview.is_some() {
+                        entry["overview"] = serde_json::json!(item.overview);
+                    }
+                    if item.poster_path.is_some() {
+                        entry["poster_path"] = serde_json::json!(item.poster_path);
+                    }
+                    let already = entry["sources"].as_array().is_some_and(|sources| {
+                        sources.iter().any(|source| {
+                            source["source_kind"].as_str() == Some(source_kind)
+                                && source["connection_id"].as_i64() == Some(connection_id)
+                                && source["remote_id"].as_str() == Some(item.remote_id.as_str())
+                        })
+                    });
+                    if !already {
+                        if let Some(sources) = entry["sources"].as_array_mut() {
+                            sources.push(source);
+                        } else {
+                            entry["sources"] = serde_json::json!([source]);
+                        }
+                    }
+                }
+                None => catalog.push(serde_json::json!({
+                    "match_key": key,
+                    "kind": item.kind,
+                    "title": item.title,
+                    "year": item.year,
+                    "overview": item.overview,
+                    "poster_path": item.poster_path,
+                    "sources": [source],
+                })),
+            }
         }
-        write_media_catalog(root, &rows)?;
+        catalog.retain(has_sources);
+        write_media_catalog(root, &catalog)?;
         Ok(items.len())
     }
 
     pub fn media_clear_connection(root: &Path, connection_id: i64) -> Result<(), StoreError> {
-        let rows = read_media_catalog(root)?;
-        let rows: Vec<serde_json::Value> = rows
-            .into_iter()
-            .filter(|row| row["connection_id"].as_i64() != Some(connection_id))
-            .collect();
-        write_media_catalog(root, &rows)
+        let mut catalog = read_media_catalog(root)?;
+        for entry in catalog.iter_mut() {
+            if let Some(sources) = entry.get_mut("sources").and_then(serde_json::Value::as_array_mut) {
+                sources.retain(|source| source["connection_id"].as_i64() != Some(connection_id));
+            }
+        }
+        catalog.retain(has_sources);
+        write_media_catalog(root, &catalog)
     }
 
     pub fn media_list(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
@@ -1421,21 +1511,33 @@ mod pg {
                 config JSONB NOT NULL DEFAULT '{}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
-            // The core's own media catalog: one row per item a media source
-            // reported during sync. Plugins never read this table — it feeds
-            // the base Media page, which must work the same for any source.
-            "CREATE TABLE IF NOT EXISTS media_catalog (
-                connection_id BIGINT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
-                library TEXT NOT NULL,
+            // The base's own media catalog: one row per media (matched across
+            // sources) plus the sources that provide it. Plugins never read
+            // these tables — they feed the base Media page, which must work the
+            // same for any source.
+            "DROP TABLE IF EXISTS media_catalog",
+            "CREATE TABLE IF NOT EXISTS media_items (
+                id BIGSERIAL PRIMARY KEY,
+                match_key TEXT NOT NULL UNIQUE,
                 kind TEXT NOT NULL,
-                remote_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 year INTEGER,
                 overview TEXT,
                 poster_path TEXT,
-                synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (connection_id, library, kind, remote_id)
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
+            "CREATE TABLE IF NOT EXISTS media_item_sources (
+                item_id BIGINT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                source_kind TEXT NOT NULL,
+                connection_id BIGINT NOT NULL,
+                library TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                poster_path TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (item_id, source_kind, connection_id, library, remote_id)
+            )",
+            "CREATE INDEX IF NOT EXISTS media_item_sources_conn \
+                ON media_item_sources (connection_id, library)",
         ] {
             sqlx::query(statement).execute(pool).await?;
         }
@@ -1785,34 +1887,65 @@ mod pg {
     pub async fn media_replace_library(
         pool: &PgPool,
         connection_id: i64,
+        source_kind: &str,
         library: &str,
         items: &[CatalogItem],
     ) -> Result<usize, StoreError> {
         let mut tx = pool.begin().await?;
         sqlx::query(
-            "DELETE FROM media_catalog WHERE connection_id = $1 AND library = $2",
+            "DELETE FROM media_item_sources \
+             WHERE source_kind = $1 AND connection_id = $2 AND library = $3",
         )
+        .bind(source_kind)
         .bind(connection_id)
         .bind(library)
         .execute(&mut *tx)
         .await?;
         for item in items {
-            sqlx::query(
-                "INSERT INTO media_catalog \
-                 (connection_id, library, kind, remote_id, title, year, overview, poster_path) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            let key = super::match_key(&item.kind, item.match_id.as_deref(), &item.title, item.year);
+            let row = sqlx::query(
+                "INSERT INTO media_items (match_key, kind, title, year, overview, poster_path, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, now()) \
+                 ON CONFLICT (match_key) DO UPDATE SET \
+                     title = EXCLUDED.title, \
+                     year = COALESCE(EXCLUDED.year, media_items.year), \
+                     overview = COALESCE(EXCLUDED.overview, media_items.overview), \
+                     poster_path = COALESCE(EXCLUDED.poster_path, media_items.poster_path), \
+                     updated_at = now() \
+                 RETURNING id",
             )
-            .bind(connection_id)
-            .bind(library)
+            .bind(&key)
             .bind(&item.kind)
-            .bind(&item.remote_id)
             .bind(&item.title)
             .bind(item.year)
             .bind(&item.overview)
             .bind(&item.poster_path)
+            .fetch_one(&mut *tx)
+            .await?;
+            let item_id: i64 = row.try_get("id")?;
+            sqlx::query(
+                "INSERT INTO media_item_sources \
+                 (item_id, source_kind, connection_id, library, remote_id, poster_path, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, now()) \
+                 ON CONFLICT (item_id, source_kind, connection_id, library, remote_id) DO UPDATE SET \
+                     poster_path = EXCLUDED.poster_path, updated_at = now()",
+            )
+            .bind(item_id)
+            .bind(source_kind)
+            .bind(connection_id)
+            .bind(library)
+            .bind(&item.remote_id)
+            .bind(&item.poster_path)
             .execute(&mut *tx)
             .await?;
         }
+        // A media entry with no sources is no longer provided by anything.
+        sqlx::query(
+            "DELETE FROM media_items \
+             WHERE NOT EXISTS (SELECT 1 FROM media_item_sources s WHERE s.item_id = media_items.id)",
+        )
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(items.len())
     }
@@ -1821,40 +1954,47 @@ mod pg {
         pool: &PgPool,
         connection_id: i64,
     ) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM media_catalog WHERE connection_id = $1")
+        sqlx::query("DELETE FROM media_item_sources WHERE connection_id = $1")
             .bind(connection_id)
             .execute(pool)
             .await?;
+        sqlx::query(
+            "DELETE FROM media_items \
+             WHERE NOT EXISTS (SELECT 1 FROM media_item_sources s WHERE s.item_id = media_items.id)",
+        )
+        .execute(pool)
+        .await?;
         Ok(())
     }
 
     pub async fn media_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
         let rows = sqlx::query(
-            "SELECT connection_id, library, kind, remote_id, title, year, overview, \
-                    poster_path \
-             FROM media_catalog ORDER BY connection_id, library, kind, title",
+            "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
+                    COALESCE(json_agg(json_build_object( \
+                        'source_kind', s.source_kind, 'connection_id', s.connection_id, \
+                        'library', s.library, 'remote_id', s.remote_id, \
+                        'poster_path', s.poster_path) \
+                        ORDER BY s.source_kind, s.connection_id) \
+                        FILTER (WHERE s.item_id IS NOT NULL), '[]'::json) AS sources \
+             FROM media_items m \
+             LEFT JOIN media_item_sources s ON s.item_id = m.id \
+             GROUP BY m.id \
+             ORDER BY m.kind, m.title",
         )
         .fetch_all(pool)
         .await?;
         let mut items = Vec::new();
         for row in rows {
-            let connection_id: i64 = row.try_get("connection_id")?;
-            let library: String = row.try_get("library")?;
-            let kind: String = row.try_get("kind")?;
-            let remote_id: String = row.try_get("remote_id")?;
-            let title: String = row.try_get("title")?;
-            let year: Option<i32> = row.try_get("year")?;
-            let overview: Option<String> = row.try_get("overview")?;
-            let poster_path: Option<String> = row.try_get("poster_path")?;
+            let sources: serde_json::Value =
+                row.try_get::<Json<serde_json::Value>, _>("sources")?.0;
             items.push(serde_json::json!({
-                "connection_id": connection_id,
-                "library": library,
-                "kind": kind,
-                "remote_id": remote_id,
-                "title": title,
-                "year": year,
-                "overview": overview,
-                "poster_path": poster_path,
+                "match_key": row.try_get::<String, _>("match_key")?,
+                "kind": row.try_get::<String, _>("kind")?,
+                "title": row.try_get::<String, _>("title")?,
+                "year": row.try_get::<Option<i32>, _>("year")?,
+                "overview": row.try_get::<Option<String>, _>("overview")?,
+                "poster_path": row.try_get::<Option<String>, _>("poster_path")?,
+                "sources": sources,
             }));
         }
         Ok(items)

@@ -51,7 +51,43 @@ function mediaTabForKind(kind) {
   return tab ? tab.key : "movies";
 }
 
+// ── TV: series → seasons → episodes ───────────────────────────────────────
+// Seasons and episodes aren't in the catalog; the media page asks the server
+// live through the base's TV endpoints.
+
+const TV_ROUTES = {
+  season: "/api/media/tv/seasons",
+  episodes: "/api/media/tv/episodes",
+  image: "/api/media/tv/episode-image",
+};
+
+function mediaTvRouteFromPath(path) {
+  const season = path.match(/^\/webui\/media\/season\/([^/]+)\/([^/]+)$/);
+  if (season) {
+    return {
+      type: "season",
+      seriesKey: decodeURIComponent(season[1]),
+      seasonId: decodeURIComponent(season[2]),
+    };
+  }
+  const episode = path.match(/^\/webui\/media\/episode\/([^/]+)\/([^/]+)\/([^/]+)$/);
+  if (episode) {
+    return {
+      type: "episode",
+      seriesKey: decodeURIComponent(episode[1]),
+      seasonId: decodeURIComponent(episode[2]),
+      episodeId: decodeURIComponent(episode[3]),
+    };
+  }
+  return null;
+}
+
 async function loadMedia() {
+  const tvRoute = mediaTvRouteFromPath(location.pathname);
+  if (tvRoute) {
+    await renderTvPage(tvRoute);
+    return;
+  }
   const itemKey = mediaItemKeyFromPath(location.pathname);
   if (itemKey) {
     await renderMediaItem(itemKey);
@@ -268,8 +304,9 @@ async function renderMediaItem(matchKey) {
   const enriched = await fetchItemDetail(item);
   renderMediaDetail(detail, item, enriched);
   // Music gets its own lower sections: an artist lists their albums, an
-  // album lists its tracks.
+  // album lists its tracks. TV series list their seasons.
   await renderMusicDetail(detail, item);
+  await renderTvDetail(detail, item);
   mediaPageKey = mediaTabForKind(item.kind);
 }
 
@@ -715,6 +752,215 @@ async function renderMusicDetail(detail, item) {
 function findBaseArtist(name) {
   const wanted = normalizeMusicName(name);
   return mediaItems.find((item) => item.kind === "artist" && normalizeMusicName(item.title) === wanted);
+}
+
+// ── TV series → seasons → episodes ───────────────────────────────────────
+
+function enterMediaDetailView() {
+  const detail = $("media-detail");
+  if (detail) detail.hidden = false;
+  document.querySelectorAll("#tab-media .library-page").forEach((page) => {
+    page.hidden = true;
+  });
+  const tabs = $("media-inner-tabs");
+  if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
+  return detail;
+}
+
+function tvBackButton(label, go) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "media-back";
+  button.textContent = `← ${label}`;
+  button.addEventListener("click", go);
+  return button;
+}
+
+function tvSeasonRoute(seriesKey, seasonId) {
+  return `/webui/media/season/${encodeURIComponent(seriesKey)}/${encodeURIComponent(seasonId)}`;
+}
+
+function tvEpisodeRoute(seriesKey, seasonId, episodeId) {
+  return `/webui/media/episode/${encodeURIComponent(seriesKey)}/${encodeURIComponent(seasonId)}/${encodeURIComponent(episodeId)}`;
+}
+
+function openTvRoute(path) {
+  history.pushState(null, "", path);
+  loadMedia();
+}
+
+function tvSeasonCard(season, seriesKey) {
+  const card = document.createElement("div");
+  card.className = "media-season-card";
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  const number = season.number != null ? `Season ${season.number}` : season.name || "Season";
+  const sub = season.name && season.name !== number ? season.name : "";
+  card.innerHTML =
+    `<div class="media-season-num">${escapeHtml(number)}</div>` +
+    (sub ? `<div class="media-season-sub">${escapeHtml(sub)}</div>` : "");
+  const go = () => openTvRoute(tvSeasonRoute(seriesKey, season.id));
+  card.addEventListener("click", go);
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      go();
+    }
+  });
+  return card;
+}
+
+function tvEpisodeCard(episode, seriesKey, seasonId, connectionId) {
+  const card = document.createElement("div");
+  card.className = "media-episode-card";
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  const image = episode.has_image
+    ? `<img class="media-episode-shot" src="/api/media/tv/episode-image?connection_id=${connectionId}&item_id=${encodeURIComponent(episode.id)}" alt="" loading="lazy" onerror="this.remove(); this.closest('.media-episode-frame').querySelector('.media-episode-fallback').style.display='flex';">`
+    : "";
+  const label = episode.number != null ? `E${episode.number} · ` : "";
+  const time = formatTrackTime(episode.runtime_ticks);
+  card.innerHTML =
+    `<div class="media-episode-frame">` +
+      `<span class="media-episode-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></span>` +
+      image +
+    `</div>` +
+    `<div class="media-episode-title" title="${escapeHtml(episode.title || "")}">${escapeHtml(label + (episode.title || ""))}</div>` +
+    (time ? `<div class="media-episode-sub">${escapeHtml(time)}</div>` : "");
+  const go = () => openTvRoute(tvEpisodeRoute(seriesKey, seasonId, episode.id));
+  card.addEventListener("click", go);
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      go();
+    }
+  });
+  return card;
+}
+
+// The Seasons section on a series item page.
+async function renderTvDetail(detail, item) {
+  if (!detail || item.kind !== "series") return;
+  let data = null;
+  try {
+    data = await request(`${TV_ROUTES.season}?match_key=${encodeURIComponent(item.match_key)}`);
+  } catch (error) {
+    data = null;
+  }
+  const seasons = (data && data.seasons) || [];
+  if (!seasons.length) return;
+  const heading = document.createElement("h2");
+  heading.className = "media-detail-section";
+  heading.textContent = "Seasons";
+  detail.appendChild(heading);
+  const grid = document.createElement("div");
+  grid.className = "media-seasons";
+  seasons.forEach((season) => grid.appendChild(tvSeasonCard(season, item.match_key)));
+  detail.appendChild(grid);
+}
+
+async function renderTvPage(route) {
+  const detail = enterMediaDetailView();
+  if (!detail) return;
+  detail.textContent = "";
+  detail.innerHTML = '<p class="hint">Loading…</p>';
+  if (route.type === "season") {
+    await renderTvSeason(detail, route);
+  } else {
+    await renderTvEpisode(detail, route);
+  }
+}
+
+async function renderTvSeason(detail, route) {
+  let episodes = [];
+  let seriesTitle = "";
+  let connectionId = 0;
+  let seasonName = "";
+  try {
+    const [seasonInfo, episodeInfo] = await Promise.all([
+      request(`${TV_ROUTES.season}?match_key=${encodeURIComponent(route.seriesKey)}`),
+      request(
+        `${TV_ROUTES.episodes}?match_key=${encodeURIComponent(route.seriesKey)}&season_id=${encodeURIComponent(route.seasonId)}`
+      ),
+    ]);
+    seriesTitle = seasonInfo.title || "";
+    connectionId = episodeInfo.connection_id || 0;
+    episodes = episodeInfo.episodes || [];
+    const season = (seasonInfo.seasons || []).find((entry) => entry.id === route.seasonId);
+    if (season) seasonName = season.number != null ? `Season ${season.number}` : season.name || "";
+  } catch (error) {
+    episodes = [];
+  }
+  detail.textContent = "";
+  detail.appendChild(
+    tvBackButton(seriesTitle || "Series", () =>
+      openTvRoute(`/webui/media/item/${encodeURIComponent(route.seriesKey)}`)
+    )
+  );
+  const heading = document.createElement("h2");
+  heading.className = "media-detail-section";
+  heading.textContent = seasonName || "Season";
+  detail.appendChild(heading);
+  if (!episodes.length) {
+    detail.appendChild(libraryCard('<p class="hint">No episodes on this season.</p>'));
+    return;
+  }
+  const grid = document.createElement("div");
+  grid.className = "media-episodes";
+  episodes.forEach((episode) => grid.appendChild(tvEpisodeCard(episode, route.seriesKey, route.seasonId, connectionId)));
+  detail.appendChild(grid);
+}
+
+async function renderTvEpisode(detail, route) {
+  let episode = null;
+  let seriesTitle = "";
+  let connectionId = 0;
+  try {
+    const info = await request(
+      `${TV_ROUTES.episodes}?match_key=${encodeURIComponent(route.seriesKey)}&season_id=${encodeURIComponent(route.seasonId)}`
+    );
+    seriesTitle = info.title || "";
+    connectionId = info.connection_id || 0;
+    episode = (info.episodes || []).find((entry) => entry.id === route.episodeId) || null;
+  } catch (error) {
+    episode = null;
+  }
+  detail.textContent = "";
+  detail.appendChild(
+    tvBackButton("Season", () => openTvRoute(tvSeasonRoute(route.seriesKey, route.seasonId)))
+  );
+  if (!episode) {
+    detail.appendChild(libraryCard('<p class="hint bad">That episode isn\u2019t available.</p>'));
+    return;
+  }
+  const seriesLink = document.createElement("button");
+  seriesLink.type = "button";
+  seriesLink.className = "media-series-link";
+  seriesLink.textContent = seriesTitle;
+  seriesLink.addEventListener("click", () =>
+    openTvRoute(`/webui/media/item/${encodeURIComponent(route.seriesKey)}`)
+  );
+  detail.appendChild(seriesLink);
+
+  const shot = episode.has_image
+    ? `<div class="media-episode-hero" style="background-image:url('/api/media/tv/episode-image?connection_id=${connectionId}&item_id=${encodeURIComponent(episode.id)}')"></div>`
+    : "";
+  const chips = [];
+  if (episode.season != null && episode.number != null) chips.push(`S${episode.season}E${episode.number}`);
+  if (episode.year) chips.push(String(episode.year));
+  const runtime = formatTrackTime(episode.runtime_ticks);
+  if (runtime) chips.push(runtime);
+  const play = episode.web_url
+    ? `<a class="primary media-play" href="${escapeHtml(episode.web_url)}" target="_blank" rel="noopener">▶ Play episode</a>`
+    : "";
+  const body = document.createElement("div");
+  body.innerHTML =
+    shot +
+    `<h1>${escapeHtml(episode.title || "")}</h1>` +
+    (chips.length ? `<div class="media-detail-meta">${chips.map((chip) => `<span class="media-detail-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : "") +
+    (play ? `<div class="media-detail-actions">${play}</div>` : "") +
+    (episode.overview ? `<p class="media-detail-overview">${escapeHtml(episode.overview)}</p>` : "");
+  detail.appendChild(body);
 }
 
 CF.define("media", { onShow: loadMedia });

@@ -114,6 +114,9 @@ pub fn router(
         .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
         .route("/api/media/source-index", get(media_source_index))
+        .route("/api/media/tv/seasons", get(tv_seasons))
+        .route("/api/media/tv/episodes", get(tv_episodes))
+        .route("/api/media/tv/episode-image", get(tv_episode_image))
         .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
         .route("/live/{asset}", get(live_pending))
@@ -1627,6 +1630,269 @@ async fn enrich_source_web_urls(
         }
     }
     Ok(())
+}
+
+// ── TV: seasons and episodes, live from the media server ─────────────────
+// Seasons aren't stored by the sync (the TV walk can't finish on a slow
+// server), so the Media page asks the server directly; the base holds the
+// connection secret and the browser never sees it.
+
+#[derive(Deserialize)]
+struct TvSeasonsQuery {
+    match_key: String,
+}
+
+#[derive(Deserialize)]
+struct TvEpisodesQuery {
+    match_key: String,
+    season_id: String,
+}
+
+#[derive(Deserialize)]
+struct TvEpisodeImageQuery {
+    connection_id: i64,
+    item_id: String,
+}
+
+fn tv_connection_config(
+    connections: &[serde_json::Value],
+    connection_id: i64,
+) -> Option<channelflow_plugin_api::media::Connection> {
+    connections
+        .iter()
+        .find(|row| row["id"].as_i64() == Some(connection_id))
+        .and_then(|row| serde_json::from_value(row["config"].clone()).ok())
+}
+
+/// The jellyfin source (connection id + remote id) behind a catalog item.
+fn jellyfin_source_of(item: &serde_json::Value) -> Option<(i64, String)> {
+    item["sources"].as_array().and_then(|sources| {
+        sources.iter().find_map(|source| {
+            if source["source_kind"].as_str() == Some("jellyfin") {
+                Some((
+                    source["connection_id"].as_i64().unwrap_or(0),
+                    source["remote_id"].as_str().unwrap_or("").to_string(),
+                ))
+            } else {
+                None
+            }
+        })
+    })
+}
+
+/// The authenticated GET helpers for a connection (header + query forms the
+/// Jellyfin client uses), with a bounded timeout so a slow server never hangs
+/// the Media page.
+struct TvJellyfin<'a> {
+    client: &'a reqwest::Client,
+    connection: channelflow_plugin_api::media::Connection,
+}
+
+impl<'a> TvJellyfin<'a> {
+    fn new(
+        client: &'a reqwest::Client,
+        connections: &[serde_json::Value],
+        connection_id: i64,
+    ) -> Option<Self> {
+        tv_connection_config(connections, connection_id).map(|connection| Self {
+            client,
+            connection,
+        })
+    }
+
+    fn get(&self, path: &str) -> reqwest::RequestBuilder {
+        let base = self.connection.url.trim().trim_end_matches('/');
+        let key = &self.connection.api_key;
+        self.client
+            .get(format!("{base}{path}"))
+            .header("X-Emby-Token", key)
+            .header("Authorization", format!("MediaBrowser Token=\"{key}\""))
+            .header("Accept", "application/json")
+            .timeout(std::time::Duration::from_secs(25))
+    }
+}
+
+/// The seasons of the series behind a match key, straight from the server.
+async fn tv_seasons(State(state): State<AppState>, Query(query): Query<TvSeasonsQuery>) -> Response {
+    let Ok(rows) = state.store.media_list().await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "catalog unavailable" }))).into_response();
+    };
+    let item = match rows.iter().find(|row| row["match_key"].as_str() == Some(query.match_key.as_str())) {
+        Some(item) => item,
+        None => return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such series" }))).into_response(),
+    };
+    let Ok(connections) = state.store.connection_list().await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "connections unavailable" }))).into_response();
+    };
+    let Some((connection_id, series_id)) = jellyfin_source_of(item) else {
+        return Json(json!({ "seasons": [] })).into_response();
+    };
+    let Some(tv) = TvJellyfin::new(&state.http, &connections, connection_id) else {
+        return Json(json!({ "seasons": [] })).into_response();
+    };
+    let response = match tv.get(&format!("/Shows/{series_id}/Seasons")).send().await {
+        Ok(response) => response,
+        Err(_) => return Json(json!({ "seasons": [] })).into_response(),
+    };
+    if !response.status().is_success() {
+        return Json(json!({ "seasons": [] })).into_response();
+    }
+    let value: serde_json::Value = match response.json().await {
+        Ok(value) => value,
+        Err(_) => return Json(json!({ "seasons": [] })).into_response(),
+    };
+    let seasons: Vec<serde_json::Value> = value
+        .get("Items")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|season| {
+            let id = season.get("Id").and_then(serde_json::Value::as_str)?.to_string();
+            let name = season.get("Name").and_then(serde_json::Value::as_str).map(str::to_string);
+            let number = season.get("IndexNumber").and_then(serde_json::Value::as_i64);
+            Some(serde_json::json!({ "id": id, "name": name, "number": number }))
+        })
+        .collect();
+    Json(json!({
+        "title": item["title"],
+        "match_key": item["match_key"],
+        "seasons": seasons,
+    }))
+    .into_response()
+}
+
+/// The episodes of one season, straight from the server.
+async fn tv_episodes(State(state): State<AppState>, Query(query): Query<TvEpisodesQuery>) -> Response {
+    let Ok(rows) = state.store.media_list().await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "catalog unavailable" }))).into_response();
+    };
+    let item = match rows.iter().find(|row| row["match_key"].as_str() == Some(query.match_key.as_str())) {
+        Some(item) => item,
+        None => return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such series" }))).into_response(),
+    };
+    let Ok(connections) = state.store.connection_list().await else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "connections unavailable" }))).into_response();
+    };
+    let Some((connection_id, series_id)) = jellyfin_source_of(item) else {
+        return Json(json!({ "episodes": [] })).into_response();
+    };
+    let Some(connection) = tv_connection_config(&connections, connection_id) else {
+        return Json(json!({ "episodes": [] })).into_response();
+    };
+    let tv = TvJellyfin::new(&state.http, &connections, connection_id).expect("connection present");
+    let fields = "Name,IndexNumber,ParentIndexNumber,ProductionYear,RunTimeTicks,Overview,ImageTags,ProviderIds";
+    let response = match tv
+        .get(&format!("/Shows/{series_id}/Episodes?SeasonId={}&Fields={fields}", query.season_id))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return Json(json!({ "episodes": [] })).into_response(),
+    };
+    if !response.status().is_success() {
+        return Json(json!({ "episodes": [] })).into_response();
+    }
+    let value: serde_json::Value = match response.json().await {
+        Ok(value) => value,
+        Err(_) => return Json(json!({ "episodes": [] })).into_response(),
+    };
+    let registry = match state.store.plugin_registry().await {
+        Ok(registry) => registry,
+        Err(_) => return Json(json!({ "episodes": [] })).into_response(),
+    };
+    let installed = |plugin_id: &str| registry.get(plugin_id).is_some();
+    let series_web = state
+        .media
+        .find_installed("jellyfin", &installed)
+        .and_then(|source| source.item_web_url(&connection, &series_id))
+        .unwrap_or_default();
+    let episodes: Vec<serde_json::Value> = value
+        .get("Items")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|episode| {
+            let id = episode.get("Id").and_then(serde_json::Value::as_str)?.to_string();
+            let title = episode.get("Name").and_then(serde_json::Value::as_str).map(str::to_string);
+            let number = episode.get("IndexNumber").and_then(serde_json::Value::as_i64);
+            let season = episode.get("ParentIndexNumber").and_then(serde_json::Value::as_i64);
+            let runtime = episode.get("RunTimeTicks").and_then(serde_json::Value::as_i64);
+            let overview = episode.get("Overview").and_then(serde_json::Value::as_str).map(str::to_string);
+            let year = episode.get("ProductionYear").and_then(serde_json::Value::as_i64);
+            let has_image = episode
+                .get("ImageTags")
+                .and_then(|tags| tags.get("Primary"))
+                .is_some();
+            let web_url = if series_web.is_empty() {
+                String::new()
+            } else {
+                series_web.replace(&series_id, &id)
+            };
+            Some(serde_json::json!({
+                "id": id,
+                "title": title,
+                "number": number,
+                "season": season,
+                "runtime_ticks": runtime,
+                "overview": overview,
+                "year": year,
+                "has_image": has_image,
+                "web_url": web_url,
+            }))
+        })
+        .collect();
+    Json(json!({
+        "title": item["title"],
+        "match_key": item["match_key"],
+        "connection_id": connection_id,
+        "season_id": query.season_id,
+        "episodes": episodes,
+    }))
+    .into_response()
+}
+
+/// Proxy one episode's image (a frame of the video) from the server.
+async fn tv_episode_image(
+    State(state): State<AppState>,
+    Query(query): Query<TvEpisodeImageQuery>,
+) -> Response {
+    let Ok(connections) = state.store.connection_list().await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let Some(tv) = TvJellyfin::new(&state.http, &connections, query.connection_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let response = match tv
+        .get(&format!("/Items/{}/Images/Primary", query.item_id))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    if !response.status().is_success() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+        ],
+        axum::body::Bytes::from(bytes),
+    )
+        .into_response()
 }
 
 /// A map from a source's remote id to the catalog `match_key` of the item it

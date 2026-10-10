@@ -465,3 +465,86 @@
     font-size: 0.74rem;
     color: var(--muted);
 }
+
+/* ── TV: series → seasons → episodes ───────────────────────────────────── */
+
+.media-seasons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.9rem;
+}
+.media-season-card {
+    min-width: 0;
+    cursor: pointer;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--card-bg);
+}
+.media-season-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-season-num { font-size: 1.05rem; font-weight: 600; }
+.media-season-sub { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+
+.media-episodes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 1.1rem 0.9rem;
+}
+.media-episode-card { min-width: 0; cursor: pointer; }
+.media-episode-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-episode-frame {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border-radius: 0.25em;
+    background: #141414;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+.media-episode-frame img.media-episode-shot {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.media-episode-fallback {
+    display: none;
+    color: #4a4a4a;
+    align-items: center;
+    justify-content: center;
+}
+.media-episode-fallback svg { width: 2.2rem; height: 2.2rem; }
+.media-episode-card:not(:has(img.media-episode-shot)) .media-episode-fallback { display: flex; }
+.media-episode-title {
+    margin-top: 0.4rem;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.media-episode-sub { font-size: 0.74rem; color: var(--muted); }
+
+.media-series-link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--accent);
+    cursor: pointer;
+    margin-bottom: 0.7rem;
+}
+.media-series-link:hover { color: var(--accent-hover); }
+.media-episode-hero {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 0.4rem;
+    background-size: cover;
+    background-position: center;
+    background-color: #141414;
+    box-shadow: 0 0.25em 1em rgba(0, 0, 0, 0.5);
+    margin-bottom: 1.1rem;
+}

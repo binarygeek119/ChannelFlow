@@ -2677,8 +2677,8 @@ async function syncConnection(connection) {
   const apiKey = config.api_key || "";
   const connectionBody = { connection: config, api_key: apiKey };
   // Sync only the toggled-on libraries. With no stored selection every library
-// is included; an empty stored selection means the operator turned them all
-// off, so nothing syncs.
+  // is included; an empty stored selection means the operator turned them all
+  // off, so nothing syncs.
   const all = (await request(route.base + "/libraries", { method: "POST", body: JSON.stringify(connectionBody) })).libraries || [];
   const hasSelection = Array.isArray(config.enabled_libraries);
   const preferred = new Set(hasSelection ? config.enabled_libraries : []);
@@ -2690,11 +2690,48 @@ async function syncConnection(connection) {
     const about = await request("/api/about");
     if (about.system && about.system.configFolder) imageRoot = `${about.system.configFolder}/Images`;
   } catch (error) { /* keep the default */ }
-  const report = await request(route.base + "/sync", {
+
+  taskPopup.show(`Syncing ${config.name || "Jellyfin"}`);
+  const done = request(route.base + "/sync", {
     method: "POST",
     body: JSON.stringify({ connection_id: connection.id, ...connectionBody, libraries, image_root: imageRoot }),
   });
-  return report.report || report;
+  // Watch the plugin's live progress (stage + count) until the sync settles.
+  await pollSyncProgress(done);
+
+  let report;
+  try {
+    report = await done;
+  } catch (error) {
+    taskPopup.finish(error.message || "Sync failed.", false);
+    throw error;
+  }
+  report = (report && report.report) || report || {};
+  taskPopup.finish(
+    `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`,
+    report.errors === 0
+  );
+  return report;
+}
+
+// Poll the plugin's /progress while the sync runs and push each snapshot into
+// the popup: "Movies · 5 of 19,328", then "TV · 1,024 of 8,412", and so on.
+// Stops the moment the sync request settles (success or failure).
+async function pollSyncProgress(done) {
+  const progressUrl = LIBRARY_ROUTES.jellyfin.base + "/progress";
+  let settled = false;
+  done.finally(() => { settled = true; });
+  while (!settled) {
+    try {
+      const data = await request(progressUrl);
+      const snapshot = (data && data.progress) || {};
+      taskPopup.progress(
+        `${snapshot.label || "Library"} · ${(Number(snapshot.current) || 0).toLocaleString()}` +
+          ` of ${(Number(snapshot.total) || 0).toLocaleString()}`
+      );
+    } catch (error) { /* a transient poll failure must not kill the sync */ }
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
 }
 
 // --- task progress popup ----------------------------------------------------
@@ -2732,6 +2769,14 @@ const taskPopup = (() => {
     }, 2600);
   }
 
+  // Live progress: swap the status text while a task runs, e.g.
+  // "Movies · 5 of 19,328".
+  function progress(text) {
+    clearTimeout(holdTimer);
+    bar.className = "task-popup-bar indeterminate";
+    status.textContent = text;
+  }
+
   function run(title, work, format) {
     show(title);
     Promise.resolve()
@@ -2740,7 +2785,7 @@ const taskPopup = (() => {
       .catch((error) => finish(error.message || "Failed.", false));
   }
 
-  return { show, finish, run };
+  return { show, progress, finish, run };
 })();
 
 // --- Tasks: the Jellyfin library scan -------------------------------------

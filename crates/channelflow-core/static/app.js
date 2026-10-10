@@ -1226,12 +1226,15 @@ function renderInstalled(plugins) {
       const update = plugin.update_available
         ? `<button type="button" class="ghost" data-installed="${escapeHtml(plugin.id)}" data-act="update">Update</button>`
         : "";
+      const perms = (plugin.permissions || []).length
+        ? plugin.permissions.map((p) => `<code>${escapeHtml(p)}</code>`).join(" ")
+        : "none";
       return `<tr>
         <td><span class="channel-name">${escapeHtml(plugin.name)}</span>
             <div class="channel-desc">${escapeHtml(plugin.id)} · ${status}</div></td>
         <td>${escapeHtml(plugin.category || "—")}</td>
         <td>${escapeHtml(plugin.version)}</td>
-        <td>${plugin.permissions.length}</td>
+        <td class="perms">${perms}</td>
         <td class="${plugin.health && plugin.health.ok ? "ok" : ""}">${escapeHtml(health)}</td>
         <td class="actions">${update}
           <button type="button" class="ghost danger" data-installed="${escapeHtml(plugin.id)}" data-act="remove">Remove</button>
@@ -1278,12 +1281,19 @@ function renderStore(catalog, installed) {
       const install = plugin.compatible
         ? `<button type="button" class="primary" data-store="${escapeHtml(plugin.id)}" data-url="${escapeHtml(plugin.repository)}" data-version="${escapeHtml(latest)}">Install</button>`
         : `<button type="button" class="ghost" disabled title="No version runs on this base">Incompatible</button>`;
+      // The permissions the plugin asks for. The repository manifest carries
+      // none, so this comes from the plugin's own manifest when this build
+      // ships it; "unknown" means it is not part of this build.
+      const perms = (plugin.permissions || []).length
+        ? plugin.permissions.map((p) => `<code>${escapeHtml(p)}</code>`).join(" ")
+        : '<span class="plugin-perms-unknown">not part of this build</span>';
       return `<article class="plugin-card">
         ${banner}
         <div class="plugin-card-body">
           <h4>${escapeHtml(plugin.name)}</h4>
           <p class="plugin-card-meta">${escapeHtml(plugin.category || "plugin")} · v${escapeHtml(latest)} · ${escapeHtml(plugin.owner || "")}</p>
           <p class="channel-desc">${escapeHtml(plugin.description)}</p>
+          <p class="plugin-perms"><strong>Permissions:</strong> ${perms}</p>
           <div class="plugin-card-actions">${install}</div>
         </div>
       </article>`;
@@ -2263,7 +2273,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "34";
+const UI_BUILD = "35";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

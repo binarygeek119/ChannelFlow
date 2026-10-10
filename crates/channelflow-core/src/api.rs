@@ -1023,6 +1023,25 @@ async fn plugin_catalog(
             }
         }
     }
+    // A store listing should show the permissions the plugin asks for. The
+    // repositories' manifest.json carries no permission list, so the value
+    // comes from the plugin's own bundled manifest when this build has it
+    // compiled in (empty = not part of this build).
+    let known = {
+        let manager = state.plugins.lock().await;
+        manager.catalog()
+    };
+    let known: std::collections::HashMap<&str, &serde_json::Value> = known
+        .iter()
+        .filter_map(|entry| entry["id"].as_str().map(|id| (id, entry)))
+        .collect();
+    for plugin in &mut plugins {
+        if let Some(entry) = plugin["id"].as_str().and_then(|id| known.get(id)) {
+            plugin["permissions"] = entry["permissions"].clone();
+        } else {
+            plugin["permissions"] = serde_json::json!([]);
+        }
+    }
     Ok(Json(json!({ "plugins": plugins, "errors": errors })))
 }
 

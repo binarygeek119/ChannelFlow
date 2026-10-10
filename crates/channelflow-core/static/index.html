@@ -9,7 +9,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#101010">
-<link rel="stylesheet" href="/app.css?v=40">
+<link rel="stylesheet" href="/app.css?v=41">
 </head>
 <body>
 <div id="app-shell" hidden>
@@ -26,22 +26,7 @@
 
       <a href="/webui/channels" class="nav-item active" data-tab="channels" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="12" rx="2"/><path d="M7 20h10M12 8V5M9 3.5L12 5l3-1.5"/></svg><span class="nav-label">Channels</span></a>
       <a href="/webui/lineups" class="nav-item" data-tab="lineups"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg><span class="nav-label">Lineups</span></a>
-      <a href="/webui/presets" class="nav-item" data-tab="presets"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.4 4.4L18 9l-4.6 1.6L12 15l-1.4-4.4L6 9l4.6-1.6L12 3z"/><path d="M19 14l.8 2.4L22 17.2l-2.2.8L19 20.4l-.8-2.4-2.2-.8 2.2-.8L19 14z"/></svg><span class="nav-label">Presets</span></a>
-      <a href="/webui/lists" class="nav-item" data-tab="list"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg><span class="nav-label">List</span></a>
-      <a href="/webui/special" class="nav-item" data-tab="special"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 9 22 10 17 15 18 22 12 18 6 22 7 15 2 10 9 9"/></svg><span class="nav-label">Special Presentation</span></a>
       <a href="/webui/library" class="nav-item" data-tab="jellyfin"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M10 9l5 3-5 3V9z"/></svg><span class="nav-label">Library</span></a>
-
-      <div class="drawer-nav-gap" aria-hidden="true"></div>
-
-      <a href="/webui/commercials" class="nav-item" data-tab="commercials"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M16 9.5a4 4 0 0 1 0 5"/><path d="M18.5 7a7 7 0 0 1 0 10"/></svg><span class="nav-label">Commercials</span></a>
-      <a href="/webui/commercialbrainz" class="nav-item" data-tab="commercialbrainz"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 8a3.2 3.2 0 0 1 5.4-2.2A3.2 3.2 0 0 1 18.5 9c0 .4 0 .8-.2 1.2A3.5 3.5 0 0 1 16 17H8.5A3.5 3.5 0 0 1 5 13.6 3.2 3.2 0 0 1 8 8z"/><path d="M9 12h.01M12 12h.01M15 12h.01"/></svg><span class="nav-label">CommercialBrainz</span></a>
-      <a href="/webui/youtube" class="nav-item" data-tab="youtube"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M10 9.5v5l5-2.5-5-2.5z"/></svg><span class="nav-label">YouTube</span></a>
-
-      <div class="drawer-nav-gap" aria-hidden="true"></div>
-
-      <a href="/webui/weather" class="nav-item" data-tab="weather"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 18a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.4 1.5A3.5 3.5 0 0 0 7 18z"/><circle cx="7" cy="7" r="2.2"/><path d="M7 3.5v1M4.2 5.2l.8.8M3.5 8h1"/></svg><span class="nav-label">Weather</span></a>
-      <a href="/webui/news" class="nav-item" data-tab="news"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h12a2 2 0 0 1 2 2v13H6a2 2 0 0 1-2-2V5z"/><path d="M18 8h2a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H6"/><path d="M8 9h6M8 13h6M8 17h4"/></svg><span class="nav-label">News</span></a>
-      <a href="/webui/emergency" class="nav-item" data-tab="emergency"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3L12 3z"/><path d="M12 10v4M12 17h.01"/></svg><span class="nav-label">Emergency Broadcast System</span></a>
 
       <div class="drawer-nav-gap" aria-hidden="true"></div>
 
@@ -679,6 +664,6 @@
   </div>
 </div>
 
-<script src="/app.js?v=40"></script>
+<script src="/app.js?v=41"></script>
 </body>
 </html>

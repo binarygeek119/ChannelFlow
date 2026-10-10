@@ -2014,10 +2014,18 @@ async function toggleLibrary(connectionId, remoteId, enabledNow, list) {
     // A library that just got turned on starts the scan for this connection,
     // so the toggled-on libraries sync right away.
     if (enabledNow) {
-      request("/api/tasks/jellyfin-sync/run", {
-        method: "POST",
-        body: JSON.stringify({ connection_id: connectionId }),
-      }).catch((error) => setCardStatus(list, { ok: false, detail: error.message }));
+      taskPopup.run(
+        `Jellyfin · ${escapeHtml(config.name || "connection")} scan`,
+        () =>
+          request("/api/tasks/jellyfin-sync/run", {
+            method: "POST",
+            body: JSON.stringify({ connection_id: connectionId }),
+          }),
+        (data) => {
+          const run = data.run || {};
+          return `Scan finished: ${run.added || 0} added · ${run.updated || 0} updated · ${run.errors || 0} errors`;
+        }
+      );
     }
   } catch (error) {
     setCardStatus(list, { ok: false, detail: error.message });
@@ -2034,25 +2042,11 @@ document.getElementById("tab-library").addEventListener("click", async (event) =
   if (!button) return;
   const connection = libraryConnections.find((row) => row.id === Number(button.dataset.libSync));
   if (!connection) return;
-  button.disabled = true;
-  const original = button.textContent;
-  button.textContent = "Syncing…";
-  try {
-    const report = await syncConnection(connection);
-    const note = document.createElement("p");
-    note.className = "hint" + (report.errors === 0 ? "" : " bad");
-    note.textContent =
-      `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`;
-    button.parentElement.appendChild(note);
-  } catch (error) {
-    const note = document.createElement("p");
-    note.className = "hint bad";
-    note.textContent = error.message || "Sync failed.";
-    button.parentElement.appendChild(note);
-  } finally {
-    button.disabled = false;
-    button.textContent = original;
-  }
+  taskPopup.run(
+    `Jellyfin · ${escapeHtml(connection.config.name || "connection")} sync`,
+    () => syncConnection(connection),
+    (report) => `Synced: ${report.added} added · ${report.updated} updated · ${report.errors} errors`
+  );
 });
 
 async function syncConnection(connection) {
@@ -2081,6 +2075,52 @@ async function syncConnection(connection) {
   });
   return report.report || report;
 }
+
+// --- task progress popup ----------------------------------------------------
+// A bottom-right popup tracks a running task. It stays until the work is done,
+// holds briefly green (or red on failure), then fades away. It lives outside
+// the tab panels, so switching pages never hides it.
+
+const taskPopup = (() => {
+  const wrap = document.getElementById("task-popup");
+  const head = wrap.querySelector(".task-popup-head");
+  const bar = wrap.querySelector(".task-popup-bar");
+  const status = wrap.querySelector(".task-popup-status");
+  const card = wrap.querySelector(".task-popup");
+  let holdTimer = null;
+
+  function show(title) {
+    clearTimeout(holdTimer);
+    wrap.hidden = false;
+    wrap.classList.remove("fading");
+    card.classList.remove("status-done", "status-fail");
+    bar.className = "task-popup-bar indeterminate";
+    head.textContent = title;
+    status.textContent = "Running…";
+  }
+
+  function finish(text, ok) {
+    clearTimeout(holdTimer);
+    bar.className = ok ? "task-popup-bar done" : "task-popup-bar fail";
+    card.classList.toggle("status-done", ok);
+    card.classList.toggle("status-fail", !ok);
+    status.textContent = text;
+    holdTimer = setTimeout(() => {
+      wrap.classList.add("fading");
+      setTimeout(() => { wrap.hidden = true; }, 650);
+    }, 2600);
+  }
+
+  function run(title, work, format) {
+    show(title);
+    Promise.resolve()
+      .then(work)
+      .then((result) => finish(format ? format(result) : "Done.", true))
+      .catch((error) => finish(error.message || "Failed.", false));
+  }
+
+  return { show, finish, run };
+})();
 
 // --- Tasks: the Jellyfin library scan -------------------------------------
 
@@ -2153,28 +2193,23 @@ $("jellyfin-task-form").addEventListener("submit", async (event) => {
   }
 });
 
-$("jf-task-run").addEventListener("click", async () => {
-  const button = $("jf-task-run");
-  button.disabled = true;
-  button.textContent = "Running…";
+$("jf-task-run").addEventListener("click", () => {
   setTaskNote("");
-  try {
-    const data = await request("/api/tasks/jellyfin-sync/run", {
+  taskPopup.run(
+    "Jellyfin library scan",
+    () => request("/api/tasks/jellyfin-sync/run", {
       method: "POST",
       body: JSON.stringify({}),
-    });
-    renderTaskRuns(data.runs || []);
-    const run = data.run || {};
-    setTaskNote(
-      `Ran ${run.connections || 0} connection(s): ${run.added || 0} added · ${run.updated || 0} updated · ${run.removed || 0} removed · ${run.errors || 0} errors`,
-      (run.errors || 0) > 0
-    );
-  } catch (error) {
-    setTaskNote(error.message || "Could not run the scan.", true);
-  } finally {
-    button.disabled = false;
-    button.textContent = "Run now";
-  }
+    }),
+    (data) => {
+      renderTaskRuns(data.runs || []);
+      const run = data.run || {};
+      const note =
+        `Ran ${run.connections || 0} connection(s): ${run.added || 0} added · ${run.updated || 0} updated · ${run.removed || 0} removed · ${run.errors || 0} errors`;
+      setTaskNote(note, (run.errors || 0) > 0);
+      return `Scan finished: ${run.added || 0} added · ${run.updated || 0} updated · ${run.errors || 0} errors (${run.connections || 0} connection(s))`;
+    }
+  );
 });
 
 // Maintenance jobs are user-triggered one-offs. They are stubbed for now —
@@ -2688,7 +2723,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.replace("/");
 });
 
-const UI_BUILD = "43";
+const UI_BUILD = "44";
 
 // There is no login screen: an unreachable server never has a reason to show a
 // password form, so the walkthrough appears with the error instead.

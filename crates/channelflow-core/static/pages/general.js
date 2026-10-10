@@ -49,6 +49,8 @@ async function loadGeneral() {
     const settings = data.settings || {};
     $("general-local-url").value = settings.local_url || "";
     $("general-public-url").value = settings.public_url || "";
+    $("general-playout-days").value = settings.playout_days != null ? settings.playout_days : 14;
+    $("general-stream-idle").value = settings.stream_idle_seconds != null ? settings.stream_idle_seconds : 30;
     fillTimeZones(settings.timezone || "");
     $("general-result").textContent = "";
   } catch (error) {
@@ -68,11 +70,15 @@ async function saveGeneral(event) {
         public_url: $("general-public-url").value.trim(),
         local_url: $("general-local-url").value.trim(),
         timezone: $("general-timezone").value,
+        playout_days: Number($("general-playout-days").value) || 14,
+        stream_idle_seconds: Number($("general-stream-idle").value) || 0,
       }),
     });
     const settings = data.settings || {};
     $("general-local-url").value = settings.local_url || "";
     $("general-public-url").value = settings.public_url || "";
+    $("general-playout-days").value = settings.playout_days != null ? settings.playout_days : 14;
+    $("general-stream-idle").value = settings.stream_idle_seconds != null ? settings.stream_idle_seconds : 30;
     fillTimeZones(settings.timezone || "");
     $("general-result").textContent = "Saved.";
   } catch (error) {

@@ -22,14 +22,32 @@ pub struct GeneralSettings {
     /// in. Empty means "the server's own zone".
     #[serde(default)]
     pub timezone: String,
+    /// How many days of planned playout to build ahead (1–14; default 14).
+    #[serde(default = "default_playout_days")]
+    pub playout_days: i32,
+    /// Seconds to keep a channel stream encoding after the last viewer leaves
+    /// (0–3600; default 30).
+    #[serde(default = "default_stream_idle_seconds")]
+    pub stream_idle_seconds: i32,
+}
+
+fn default_playout_days() -> i32 {
+    14
+}
+
+fn default_stream_idle_seconds() -> i32 {
+    30
 }
 
 impl GeneralSettings {
-    /// Trim and drop trailing slashes so a stored URL is canonical.
+    /// Trim and drop trailing slashes so a stored URL is canonical, and clamp
+    /// the playout knobs to their valid ranges.
     pub fn normalized(mut self) -> Self {
         self.public_url = normalize(&self.public_url);
         self.local_url = normalize(&self.local_url);
         self.timezone = self.timezone.trim().to_string();
+        self.playout_days = self.playout_days.clamp(1, 14);
+        self.stream_idle_seconds = self.stream_idle_seconds.clamp(0, 3600);
         self
     }
 }
@@ -137,11 +155,15 @@ mod tests {
             public_url: " https://example.com/ ".to_string(),
             local_url: "http://192.168.1.2:8097/".to_string(),
             timezone: " America/New_York ".to_string(),
+            playout_days: 30,
+            stream_idle_seconds: 0,
         }
         .normalized();
         assert_eq!(s.public_url, "https://example.com");
         assert_eq!(s.local_url, "http://192.168.1.2:8097");
         assert_eq!(s.timezone, "America/New_York");
+        assert_eq!(s.playout_days, 14); // clamped 1–14
+        assert_eq!(s.stream_idle_seconds, 0);
         assert!(is_valid_url(""));
         assert!(is_valid_url("http://x"));
         assert!(is_valid_url("HTTPS://x"));

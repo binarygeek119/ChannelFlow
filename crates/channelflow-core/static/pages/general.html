@@ -23,6 +23,16 @@
       <select id="general-timezone"></select>
       <span class="field-hint">The time zone the TV Guide shows times in. &ldquo;Server default&rdquo; follows this machine's clock.</span>
     </div>
+    <div class="field">
+      <label class="field-label" for="general-playout-days">Playout days to build (1&ndash;14)</label>
+      <input id="general-playout-days" type="number" min="1" max="14" step="1">
+      <span class="field-hint">How many days of channel playout to plan ahead.</span>
+    </div>
+    <div class="field">
+      <label class="field-label" for="general-stream-idle">Keep stream running after last viewer (seconds)</label>
+      <input id="general-stream-idle" type="number" min="0" max="3600" step="1">
+      <span class="field-hint">After nobody is watching, keep encoding for this many seconds so a returning viewer does not wait for a fresh stream. 0 stops immediately.</span>
+    </div>
     <div class="ms-form-actions">
       <button type="submit" class="primary" id="general-save">Save</button>
     </div>

@@ -278,6 +278,25 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Weather plugin: {error}"))?;
 
+    // The News plugin owns the newscast settings; its page contribution
+    // draws the News tab.
+    let news_plugin = channelflow_plugin_news::plugin();
+    let news_manifest = news_plugin.metadata().clone();
+    let news_api = PluginApi {
+        id: news_manifest.id.clone(),
+        storage: store.plugin_storage(&news_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&news_manifest.id),
+        logger: PluginLogger::new(&news_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&news_manifest.id).await,
+    };
+    manager
+        .add(news_plugin, news_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the News plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

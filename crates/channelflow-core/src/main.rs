@@ -3,6 +3,7 @@ mod auth;
 mod media;
 mod model;
 mod plugin;
+mod quickpin;
 mod settings;
 mod store;
 mod tasks;

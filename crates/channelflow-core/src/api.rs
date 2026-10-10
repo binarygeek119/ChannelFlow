@@ -78,6 +78,8 @@ pub fn router(
             "/api/settings/general",
             get(general_settings_get).put(general_settings_put),
         )
+        .route("/api/quickpin", get(quickpin_get))
+        .route("/api/quickpin/pair", post(quickpin_pair))
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -604,6 +606,79 @@ async fn general_settings_put(
     let settings = input.normalized();
     state.store.save_general_settings(&settings).await?;
     Ok(Json(json!({ "settings": settings })))
+}
+
+// ── quick pin ──────────────────────────────────────────────────────────────
+
+/// The resolved relay origin: a saved value, else `CHANNELFLOW_PIN_SERVER`,
+/// else the default deployment.
+async fn resolve_pin_server(state: &AppState) -> String {
+    if let Ok(Some(server)) = state.store.quickpin_server().await {
+        let server = server.trim().to_string();
+        if !server.is_empty() {
+            return server;
+        }
+    }
+    std::env::var("CHANNELFLOW_PIN_SERVER")
+        .ok()
+        .map(|server| server.trim().to_string())
+        .filter(|server| !server.is_empty())
+        .unwrap_or_else(|| crate::quickpin::DEFAULT_SERVER.to_string())
+}
+
+/// The Quick Pin page's starting state: the relay origin and the Live TV URLs
+/// that pairing would send (so the admin can see them first).
+async fn quickpin_get(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let settings = state.store.general_settings().await?;
+    let urls = crate::quickpin::payload(&settings, true);
+    Ok(Json(json!({
+        "server": resolve_pin_server(&state).await,
+        "urls": urls,
+    })))
+}
+
+#[derive(Deserialize)]
+struct QuickPinPair {
+    pin: String,
+    #[serde(default)]
+    server: Option<String>,
+}
+
+/// Encrypt this instance's Live TV URLs with the app's PIN and hand the
+/// ciphertext to the relay. The relay forwards it to the waiting app; `404`
+/// from the relay means the PIN was unknown, expired, or already used.
+async fn quickpin_pair(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(input): Json<QuickPinPair>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !crate::quickpin::is_valid_pin(&input.pin) {
+        return Err(StoreError::Invalid("enter the 8-character PIN shown on the app").into());
+    }
+    let server = match input.server.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(server) => {
+            state.store.save_quickpin_server(server).await?;
+            server.to_string()
+        }
+        None => resolve_pin_server(&state).await,
+    };
+    let settings = state.store.general_settings().await?;
+    if settings.local_url.trim().is_empty() && settings.public_url.trim().is_empty() {
+        return Err(StoreError::Invalid(
+            "set a local or public URL on General Settings before pairing",
+        )
+        .into());
+    }
+    let host = headers.get(header::HOST).and_then(|value| value.to_str().ok());
+    let primary_local = crate::quickpin::primary_is_local(&settings, host);
+    let payload = crate::quickpin::payload(&settings, primary_local);
+    let plaintext = serde_json::to_vec(&payload).map_err(StoreError::Json)?;
+    let ciphertext = crate::quickpin::encrypt(&input.pin, &plaintext)
+        .map_err(|error| StoreError::Plugin(format!("could not encrypt the pairing details: {error}")))?;
+    let delivered = crate::quickpin::deliver(&state.http, &server, &input.pin, &ciphertext)
+        .await
+        .map_err(StoreError::Plugin)?;
+    Ok(Json(json!({ "delivered": delivered, "server": server })))
 }
 
 /// Resident set size from `/proc/self/status`. Linux only, so the row simply

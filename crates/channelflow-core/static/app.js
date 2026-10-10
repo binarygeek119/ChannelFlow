@@ -58,7 +58,7 @@ const MENU = {
   livetv: ["Live TV", "Watch your channels."],
   guide: ["TV Guide", "What's on now, and what's coming up across every channel."],
   general: ["General Settings", "Server-wide defaults for how ChannelFlow runs."],
-  quickpin: ["Quick Pin", "Pin something to the top of a channel without building a full preset."],
+  quickpin: ["Quick Pin", "Pair a ChannelFlow app by the PIN it shows."],
   clients: ["Clients", "Players that have connected and what they're watching."],
   channels: ["Channels", "Manage Live TV channels"],
   lineups: ["Lineups", "Group channels into playlists you can hand to a player."],
@@ -191,7 +191,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "54";
+const UI_BUILD = "55";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {

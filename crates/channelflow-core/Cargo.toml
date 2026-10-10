@@ -12,9 +12,11 @@ name = "channelflow"
 path = "src/main.rs"
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1"
 async-trait = "0.1"
 axum.workspace = true
+base64 = "0.22"
 chrono.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 cron.workspace = true

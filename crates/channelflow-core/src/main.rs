@@ -259,6 +259,25 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Emergency plugin: {error}"))?;
 
+    // The Weather plugin owns the WeatherStar settings; its page contribution
+    // draws the Weather tab.
+    let weather_plugin = channelflow_plugin_weather::plugin();
+    let weather_manifest = weather_plugin.metadata().clone();
+    let weather_api = PluginApi {
+        id: weather_manifest.id.clone(),
+        storage: store.plugin_storage(&weather_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&weather_manifest.id),
+        logger: PluginLogger::new(&weather_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&weather_manifest.id).await,
+    };
+    manager
+        .add(weather_plugin, weather_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Weather plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

@@ -113,6 +113,7 @@ pub fn router(
         .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
         .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
+        .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
         .route("/live/{asset}", get(live_pending))
         .fallback(spa_fallback)
@@ -1414,6 +1415,18 @@ async fn test_connection(
         StoreError::Plugin(format!("no media source {:?} is installed", kind))
     })?;
     let result = source.test_connection(&config, &config.api_key).await;
+    // Capture the server's identity so deep links (the Media page's play
+    // button) can point at an item on this server.
+    if result.ok {
+        if let Some(meta) = source.server_info(&config, &config.api_key).await {
+            let mut updated = config;
+            updated.server_id = meta.get("server_id").and_then(serde_json::Value::as_str).map(str::to_string);
+            updated.server_name = meta.get("server_name").and_then(serde_json::Value::as_str).map(str::to_string);
+            let value = serde_json::to_value(&updated)
+                .unwrap_or_else(|_| serde_json::json!(&updated));
+            let _ = state.store.connection_update(id, &value).await;
+        }
+    }
     Ok(Json(json!({ "id": id, "kind": kind, "result": result })))
 }
 
@@ -1515,7 +1528,8 @@ async fn media_catalog_list(
     State(state): State<AppState>,
     Query(query): Query<MediaCatalogQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let rows = state.store.media_list().await?;
+    let mut rows = state.store.media_list().await?;
+    enrich_source_web_urls(&state, &mut rows).await?;
     let counts = {
         let mut counts = serde_json::Map::new();
         for tab in ["movies", "tvshows", "music", "musicvideos"] {
@@ -1546,6 +1560,68 @@ async fn media_catalog_list(
             .collect(),
     };
     Ok(Json(json!({ "counts": counts, "items": items })))
+}
+
+/// One item in the base catalog, by match key — the Media detail page's source
+/// of truth. Sources carry `web_url` deep links into the media servers.
+async fn media_catalog_item(
+    State(state): State<AppState>,
+    Path(match_key): Path<String>,
+) -> Result<Response, ApiError> {
+    let mut rows = state.store.media_list().await?;
+    let mut item = rows
+        .into_iter()
+        .find(|row| row["match_key"].as_str() == Some(match_key.as_str()));
+    match item {
+        Some(mut item) => {
+            enrich_source_web_urls(&state, std::slice::from_mut(&mut item)).await?;
+            Ok(Json(json!({ "item": item })).into_response())
+        }
+        None => Ok((StatusCode::NOT_FOUND, Json(json!({ "error": "no such item" })))
+            .into_response()),
+    }
+}
+
+/// Attach a `web_url` to every source whose media-source plugin knows how to
+/// deep-link into its server's web UI (the Media page's play buttons).
+async fn enrich_source_web_urls(
+    state: &AppState,
+    items: &mut [serde_json::Value],
+) -> Result<(), ApiError> {
+    let registry = state.store.plugin_registry().await?;
+    let installed = |plugin_id: &str| registry.get(plugin_id).is_some();
+    let connections = state.store.connection_list().await?;
+    let configs: std::collections::HashMap<i64, channelflow_plugin_api::media::Connection> =
+        connections
+            .into_iter()
+            .filter_map(|row| {
+                let id = row["id"].as_i64()?;
+                let config: channelflow_plugin_api::media::Connection =
+                    serde_json::from_value(row["config"].clone()).ok()?;
+                Some((id, config))
+            })
+            .collect();
+    for item in items.iter_mut() {
+        let Some(sources) = item.get_mut("sources").and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        for source in sources.iter_mut() {
+            let connection_id = source["connection_id"].as_i64().unwrap_or(0);
+            let kind = source["source_kind"].as_str().unwrap_or("");
+            let remote_id = source["remote_id"].as_str().unwrap_or("");
+            let Some(config) = configs.get(&connection_id).cloned() else {
+                continue;
+            };
+            let Some(media_source) = state.media.find_installed(kind, &installed) else {
+                continue;
+            };
+            if let Some(web_url) = media_source.item_web_url(&config, remote_id) {
+                source["web_url"] = serde_json::json!(web_url);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Serve one poster from `<config>/Images`. The path is the absolute path a

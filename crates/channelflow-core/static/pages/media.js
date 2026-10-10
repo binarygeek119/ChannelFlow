@@ -2,6 +2,10 @@
 // catalog. The catalog is one entry per media, so a film that is in both
 // Jellyfin and Plex is one card showing both sources. Each kind tab lists its
 // items the way Jellyfin's web UI shows a library — a responsive poster grid.
+//
+// Clicking a card's play button jumps straight to that item on the media
+// server that hosts it; clicking the card itself opens a Jellyfin-style item
+// page (/webui/media/item/<match_key>).
 
 const MEDIA_TABS = [
   { key: "movies", label: "Movies", kinds: ["movie"], shape: "portrait" },
@@ -22,6 +26,10 @@ const MEDIA_SOURCE_LOGOS = {
   emby: "/logos/Emby.png",
   local: "/logos/LOCAL.png",
 };
+// The plugin that hosts rich metadata for a source kind (item detail pages).
+const MEDIA_DETAIL_PLUGINS = {
+  jellyfin: "com.channelflow.jellyfin",
+};
 
 let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
@@ -33,9 +41,24 @@ function mediaTabFromPath(path) {
   return MEDIA_TABS.some((tab) => tab.key === match[1]) ? match[1] : null;
 }
 
+function mediaItemKeyFromPath(path) {
+  const match = path.match(/^\/webui\/media\/item\/(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function mediaTabForKind(kind) {
+  const tab = MEDIA_TABS.find((entry) => entry.kinds.includes(kind));
+  return tab ? tab.key : "movies";
+}
+
 async function loadMedia() {
-  // Each kind tab is its own URL (/webui/media/movies, /webui/media/tvshows…).
+  const itemKey = mediaItemKeyFromPath(location.pathname);
+  if (itemKey) {
+    await renderMediaItem(itemKey);
+    return;
+  }
   mediaPageKey = mediaTabFromPath(location.pathname) || "movies";
+  showMediaLibrary();
   renderMediaTabs();
   try {
     const data = await request("/api/media");
@@ -46,6 +69,17 @@ async function loadMedia() {
     mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
   }
   renderMediaPage(mediaPageKey);
+}
+
+// The kind-tab grid is visible; the item-detail panel is not.
+function showMediaLibrary() {
+  const detail = $("media-detail");
+  if (detail) detail.hidden = true;
+  const tabs = $("media-inner-tabs");
+  if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = false;
+  document.querySelectorAll("#tab-media .library-page").forEach((page) => {
+    page.hidden = page.id !== `media-page-${mediaPageKey}`;
+  });
 }
 
 function renderMediaTabs() {
@@ -60,6 +94,9 @@ function renderMediaTabs() {
     button.textContent = label;
     button.addEventListener("click", () => {
       history.pushState(null, "", `/webui/media/${key}`);
+      mediaPageKey = key;
+      showMediaLibrary();
+      renderMediaTabs();
       renderMediaPage(key);
     });
     tabs.appendChild(button);
@@ -100,10 +137,14 @@ function mediaSourceBadges(item) {
 
 // A Jellyfin-style poster card: a fixed-ratio poster with a hover dim + play
 // badge, the title/year beneath, and a badge per source that provides it.
+// The play badge deep-links into the hosting media server; the rest of the
+// card opens the item's detail page.
 function mediaCard(item, shape) {
   const card = document.createElement("div");
   card.className = "card jf-card";
   card.title = item.title + (item.year ? ` (${item.year})` : "");
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
   const poster = mediaPosterUrl(item.poster_path);
   const image = poster
     ? `<div class="cardImage" style="background-image:url('${escapeHtml(poster)}')"></div>`
@@ -112,15 +153,20 @@ function mediaCard(item, shape) {
   const badges = (item.sources || []).length
     ? `<div class="media-sources">${mediaSourceBadges(item)}</div>`
     : "";
+  const playSource = (item.sources || []).find((source) => source.web_url);
+  const fab = playSource
+    ? `<a class="cardOverlayFab" href="${escapeHtml(playSource.web_url)}" target="_blank" rel="noopener" ` +
+      `aria-label="Play on ${escapeHtml(playSource.source_kind)}" ` +
+      `title="Play on ${escapeHtml(playSource.source_kind)}">` +
+      `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></a>`
+    : `<div class="cardOverlayFab" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>`;
   card.innerHTML =
     `<div class="cardBox">` +
       `<div class="cardScalable">` +
         `<div class="cardPadder cardPadder-${shape}"></div>` +
         image +
         `<div class="cardOverlayContainer">` +
-          `<div class="cardOverlayFab">` +
-            `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>` +
-          `</div>` +
+          fab +
         `</div>` +
       `</div>` +
       `<div class="cardFooter">` +
@@ -129,12 +175,23 @@ function mediaCard(item, shape) {
         badges +
       `</div>` +
     `</div>`;
+  const openDetail = () => openMediaItem(item.match_key);
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("a.cardOverlayFab")) return; // the play badge
+    openDetail();
+  });
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (event.target.closest("a.cardOverlayFab")) return;
+      openDetail();
+    }
+  });
   return card;
 }
 
 function renderMediaPage(key) {
   mediaPageKey = key;
-  renderMediaTabs();
   document.querySelectorAll("#tab-media .library-page").forEach((page) => {
     page.hidden = page.id !== `media-page-${key}`;
   });
@@ -160,6 +217,177 @@ function renderMediaPage(key) {
     .sort((a, b) => String(a.title).localeCompare(String(b.title)))
     .forEach((item) => grid.appendChild(mediaCard(item, spec.shape)));
   host.appendChild(grid);
+}
+
+// ── Item detail (Jellyfin-style) ──────────────────────────────────────────
+
+function openMediaItem(matchKey) {
+  history.pushState(null, "", `/webui/media/item/${encodeURIComponent(matchKey)}`);
+  renderMediaItem(matchKey);
+}
+
+async function renderMediaItem(matchKey) {
+  const detail = $("media-detail");
+  if (detail) {
+    detail.hidden = false;
+    detail.textContent = "";
+    detail.innerHTML = '<p class="hint">Loading…</p>';
+  }
+  const tabs = $("media-inner-tabs");
+  if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
+  let item = null;
+  try {
+    const data = await request(`/api/media/${encodeURIComponent(matchKey)}`);
+    item = data.item || null;
+  } catch (error) {
+    item = null;
+  }
+  if (!item) {
+    if (detail) detail.innerHTML = "";
+    if (detail) detail.appendChild(mediaDetailBackBar(""));
+    if (detail) detail.appendChild(
+      libraryCard('<p class="hint bad">That item isn\u2019t in the catalog any more.</p>')
+    );
+    return;
+  }
+  const enriched = await fetchItemDetail(item);
+  renderMediaDetail(detail, item, enriched);
+  mediaPageKey = mediaTabForKind(item.kind);
+}
+
+// Ask the hosting plugin for the rich row (genres, runtime, ratings, cast)
+// when it offers an item-detail endpoint.
+async function fetchItemDetail(item) {
+  const source = (item.sources || []).find(
+    (entry) => entry.source_kind && MEDIA_DETAIL_PLUGINS[entry.source_kind] && entry.remote_id
+  );
+  if (!source) return null;
+  const pluginId = MEDIA_DETAIL_PLUGINS[source.source_kind];
+  try {
+    const path = `/api/plugins/${pluginId}/item/${encodeURIComponent(source.remote_id)}/detail`;
+    const data = await request(path);
+    return data.item || null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function formatRuntime(ticks) {
+  if (!ticks) return null;
+  const minutes = Math.round(ticks / 10_000_000 / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+function mediaDetailBackBar(kind) {
+  const tab = mediaTabForKind(kind);
+  const label = (MEDIA_TABS.find((entry) => entry.key === tab) || {}).label || "Media";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "media-back";
+  button.textContent = `← ${label}`;
+  button.addEventListener("click", () => {
+    history.pushState(null, "", `/webui/media/${tab}`);
+    loadMedia();
+  });
+  return button;
+}
+
+function renderMediaDetail(detail, item, enriched) {
+  if (!detail) return;
+  detail.textContent = "";
+  detail.appendChild(mediaDetailBackBar(item.kind));
+
+  const poster = mediaPosterUrl(item.poster_path);
+  const posterEl = poster
+    ? `<div class="media-detail-poster" style="background-image:url('${escapeHtml(poster)}')"></div>`
+    : `<div class="media-detail-poster media-detail-poster-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
+
+  // Metadata chips: year • runtime • rating • genres • studios • official rating.
+  const meta = [];
+  if (item.year) meta.push(String(item.year));
+  const runtime = formatRuntime(enriched && enriched.runtime_ticks);
+  if (runtime) meta.push(runtime);
+  if (enriched) {
+    if (enriched.genres && enriched.genres.length) meta.push(enriched.genres.join(" · "));
+    if (typeof enriched.community_rating === "number" && enriched.community_rating > 0) {
+      meta.push(`★ ${Math.round(enriched.community_rating * 10)}%`);
+    }
+    if (enriched.official_rating) meta.push(enriched.official_rating);
+    if (enriched.studios && enriched.studios.length) meta.push(enriched.studios.join(" · "));
+  }
+
+  const sources = item.sources || [];
+  const playable = sources.filter((source) => source.web_url);
+  const actions = playable.length
+    ? `<div class="media-detail-actions">` +
+      playable
+        .map((source) => {
+          const label = MEDIA_SOURCE_LABELS[source.source_kind] || source.source_kind;
+          return `<a class="primary media-play" href="${escapeHtml(source.web_url)}" target="_blank" rel="noopener">` +
+                 `▶ Play${playable.length > 1 ? ` on ${escapeHtml(label)}` : ""}</a>`;
+        })
+        .join("") +
+      `</div>`
+    : "";
+
+  const overview = item.overview || (enriched && enriched.overview) || "";
+  const overviewEl = overview
+    ? `<p class="media-detail-overview">${escapeHtml(overview)}</p>`
+    : "";
+
+  detail.innerHTML =
+    `<div class="media-detail-main">` +
+      posterEl +
+      `<div class="media-detail-info">` +
+        `<h1>${escapeHtml(item.title)}</h1>` +
+        `<div class="media-detail-sub">${escapeHtml(mediaKindLabel(item.kind))}</div>` +
+        (meta.length ? `<div class="media-detail-meta">${meta.map((chip) => `<span class="media-detail-chip">${escapeHtml(chip)}</span>`).join("")}</div>` : "") +
+        actions +
+        overviewEl +
+        (sources.length ? `<div class="media-sources">${mediaSourceBadges(item)}</div>` : "") +
+      `</div>` +
+    `</div>`;
+
+  const people = (enriched && enriched.people) || [];
+  if (people.length) {
+    const heading = document.createElement("h2");
+    heading.className = "media-detail-section";
+    heading.textContent = "Cast";
+    detail.appendChild(heading);
+    const cast = document.createElement("div");
+    cast.className = "media-cast";
+    people.forEach((person) => cast.appendChild(mediaCastCard(person)));
+    detail.appendChild(cast);
+  }
+}
+
+function mediaCastCard(person) {
+  const card = document.createElement("div");
+  card.className = "media-cast-card";
+  const name = person.name || "";
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => (word[0] || "").toUpperCase())
+    .join("");
+  const url = person.image_path
+    ? `/api/media/image?path=${encodeURIComponent(person.image_path)}`
+    : null;
+  const photo = url
+    ? `<img class="media-cast-photo" src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.remove(); this.closest('.media-cast-photo-frame').querySelector('.media-cast-initial').style.display='flex';">`
+    : "";
+  card.innerHTML =
+    `<div class="media-cast-photo-frame">` +
+      `<span class="media-cast-initial">${escapeHtml(initials)}</span>` +
+      photo +
+    `</div>` +
+    `<div class="media-cast-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>` +
+    (person.character ? `<div class="media-cast-role">${escapeHtml(person.character)}</div>` : "");
+  return card;
 }
 
 CF.define("media", { onShow: loadMedia });

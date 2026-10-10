@@ -321,6 +321,7 @@ async function loadPluginPages() {
   }
   const nav = document.getElementById("drawer-nav");
   if (!nav) return;
+  const fragment = document.createDocumentFragment();
   plugins.forEach((plugin) => {
     (plugin.ui_contributions || []).forEach((contribution) => {
       if (!contribution || contribution.type !== "page") return;
@@ -349,9 +350,17 @@ async function loadPluginPages() {
         history.pushState(null, "", contribution.path || `/webui/${key}`);
         showTab(key);
       });
-      nav.appendChild(link);
+      fragment.appendChild(link);
     });
   });
+  // Plugin pages sit just above the Transcode tool page; the AI tab is a
+  // plugin page, so it appears above Transcode and only while installed.
+  const transcodeAnchor = nav.querySelector('[data-tab="transcode"]');
+  if (transcodeAnchor && fragment.childNodes.length) {
+    nav.insertBefore(fragment, transcodeAnchor);
+  } else {
+    nav.appendChild(fragment);
+  }
   // Plugin pages load asynchronously; a deep link to one can only be resolved
   // once its drawer entry exists.
   const key = tabForPath(location.pathname);

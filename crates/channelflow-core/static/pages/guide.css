@@ -1,1 +1,148 @@
-/* page styles live here */
+/* TV Guide grid — ported from v1.0.0. */
+.tv-guide-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    align-items: end;
+    margin-bottom: 0.75rem;
+}
+.tv-guide {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #141414;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.tv-guide-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: scroll;
+    overscroll-behavior: contain;
+}
+.tv-guide-header,
+.tv-guide-row {
+    display: flex;
+    min-width: max-content;
+}
+.tv-guide-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #141414;
+}
+.tv-guide-corner,
+.tv-guide-channel {
+    flex: 0 0 168px;
+    width: 168px;
+    box-sizing: border-box;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: var(--drawer-bg);
+    border-right: 1px solid var(--border);
+}
+.tv-guide-corner {
+    z-index: 6;
+    padding: 0.65rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+}
+.tv-guide-channel {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.4rem 0.65rem;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.tv-guide-channel:hover { background: #2c2c2c; }
+.tv-guide-channel .num { font-size: 0.72rem; color: var(--accent); font-weight: 700; }
+.tv-guide-channel .name { font-size: 0.82rem; line-height: 1.2; }
+.tv-guide-times { min-width: 0; border-bottom: 1px solid var(--border); }
+.tv-guide-body { min-width: max-content; }
+.tv-guide-times-inner,
+.tv-guide-track { position: relative; height: 40px; }
+.tv-guide-track {
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+    background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent calc(4px * 30 - 1px),
+        #232323 calc(4px * 30 - 1px),
+        #232323 calc(4px * 30)
+    );
+}
+.tv-guide-tick {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    padding: 0.65rem 0 0 0.45rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+    border-left: 1px solid var(--border);
+}
+.tv-guide-now,
+.tv-guide-now-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    z-index: 3;
+    pointer-events: none;
+    box-shadow: 0 0 8px var(--accent);
+}
+.tv-guide-block {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    overflow: hidden;
+    border: 0;
+    border-radius: 4px;
+    padding: 0.28rem 0.45rem;
+    text-align: left;
+    cursor: pointer;
+    background: #242424;
+    color: var(--text);
+    border-left: 3px solid #525252;
+}
+.tv-guide-block:hover { filter: brightness(1.15); }
+.tv-guide-block strong {
+    display: block;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tv-guide-block span {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tv-guide-block.is-now { background: #3a121c; border-left-color: var(--accent); }
+.tv-guide-empty {
+    padding: 1.4rem 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+.tv-guide-program { display: flex; gap: 1rem; align-items: flex-start; }
+.tv-guide-program img.tv-guide-poster {
+    width: 7rem;
+    border-radius: 0.3rem;
+    box-shadow: 0 0.2em 0.7em rgba(0, 0, 0, 0.4);
+}
+.tv-guide-program-meta { min-width: 0; }

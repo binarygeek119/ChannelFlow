@@ -91,6 +91,7 @@ pub fn router(
         )
         .route("/api/client-logs/{device_id}", get(get_client_logs_device))
         .route("/api/iptv/urls", get(iptv_urls))
+        .route("/api/guide", get(tv_guide))
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
@@ -803,7 +804,121 @@ async fn iptv_urls(State(state): State<AppState>) -> Result<Json<serde_json::Val
     })))
 }
 
-// ── client logs ───────────────────────────────────────────────────────────
+// ── TV guide ──────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct GuideQuery {
+    /// Window start (UTC ISO). When set, `hours` (1–24) is applied from here.
+    from: Option<String>,
+    /// A calendar day (`yyyy-MM-dd`) in the guide time zone; full day window.
+    date: Option<String>,
+    #[serde(default)]
+    hours: Option<i64>,
+}
+
+/// A channel/time TV guide built from the enabled channels and whatever
+/// programme blocks scheduling has written (the JSON TV guide shape v1.0.0's
+/// GuideController served).
+async fn tv_guide(
+    State(state): State<AppState>,
+    Query(query): Query<GuideQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let settings = state.store.general_settings().await?;
+    let zone_name = if settings.timezone.trim().is_empty() {
+        "UTC".to_string()
+    } else {
+        settings.timezone.trim().to_string()
+    };
+    let zone: chrono_tz::Tz = zone_name.parse().unwrap_or(chrono_tz::UTC);
+    let now = chrono::Utc::now();
+
+    let (from, to) = if let Some(from_raw) = &query.from {
+        let start = chrono::DateTime::parse_from_rfc3339(from_raw)
+            .map(|value| value.with_timezone(&chrono::Utc))
+            .unwrap_or(now);
+        let hours = query.hours.unwrap_or(6).clamp(1, 24);
+        (start, start + chrono::Duration::hours(hours))
+    } else {
+        let day = match query.date.as_deref() {
+            Some(date) if date.trim().len() == 10 => {
+                chrono::NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d")
+                    .unwrap_or_else(|_| now.with_timezone(&zone).date_naive())
+            }
+            _ => now.with_timezone(&zone).date_naive(),
+        };
+        let midnight = day.and_hms_opt(0, 0, 0).expect("midnight is a valid clock time");
+        let start_local = match midnight.and_local_timezone(zone) {
+            chrono::offset::LocalResult::Single(value) => value,
+            _ => midnight.and_utc().with_timezone(&zone),
+        };
+        let end_local = start_local + chrono::Duration::days(1);
+        (
+            start_local.with_timezone(&chrono::Utc),
+            end_local.with_timezone(&chrono::Utc),
+        )
+    };
+
+    let mut channels = state.store.list().await?;
+    channels.retain(|channel| channel.enabled);
+    channels.sort_by_key(|channel| channel.number);
+    let channels_json: Vec<serde_json::Value> = channels
+        .iter()
+        .map(|channel| {
+            json!({
+                "id": channel.id.to_string(),
+                "number": channel.number.to_string(),
+                "name": channel.name,
+                "content_type": "media",
+            })
+        })
+        .collect();
+
+    let guide = state.store.guide_get().await?;
+    let stored = guide["programs"].as_array().cloned().unwrap_or_default();
+    let mut programs = Vec::new();
+    for program in stored {
+        let start = program["start"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc));
+        let finish = program["finish"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc));
+        let (Some(start), Some(finish)) = (start, finish) else {
+            continue;
+        };
+        if finish <= from || start >= to {
+            continue;
+        }
+        let is_now = start <= now && finish > now;
+        programs.push(json!({
+            "id": program["id"],
+            "channelId": program["channel_id"],
+            "start": program["start"],
+            "finish": program["finish"],
+            "title": program["title"],
+            "subTitle": program["sub_title"],
+            "description": program["description"],
+            "episode": program["episode"],
+            "categories": program["categories"],
+            "year": program["year"],
+            "rating": program["rating"],
+            "posterUrl": program["poster_url"],
+            "isNow": is_now,
+            "isVirtual": false,
+        }));
+    }
+
+    Ok(Json(json!({
+        "from": from.to_rfc3339(),
+        "to": to.to_rfc3339(),
+        "now": now.to_rfc3339(),
+        "timeZone": zone_name,
+        "channels": channels_json,
+        "programs": programs,
+    })))
+}
 
 #[derive(Deserialize)]
 struct ClientLogsQuery {

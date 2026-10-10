@@ -1,8 +1,22 @@
 <div class="panel">
-  <div class="panel-head">
-    <h2>TV Guide</h2>
+  <div class="tv-guide-toolbar">
+    <button type="button" class="ghost" id="btn-guide-prev">Yesterday</button>
+    <button type="button" class="primary" id="btn-guide-now">Now</button>
+    <button type="button" class="ghost" id="btn-guide-next">Tomorrow</button>
+    <input id="guide-date" type="date">
+    <span class="hint" id="guide-range-label" style="margin:0"></span>
   </div>
-  <p class="hint">What's on now, and what's coming up across every channel.</p>
-  <p class="hint" id="guide-tz"></p>
-  <p class="empty">Carried over from ChannelFlow 1.0.0 for layout only. Nothing is wired up yet.</p>
+  <p class="hint">
+    What's on across every enabled channel. Times use the <strong>Guide time zone</strong> from
+    General Settings. Click a programme for details.
+  </p>
+  <div id="tv-guide" class="tv-guide"></div>
 </div>
+
+<dialog id="guide-program-dialog" class="settings-dialog">
+  <div class="settings-dialog-head">
+    <h2 id="guide-program-title"></h2>
+    <button type="button" class="ghost" id="guide-program-close">Close</button>
+  </div>
+  <div id="guide-program-body" class="settings-dialog-body"></div>
+</dialog>

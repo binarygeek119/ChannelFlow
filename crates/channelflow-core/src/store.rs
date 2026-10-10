@@ -72,6 +72,8 @@ pub const SESSION_TTL_HOURS: i64 = 6;
 const RESET_KEY: &str = "auth_reset";
 const RESET_AT_KEY: &str = "auth_reset_at";
 const DATABASE_URL_KEY: &str = "database_url";
+/// The guide programmes a scheduling pass computed (see `/api/guide`).
+const GUIDE_KEY: &str = "guide";
 /// The General Settings document (public and local URLs).
 const GENERAL_KEY: &str = "general";
 
@@ -317,6 +319,20 @@ impl Store {
     ) -> Result<(), StoreError> {
         let value = serde_json::to_value(settings)?;
         self.plugin_set(CORE_NAMESPACE, GENERAL_KEY, &value).await
+    }
+
+    /// The guide programmes the scheduling pass stored, if any.
+    /// Shape: `{ "programs": [ { id, channel_id, start, finish, title, … } ] }`.
+    pub async fn guide_get(&self) -> Result<serde_json::Value, StoreError> {
+        Ok(self
+            .plugin_get(CORE_NAMESPACE, GUIDE_KEY)
+            .await?
+            .unwrap_or_else(|| serde_json::json!({ "programs": [] })))
+    }
+
+    /// Replace the stored guide programmes.
+    pub async fn guide_set(&self, value: &serde_json::Value) -> Result<(), StoreError> {
+        self.plugin_set(CORE_NAMESPACE, GUIDE_KEY, value).await
     }
 
     /// The storage handle passed to a plugin, scoped to its id.

@@ -1452,14 +1452,19 @@ async fn jellyfin_sync_run(
         "manual"
     };
     let config_dir = std::path::PathBuf::from(&state.about.config_folder);
-    let run = tasks::run_sync(
-        &state.store,
-        &state.media,
-        &config_dir,
-        trigger,
-        body.connection_id,
-    )
-    .await?;
+    let store = state.store.clone();
+    let media = state.media.clone();
+    let only_connection = body.connection_id;
+    let trigger = trigger.to_string();
+    // Run the scan in its own task: a big library takes a while, and it must
+    // keep going even if the browser that started it navigates away (the
+    // request future is dropped on disconnect).
+    let handle = tokio::spawn(async move {
+        tasks::run_sync(&store, &media, &config_dir, &trigger, only_connection).await
+    });
+    let run = handle
+        .await
+        .map_err(|error| StoreError::Plugin(format!("the scan task ended unexpectedly: {error}")))??;
     Ok(Json(json!({
         "run": run,
         "runs": tasks::runs(&state.store).await,

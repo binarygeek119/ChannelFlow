@@ -19,9 +19,13 @@ FROM ersatztv/next:develop
 USER root
 
 # Platform layer: packages next does not ship that ChannelFlow needs.
-ENV TZ=America/Chicago
+# The default zone is a build-time default only; the entrypoint re-applies the
+# runtime $TZ to /etc/localtime + /etc/timezone on every start.
+ARG TZ=America/Chicago
+ENV TZ=${TZ}
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tzdata \
+        gosu \
         python3 \
         ca-certificates \
     && ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
@@ -33,6 +37,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 COPY --from=rust-build /src/target/release/channelflow /usr/local/bin/channelflow
 
+# The entrypoint applies $TZ at runtime and then drops to the app user.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/channelflow-entrypoint.sh
+RUN chmod +x /usr/local/bin/channelflow-entrypoint.sh
+
 # The web UI ships as files alongside the binary — the loader serves them from
 # /config/webui, and a fresh (empty) /config gets them copied in on start
 # (see main.rs: CHANNELFLOW_WEBUI default below).
@@ -43,18 +51,17 @@ COPY crates/channelflow-core/static /usr/share/channelflow/webui
 COPY vendor/ws4kp /app/channelflow/ws4kp
 COPY vendor/ws3kp /app/channelflow/ws3kp
 
-USER ersatztv
-
+# No USER here: the image starts as root only long enough for the entrypoint to
+# set the time zone, then it execs the server as `ersatztv` (uid 1000).
 ENV CHANNELFLOW_CONFIG=/config \
     CHANNELFLOW_WS4KP=/app/channelflow/ws4kp \
     CHANNELFLOW_WS3KP=/app/channelflow/ws3kp \
     FFMPEG_PATH=/usr/local/bin/ffmpeg \
-    PORT=8097 \
-    TZ=America/Chicago
+    PORT=8097
 
 EXPOSE 8097
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD wget -qO- http://127.0.0.1:${PORT}/api/health >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/local/bin/channelflow"]
+ENTRYPOINT ["/usr/local/bin/channelflow-entrypoint.sh"]

@@ -1,0 +1,52 @@
+# ChannelFlow 2.0 in Docker.
+#
+#   docker compose up -d
+#
+# The image is built FROM ersatztv/next:develop (patched ffmpeg, the ersatztv
+# engine) and runs the ChannelFlow server on 8097.
+#
+# Time zone: set TZ (or TZ in a .env next to this file). The image's entrypoint
+# applies it to the container clock on every start, so the server — and anything
+# it launches — share one zone. Default: America/Chicago.
+#
+# Postgres holds the catalog and channels. DATABASE_URL points the server at the
+# service below; drop that variable and the postgres service to keep everything
+# as JSON under /config instead.
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: channelflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: channelflow
+      POSTGRES_USER: channelflow
+      POSTGRES_PASSWORD: channelflow
+    volumes:
+      - channelflow-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U channelflow -d channelflow"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  channelflow:
+    build: .
+    image: ghcr.io/binarygeek119/channelflow:latest
+    container_name: channelflow
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-America/Chicago}
+      PORT: "8097"
+      DATABASE_URL: ${DATABASE_URL:-postgres://channelflow:channelflow@postgres:5432/channelflow}
+    ports:
+      - "8097:8097"
+    volumes:
+      - channelflow-config:/config
+      - ${MEDIA_ROOT:-/mnt/user/media}:/media
+
+volumes:
+  channelflow-pgdata:
+  channelflow-config:

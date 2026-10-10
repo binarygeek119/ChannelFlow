@@ -233,6 +233,12 @@ async function renderMediaItem(matchKey) {
     detail.textContent = "";
     detail.innerHTML = '<p class="hint">Loading…</p>';
   }
+  // The item page replaces the tab's library grid, not just the shared shell:
+  // hide every kind-tab page so the detail isn't stranded below a populated
+  // grid (which made a click look like the page never opened until refresh).
+  document.querySelectorAll("#tab-media .library-page").forEach((page) => {
+    page.hidden = true;
+  });
   const tabs = $("media-inner-tabs");
   if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
   // Directly-opened item URLs may lack the catalog the tabs loaded.

@@ -55,6 +55,10 @@ pub struct Connection {
     /// The server's display name, captured the same way.
     #[serde(default)]
     pub server_name: Option<String>,
+    /// What the media in this connection is (`movie`, `series`, `music`,
+    /// `musicvideo`). File-based sources (Local) use it to scan correctly.
+    #[serde(default)]
+    pub media_kind: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -72,6 +76,7 @@ impl Default for Connection {
             verify_tls: true,
             server_id: None,
             server_name: None,
+            media_kind: None,
         }
     }
 }

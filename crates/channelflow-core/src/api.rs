@@ -696,7 +696,7 @@ async fn update_plugin(
     }
     if bundled.is_some() {
         return Err(StoreError::Plugin(format!(
-            "plugins are compiled into ChannelFlow, so {id} updates with ChannelFlow, not on its own (latest is {latest})"
+            "{id} is compiled into ChannelFlow, so it updates with ChannelFlow itself: pull the newer dependency from the ChannelFlow-Plugins repo and rebuild (latest is {latest})"
         ))
         .into());
     }
@@ -818,13 +818,21 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
         .iter()
         .map(|installed| {
             let known = catalog.iter().find(|entry| entry["id"] == json!(installed.id));
+            // A bundled plugin's real version is what this build compiled —
+            // the catalog entry's version — not the stamp recorded at install
+            // time. That way a rebuild that pulls a newer plugin shows the
+            // newer version and no phantom update.
+            let version = known
+                .and_then(|entry| entry["version"].as_str())
+                .unwrap_or(&installed.version)
+                .to_string();
             let has_update = newest
                 .get(&installed.id)
-                .is_some_and(|latest| version_is_newer(latest, &installed.version));
+                .is_some_and(|latest| version_is_newer(latest, &version));
             match known {
                 Some(entry) => json!({
                     "id": installed.id,
-                    "version": installed.version,
+                    "version": version,
                     "enabled": installed.enabled,
                     "bundled": true,
                     "staged": false,
@@ -839,7 +847,7 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                 }),
                 None => json!({
                     "id": installed.id,
-                    "version": installed.version,
+                    "version": version,
                     "enabled": installed.enabled,
                     "bundled": false,
                     "staged": false,

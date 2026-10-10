@@ -1,8 +1,13 @@
+// Media page: what every media source synced, read from ChannelFlow's own
+// catalog. Each kind tab lists its source libraries the way Jellyfin's web UI
+// shows a library — a header naming the library, then a responsive grid of
+// poster cards — rather than a flat list.
+
 const MEDIA_TABS = [
-  { key: "movies", label: "Movies", kinds: ["movie"] },
-  { key: "tvshows", label: "TV Shows", kinds: ["series"] },
-  { key: "music", label: "Music", kinds: ["album", "artist"] },
-  { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"] },
+  { key: "movies", label: "Movies", kinds: ["movie"], shape: "portrait" },
+  { key: "tvshows", label: "TV Shows", kinds: ["series"], shape: "portrait" },
+  { key: "music", label: "Music", kinds: ["album", "artist"], shape: "square" },
+  { key: "musicvideos", label: "Music Videos", kinds: ["musicvideo"], shape: "portrait" },
 ];
 let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0 };
@@ -52,6 +57,43 @@ function mediaPosterUrl(path) {
   return `/api/media/image?path=${encodeURIComponent(path)}`;
 }
 
+function mediaKindLabel(kind) {
+  return (
+    { movie: "Movie", series: "Series", album: "Album", artist: "Artist", musicvideo: "Music video" }[kind] ||
+    kind
+  );
+}
+
+// A Jellyfin-style poster card: a fixed-ratio poster with a hover dim + play
+// badge, and the title/year beneath.
+function mediaCard(item, shape) {
+  const card = document.createElement("div");
+  card.className = "card jf-card";
+  card.title = item.title + (item.year ? ` (${item.year})` : "");
+  const poster = mediaPosterUrl(item.poster_path);
+  const image = poster
+    ? `<div class="cardImage" style="background-image:url('${escapeHtml(poster)}')"></div>`
+    : `<div class="cardImage cardImage-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></div>`;
+  const secondary = item.year ? String(item.year) : mediaKindLabel(item.kind);
+  card.innerHTML =
+    `<div class="cardBox">` +
+      `<div class="cardScalable">` +
+        `<div class="cardPadder cardPadder-${shape}"></div>` +
+        image +
+        `<div class="cardOverlayContainer">` +
+          `<div class="cardOverlayFab">` +
+            `<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>` +
+          `</div>` +
+        `</div>` +
+      `</div>` +
+      `<div class="cardFooter">` +
+        `<div class="cardText cardText-first">${escapeHtml(item.title)}</div>` +
+        `<div class="cardText cardText-secondary">${escapeHtml(secondary)}</div>` +
+      `</div>` +
+    `</div>`;
+  return card;
+}
+
 function renderMediaPage(key) {
   mediaPageKey = key;
   renderMediaTabs();
@@ -62,58 +104,43 @@ function renderMediaPage(key) {
   if (!spec) return;
   const count = $(`media-count-${key}`);
   if (count) count.textContent = `${mediaCounts[key] || 0} item(s)`;
-  const list = $(`media-list-${key}`);
-  if (!list) return;
-  list.textContent = "";
-  const rows = mediaItems.filter((item) => spec.kinds.includes(item.kind));
-  if (!rows.length) {
-    list.appendChild(
+  const host = $(`media-list-${key}`);
+  if (!host) return;
+  host.textContent = "";
+  const items = mediaItems.filter((item) => spec.kinds.includes(item.kind));
+  if (!items.length) {
+    host.appendChild(
       libraryCard(
         '<p class="hint">Nothing synced here yet — run a library scan on the Library tab and the items appear.</p>'
       )
     );
     return;
   }
-  // One box per library, copying the Library page's group-per-connection look.
+  // One Jellyfin-style library section per source library.
   const byLibrary = new Map();
-  rows.forEach((item) => {
+  items.forEach((item) => {
     const groupKey = `${item.connection_id}::${item.library || ""}`;
-    if (!byLibrary.has(groupKey)) byLibrary.set(groupKey, { ...item, items: [] });
+    if (!byLibrary.has(groupKey)) byLibrary.set(groupKey, { items: [], library: item.library, connection_id: item.connection_id });
     byLibrary.get(groupKey).items.push(item);
   });
-  for (const [groupKey, group] of byLibrary) {
-    const box = document.createElement("div");
-    box.className = "library-box";
-    const host = connectionNameFor(group.connection_id);
-    const libraryName = escapeHtml(group.library || "Library");
-    const head = document.createElement("div");
-    head.className = "library-box-head";
-    head.innerHTML = `<h3>${escapeHtml(host)} · ${libraryName}</h3><span class="count">${group.items.length} item(s)</span>`;
-    box.appendChild(head);
-    group.items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "media-row";
-      const poster = mediaPosterUrl(item.poster_path);
-      const thumb = poster
-        ? `<img class="media-thumb" src="${escapeHtml(poster)}" alt="" loading="lazy">`
-        : '<div class="media-thumb media-thumb-missing"></div>';
-      const year = item.year ? ` <span class="media-year">(${escapeHtml(String(item.year))})</span>` : "";
-      const sub = item.kind === "artist"
-        ? '<span class="media-sub">Artist</span>'
-        : item.kind === "album"
-          ? '<span class="media-sub">Album</span>'
-          : "";
-      row.innerHTML = `${thumb}<div class="media-info"><div class="media-title">${escapeHtml(item.title)}${year}</div>${sub}</div>`;
-      box.appendChild(row);
-    });
-    list.appendChild(box);
+  for (const group of byLibrary.values()) {
+    const section = document.createElement("section");
+    section.className = "jf-library";
+    const source = connectionNameFor(group.connection_id);
+    const heading = group.library ? escapeHtml(group.library) : "Library";
+    section.innerHTML =
+      `<div class="jf-library-head">` +
+        `<h3>${heading}</h3>` +
+        `<span class="jf-library-meta">${escapeHtml(source)} · ${group.items.length} item(s)</span>` +
+      `</div>`;
+    const grid = document.createElement("div");
+    grid.className = "itemsContainer vertical-wrap";
+    group.items
+      .sort((a, b) => String(a.title).localeCompare(String(b.title)))
+      .forEach((item) => grid.appendChild(mediaCard(item, spec.shape)));
+    section.appendChild(grid);
+    host.appendChild(section);
   }
 }
-
-// --- task progress popup ----------------------------------------------------
-// A bottom-right popup tracks a running task. It stays until the work is done,
-// holds briefly green (or red on failure), then fades away. It lives outside
-// the tab panels, so switching pages never hides it.
-
 
 CF.define("media", { onShow: loadMedia });

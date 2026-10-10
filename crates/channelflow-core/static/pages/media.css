@@ -1,8 +1,165 @@
-.media-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.45rem 0; border-top: 1px solid var(--border); }
-.media-thumb { width: 3.2rem; height: 4.6rem; object-fit: cover; border-radius: 6px; background: var(--off); flex: 0 0 auto; }
-.media-thumb-missing { border: 1px dashed var(--border); }
-.media-info { min-width: 0; }
-.media-title { font-size: 0.9rem; }
-.media-year { color: var(--muted); font-size: 0.82rem; }
-.media-sub { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 0.15rem; }
-.media-list { display: flex; flex-direction: column; gap: 0.9rem; }
+/* Media page: a Jellyfin-style library view. Each source library is a section
+   with a header and a responsive grid of poster cards (portrait 2:3 posters for
+   movies / shows / music videos, square art for music), matching jellyfin-web's
+   cardbuilder card.scss. */
+
+.jf-library { margin: 0 0 2.2rem; }
+
+.jf-library-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin: 0 0 0.9rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.jf-library-head h3 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.jf-library-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.itemsContainer {
+    display: flex;
+}
+
+.vertical-wrap {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+/* Card boxes are grid cells: even poster columns, Jellyfin's ~0.6em gutter. */
+.jf-library .itemsContainer {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1.1rem 0.7rem;
+}
+
+.card {
+    border: 0;
+    background: none;
+    margin: 0;
+    padding: 0;
+    display: block;
+    color: inherit;
+    min-width: 0;
+    outline: none;
+}
+
+.cardBox {
+    margin: 0;
+    border: 0 solid transparent;
+}
+
+.cardScalable {
+    position: relative;
+    contain: layout style;
+}
+
+.cardPadder-portrait { padding-bottom: 150%; }
+.cardPadder-square { padding-bottom: 100%; }
+.cardPadder-backdrop { padding-bottom: 56.25%; }
+
+/* Jellyfin's poster frame: dark base, soft shadow, small radius. */
+.cardPadder {
+    position: relative;
+    border-radius: 0.2em;
+    background-color: #242424;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+
+.cardScalable .cardImage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center;
+    border-radius: 0.2em;
+}
+
+.cardImage-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4a4a4a;
+}
+
+.cardImage-fallback svg {
+    width: 2.6rem;
+    height: 2.6rem;
+}
+
+/* Hover dim + centered play badge, like Jellyfin's card overlay. */
+.cardOverlayContainer {
+    position: absolute;
+    inset: 0;
+    border-radius: 0.2em;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.card:hover .cardOverlayContainer,
+.card:focus-within .cardOverlayContainer {
+    opacity: 1;
+}
+
+.cardOverlayFab {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.7);
+    color: rgba(255, 255, 255, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(1);
+    transition: transform 0.2s;
+}
+
+.card:hover .cardOverlayFab {
+    transform: scale(1.15);
+}
+
+.cardOverlayFab svg {
+    width: 1.6rem;
+    height: 1.6rem;
+    margin-left: 0.12rem;
+}
+
+.cardFooter {
+    padding: 0.35rem 0.15rem 0;
+    position: relative;
+}
+
+.cardText {
+    padding: 0.06em 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+}
+
+.cardText-first {
+    padding-top: 0.24em;
+    font-size: 0.9rem;
+}
+
+.cardText-secondary {
+    font-size: 0.78rem;
+    color: var(--muted);
+    padding-top: 0.1em;
+}

@@ -45,7 +45,7 @@ curl -X POST http://localhost:8097/api/plugins/install \
 
 **Media sources** are plugins that implement the SDK's `MediaSource` contract on top of the usual `Plugin` lifecycle. The first is **Jellyfin**: a `jellyfin` connection form, library sync into its own tables (dedup by title:year:type), per-version file selection, posters under `<config>/Images/posters/…`, and `channelflow_plugin_v1` as its ABI entrypoint. The core registers these sources (so `POST /api/connections` only accepts known kinds), stores the connections, and drives sync.
 
-During a sync a source also reports the items it found (movies, series, albums, artists, music videos) through the SDK's `MediaCatalog` handle, and the base stores them in its **own** catalog (a `media_catalog` table on Postgres, `media_catalog.json` on files). The **Media** page reads that catalog — not the live server — so it works the same for every source: **Movies / TV Shows / Music / Music Videos** tabs, each grouped by the source library, at `/webui/media`.
+During a sync a source also reports the items it found (movies, series, albums, artists, music videos) through the SDK's `MediaCatalog` handle, and the base stores them in its **own** catalog (a `media_catalog` table on Postgres, `media_catalog.json` on files). The **Media** page reads that catalog — not the live server — so it works the same for every source: **Movies / TV Shows / Music / Music Videos** tabs, each grouped by the source library and laid out as a Jellyfin-style poster grid (portrait posters for movies/shows/music videos, square art for music, with the title and year under each card), at `/webui/media`.
 
 Storage has two backends behind one `Store`, and either holds the same settings: the channels and each plugin's own data.
 

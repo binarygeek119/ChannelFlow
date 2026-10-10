@@ -810,11 +810,17 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
         let manager = state.plugins.lock().await;
         manager.catalog()
     };
+    // The newest version every registered repository offers, so an installed
+    // plugin can show an Update action when a newer one is listed.
+    let newest = newest_by_id(state).await;
     let mut plugins: Vec<serde_json::Value> = registry
         .installed
         .iter()
         .map(|installed| {
             let known = catalog.iter().find(|entry| entry["id"] == json!(installed.id));
+            let has_update = newest
+                .get(&installed.id)
+                .is_some_and(|latest| version_is_newer(latest, &installed.version));
             match known {
                 Some(entry) => json!({
                     "id": installed.id,
@@ -828,6 +834,8 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "health": entry["health"],
                     "permissions": entry["permissions"],
                     "ui_contributions": entry["ui_contributions"],
+                    "update_available": has_update,
+                    "update_to": newest.get(&installed.id),
                 }),
                 None => json!({
                     "id": installed.id,
@@ -841,6 +849,8 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "health": serde_json::Value::Null,
                     "permissions": [],
                     "ui_contributions": [],
+                    "update_available": has_update,
+                    "update_to": newest.get(&installed.id),
                 }),
             }
         })
@@ -853,6 +863,10 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
         if registry.get(id).is_some() {
             continue;
         }
+        let version = record["version"].as_str().unwrap_or_default();
+        let has_update = newest
+            .get(id)
+            .is_some_and(|latest| version_is_newer(latest, version));
         plugins.push(json!({
             "id": id,
             "version": record["version"],
@@ -865,10 +879,47 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
             "health": serde_json::Value::Null,
             "permissions": [],
             "ui_contributions": [],
+            "update_available": has_update,
+            "update_to": newest.get(id),
         }));
     }
 
     Ok(json!({ "plugins": plugins }))
+}
+
+/// The newest version every registered repository offers, keyed by plugin id.
+/// Fetching the catalogs once here keeps a listing to one request per repo
+/// instead of one per plugin.
+async fn newest_by_id(state: &AppState) -> std::collections::HashMap<String, String> {
+    let mut newest: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let Ok(urls) = repository_urls(state).await else {
+        return newest;
+    };
+    for url in urls {
+        let Ok(entries) = repo::fetch_catalog(&state.http, &url).await else {
+            continue;
+        };
+        for entry in entries {
+            let mut latest: Option<String> = None;
+            for version in &entry.versions {
+                if latest
+                    .as_deref()
+                    .map_or(true, |current| version_is_newer(&version.version, current))
+                {
+                    latest = Some(version.version.clone());
+                }
+            }
+            if let Some(latest) = latest {
+                let replace = newest
+                    .get(&entry.id)
+                    .map_or(true, |current| version_is_newer(&latest, current));
+                if replace {
+                    newest.insert(entry.id, latest);
+                }
+            }
+        }
+    }
+    newest
 }
 
 /// True when `candidate` is a higher version than `current`.

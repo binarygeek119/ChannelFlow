@@ -97,14 +97,6 @@ async function loadMedia() {
   mediaPageKey = mediaTabFromPath(location.pathname) || "movies";
   showMediaLibrary();
   renderMediaTabs();
-  try {
-    const data = await request("/api/media");
-    mediaItems = data.items || [];
-    mediaCounts = data.counts || mediaCounts;
-  } catch (error) {
-    mediaItems = [];
-    mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0, news: 0 };
-  }
   renderMediaPage(mediaPageKey);
 }
 
@@ -227,33 +219,123 @@ function mediaCard(item, shape) {
   return card;
 }
 
-function renderMediaPage(key) {
+async function renderMediaPage(key) {
   mediaPageKey = key;
   document.querySelectorAll("#tab-media .library-page").forEach((page) => {
     page.hidden = page.id !== `media-page-${key}`;
   });
   const spec = MEDIA_TABS.find((tab) => tab.key === key);
   if (!spec) return;
-  const count = $(`media-count-${key}`);
-  if (count) count.textContent = `${mediaCounts[key] || 0} item(s)`;
+  await loadMediaPage(true);
+}
+
+// ── Lazy-loading the grid ─────────────────────────────────────────────────
+
+const MEDIA_PAGE = 200;
+let mediaGridElement = null;
+let mediaTotal = 0;
+let mediaOffset = 0;
+let mediaLoading = false;
+let mediaObserver = null;
+// Detail pages match albums/artists/videos by title; those lookups pull one
+// kind at a time (never the whole catalog) and cache it here.
+let mediaKindCache = {};
+
+async function mediaForKinds(kinds) {
+  const key = kinds.slice().sort().join(",");
+  if (mediaKindCache[key]) return mediaKindCache[key];
+  try {
+    const data = await request(`/api/media?kinds=${encodeURIComponent(key)}`);
+    mediaKindCache[key] = data.items || [];
+  } catch (error) {
+    mediaKindCache[key] = [];
+  }
+  return mediaKindCache[key];
+}
+
+function mediaSentinel(host) {
+  let sentinel = host.querySelector(".media-sentinel");
+  if (!sentinel) {
+    sentinel = document.createElement("div");
+    sentinel.className = "media-sentinel";
+    host.appendChild(sentinel);
+  }
+  return sentinel;
+}
+
+function observeMediaSentinel(host) {
+  const sentinel = host.querySelector(".media-sentinel");
+  if (!sentinel) return;
+  if (mediaObserver) mediaObserver.disconnect();
+  if ("IntersectionObserver" in window) {
+    mediaObserver = new IntersectionObserver(
+      (entries) => entries.forEach((entry) => entry.isIntersecting && loadMediaPage(false)),
+      { rootMargin: "700px" }
+    );
+    mediaObserver.observe(sentinel);
+  } else {
+    window.addEventListener("scroll", () => {
+      if (sentinel.getBoundingClientRect().top < window.innerHeight + 700) loadMediaPage(false);
+    });
+  }
+}
+
+// Fetch one page of the current tab and append its cards. `reset` restarts.
+async function loadMediaPage(reset) {
+  if (mediaLoading) return;
+  const key = mediaPageKey;
+  const spec = MEDIA_TABS.find((tab) => tab.key === key);
+  if (!spec) return;
   const host = $(`media-list-${key}`);
   if (!host) return;
-  host.textContent = "";
-  const items = mediaItems.filter((item) => spec.kinds.includes(item.kind));
-  if (!items.length) {
-    host.appendChild(
-      libraryCard(
-        '<p class="hint">Nothing synced here yet — run a library scan on the Library tab and the items appear.</p>'
-      )
-    );
-    return;
+  if (reset) {
+    mediaOffset = 0;
+    mediaTotal = 0;
+    mediaItems = [];
+    mediaGridElement = null;
+    host.textContent = "";
   }
-  const grid = document.createElement("div");
-  grid.className = "itemsContainer vertical-wrap";
-  items
-    .sort((a, b) => String(a.title).localeCompare(String(b.title)))
-    .forEach((item) => grid.appendChild(mediaCard(item, spec.shape)));
-  host.appendChild(grid);
+  if (mediaOffset > 0 && mediaTotal > 0 && mediaOffset >= mediaTotal) return;
+  mediaLoading = true;
+  const sentinel = mediaSentinel(host);
+  sentinel.textContent = mediaOffset === 0 ? "Loading…" : "Loading more…";
+  observeMediaSentinel(host);
+  try {
+    const data = await request(
+      `/api/media?kinds=${encodeURIComponent(spec.kinds.join(","))}&offset=${mediaOffset}&limit=${MEDIA_PAGE}`
+    );
+    mediaCounts = data.counts || mediaCounts;
+    mediaTotal = data.total || 0;
+    const count = $(`media-count-${key}`);
+    if (count) count.textContent = `${mediaTotal} item(s)`;
+    const page = data.items || [];
+    if (!page.length && mediaTotal === 0) {
+      host.textContent = "";
+      mediaGridElement = null;
+      host.appendChild(
+        libraryCard(
+          '<p class="hint">Nothing synced here yet — run a library scan on the Library tab and the items appear.</p>'
+        )
+      );
+    } else if (page.length) {
+      if (!mediaGridElement) {
+        mediaGridElement = document.createElement("div");
+        mediaGridElement.className = "itemsContainer vertical-wrap";
+        host.insertBefore(mediaGridElement, sentinel);
+      }
+      mediaItems = mediaItems.concat(page);
+      mediaOffset += page.length;
+      page.forEach((item) => mediaGridElement.appendChild(mediaCard(item, spec.shape)));
+    }
+  } catch (error) {
+    if (sentinel && !mediaGridElement) {
+      sentinel.textContent = error.message;
+    }
+  }
+  mediaLoading = false;
+  if (sentinel) {
+    sentinel.textContent = mediaTotal === 0 || mediaOffset >= mediaTotal ? "" : "Loading more…";
+  }
 }
 
 // ── Item detail (Jellyfin-style) ──────────────────────────────────────────
@@ -278,15 +360,6 @@ async function renderMediaItem(matchKey) {
   });
   const tabs = $("media-inner-tabs");
   if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
-  // Directly-opened item URLs may lack the catalog the tabs loaded.
-  if (!mediaItems.length) {
-    try {
-      const data = await request("/api/media");
-      mediaItems = data.items || [];
-    } catch (error) {
-      mediaItems = [];
-    }
-  }
   let item = null;
   try {
     const data = await request(`/api/media/${encodeURIComponent(matchKey)}`);
@@ -543,7 +616,7 @@ function findGraphAlbum(title, year) {
 // The base-catalog album matching a title (+year), for its poster and link.
 function findBaseAlbum(title, year) {
   const wanted = normalizeMusicName(title);
-  return mediaItems.find(
+  return (mediaKindCache["album"] || []).find(
     (item) =>
       item.kind === "album" &&
       normalizeMusicName(item.title) === wanted &&
@@ -615,7 +688,7 @@ function findGraphVideo(title, year) {
 // The base-catalog music video matching a title (+year), for its poster/link.
 function findBaseVideo(title, year) {
   const wanted = normalizeMusicName(title);
-  return mediaItems.find(
+  return (mediaKindCache["musicvideo"] || []).find(
     (item) =>
       item.kind === "musicvideo" &&
       normalizeMusicName(item.title) === wanted &&
@@ -662,6 +735,9 @@ function musicVideoCard(video, baseVideo) {
 async function renderMusicDetail(detail, item) {
   if (!detail || (item.kind !== "artist" && item.kind !== "album" && item.kind !== "musicvideo")) return;
   await loadMusicGraph();
+  // Detail pages match albums/artists/videos against the catalog: pull one
+  // kind at a time (cached), never the whole catalog.
+  await Promise.all([mediaForKinds(["album"]), mediaForKinds(["artist"]), mediaForKinds(["musicvideo"])]);
 
   if (item.kind === "artist") {
     const albums = albumsForArtist(item.title);
@@ -762,7 +838,7 @@ async function renderMusicDetail(detail, item) {
 // The base-catalog artist matching a plugin artist name, for page links.
 function findBaseArtist(name) {
   const wanted = normalizeMusicName(name);
-  return mediaItems.find((item) => item.kind === "artist" && normalizeMusicName(item.title) === wanted);
+  return (mediaKindCache["artist"] || []).find((item) => item.kind === "artist" && normalizeMusicName(item.title) === wanted);
 }
 
 // ── TV series → seasons → episodes ───────────────────────────────────────

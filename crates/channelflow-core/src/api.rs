@@ -1792,9 +1792,21 @@ async fn tasks_running() -> Json<serde_json::Value> {
 
 #[derive(Deserialize)]
 struct MediaCatalogQuery {
-    /// Restrict the reply to one kind: movie, series, album, artist, musicvideo.
+    /// Restrict the reply to one kind: movie, series, album, artist, musicvideo, news.
     #[serde(default)]
     kind: Option<String>,
+    /// Restrict the reply to a comma-separated set of kinds (preferred over `kind`).
+    #[serde(default)]
+    kinds: Option<String>,
+    /// Page start (default 0).
+    #[serde(default)]
+    offset: Option<usize>,
+    /// Page size. Absent/0 means "all rows" (detail-page lookups use this).
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Substring filter on the title.
+    #[serde(default)]
+    q: Option<String>,
 }
 
 /// The image route's single parameter: the poster's own path.
@@ -1810,16 +1822,16 @@ async fn media_catalog_list(
     State(state): State<AppState>,
     Query(query): Query<MediaCatalogQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let mut rows = state.store.media_list().await?;
-    enrich_source_web_urls(&state, &mut rows).await?;
+    // Tab counts always cover the whole catalog; the items are one page so the
+    // Media page lazy-loads instead of pulling everything at once.
     let counts = {
+        let pairs = state.store.media_counts().await?;
         let mut counts = serde_json::Map::new();
         for tab in ["movies", "tvshows", "music", "musicvideos", "news"] {
             counts.insert(tab.to_string(), serde_json::json!(0));
         }
-        for row in &rows {
-            let kind = row["kind"].as_str().unwrap_or("");
-            let tab = match kind {
+        for (kind, count) in pairs {
+            let tab = match kind.as_str() {
                 "movie" => "movies",
                 "series" => "tvshows",
                 "album" | "artist" => "music",
@@ -1827,22 +1839,42 @@ async fn media_catalog_list(
                 "news" => "news",
                 _ => continue,
             };
-            if let Some(count) = counts.get_mut(tab) {
-                *count = serde_json::Value::Number(serde_json::Number::from(
-                    count.as_i64().unwrap_or(0) + 1,
-                ));
+            if let Some(entry) = counts.get_mut(tab) {
+                *entry = serde_json::json!(count);
             }
         }
         counts
     };
-    let items = match query.kind.as_deref() {
-        None => rows,
-        Some(kind) => rows
-            .into_iter()
-            .filter(|row| row["kind"].as_str() == Some(kind))
-            .collect(),
-    };
-    Ok(Json(json!({ "counts": counts, "items": items })))
+    let kinds: Vec<String> = query
+        .kinds
+        .as_deref()
+        .map(|kinds| {
+            kinds
+                .split(',')
+                .map(str::trim)
+                .filter(|kind| {
+                    matches!(*kind, "movie" | "series" | "album" | "artist" | "musicvideo" | "news")
+                })
+                .map(str::to_string)
+                .collect()
+        })
+        .or_else(|| query.kind.as_deref().filter(|kind| !kind.is_empty()).map(|kind| vec![kind.to_string()]))
+        .unwrap_or_default();
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.filter(|value| *value > 0);
+    let (rows, total) = state
+        .store
+        .media_page(&kinds, offset, limit, query.q.as_deref().unwrap_or(""))
+        .await?;
+    let mut rows = rows;
+    enrich_source_web_urls(&state, &mut rows).await?;
+    Ok(Json(json!({
+        "counts": counts,
+        "items": rows,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })))
 }
 
 /// One item in the base catalog, by match key — the Media detail page's source

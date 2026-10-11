@@ -537,6 +537,30 @@ impl Store {
         }
     }
 
+    /// One page of the catalog, filtered to `kinds` (empty = every kind) and an
+    /// optional title `query`. Returns the page and the total match count, so
+    /// the Media page can lazy-load instead of pulling everything at once.
+    pub async fn media_page(
+        &self,
+        kinds: &[String],
+        offset: usize,
+        limit: Option<usize>,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_page(&self.root, kinds, offset, limit, query),
+            Backend::Postgres(pool) => pg::media_page(pool, kinds, offset, limit, query).await,
+        }
+    }
+
+    /// How many catalog items there are of each kind (for the tab counts).
+    pub async fn media_counts(&self) -> Result<Vec<(String, i64)>, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_counts(&self.root),
+            Backend::Postgres(pool) => pg::media_counts(pool).await,
+        }
+    }
+
     /// The kind (jellyfin / plex / emby / local / …) of a connection.
     pub async fn connection_kind(&self, id: i64) -> Result<Option<String>, StoreError> {
         Ok(self
@@ -1620,6 +1644,52 @@ mod file {
         read_media_catalog(root)
     }
 
+    pub fn media_counts(root: &Path) -> Result<Vec<(String, i64)>, StoreError> {
+        let mut counts: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        for item in read_media_catalog(root)? {
+            if let Some(kind) = item["kind"].as_str() {
+                *counts.entry(kind.to_string()).or_insert(0) += 1;
+            }
+        }
+        Ok(counts.into_iter().collect())
+    }
+
+    pub fn media_page(
+        root: &Path,
+        kinds: &[String],
+        offset: usize,
+        limit: Option<usize>,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        let query = query.trim().to_ascii_lowercase();
+        let mut items: Vec<serde_json::Value> = read_media_catalog(root)?
+            .into_iter()
+            .filter(|item| {
+                let kind_ok = kinds.is_empty()
+                    || item["kind"].as_str().is_some_and(|kind| kinds.iter().any(|want| want == kind));
+                let query_ok =
+                    query.is_empty() || item["title"].as_str().unwrap_or("").to_ascii_lowercase().contains(&query);
+                kind_ok && query_ok
+            })
+            .collect();
+        items.sort_by(|a, b| {
+            let key = |item: &serde_json::Value| {
+                (
+                    item["kind"].as_str().unwrap_or("").to_string(),
+                    item["title"].as_str().unwrap_or("").to_string(),
+                )
+            };
+            key(a).cmp(&key(b))
+        });
+        let total = items.len() as i64;
+        let page = items
+            .into_iter()
+            .skip(offset)
+            .take(limit.unwrap_or(usize::MAX))
+            .collect();
+        Ok((page, total))
+    }
+
     pub fn read_legacy_ai(root: &Path) -> Result<Option<serde_json::Value>, StoreError> {
         let path = root.join("ai.json");
         let text = match fs::read_to_string(&path) {
@@ -2157,6 +2227,95 @@ mod pg {
             }));
         }
         Ok(items)
+    }
+
+    pub async fn media_counts(pool: &PgPool) -> Result<Vec<(String, i64)>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT kind, count(*)::int8 AS c FROM media_items GROUP BY kind ORDER BY kind",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| (row.try_get::<String, _>("kind").unwrap_or_default(), row.try_get::<i64, _>("c").unwrap_or(0)))
+            .collect())
+    }
+
+    /// One page of the catalog, by kinds (empty = all) + optional title query.
+    pub async fn media_page(
+        pool: &PgPool,
+        kinds: &[String],
+        offset: usize,
+        limit: Option<usize>,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        let q = query.trim();
+        let kind_sql = if kinds.is_empty() {
+            String::new()
+        } else {
+            let list = kinds
+                .iter()
+                .map(|kind| format!("'{}'", kind.as_str()))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(" WHERE m.kind IN ({list})")
+        };
+        if q.contains('\'') {
+            // The title filter is bound as a parameter below; this guard only
+            // keeps the literal clause building honest.
+            return Err(StoreError::Invalid("invalid search term"));
+        }
+        let q_sql = if q.is_empty() {
+            String::new()
+        } else if kinds.is_empty() {
+            " WHERE m.title ILIKE $1".to_string()
+        } else {
+            " AND m.title ILIKE $1".to_string()
+        };
+        let count_sql = format!("SELECT count(*)::int8 AS c FROM media_items m{kind_sql}{q_sql}");
+        let mut count_query = sqlx::query(&count_sql);
+        if !q.is_empty() {
+            count_query = count_query.bind(format!("%{q}%"));
+        }
+        let total: i64 = count_query.fetch_one(pool).await?.try_get("c")?;
+
+        let mut select = "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
+                 COALESCE(json_agg(json_build_object( \
+                     'source_kind', s.source_kind, 'connection_id', s.connection_id, \
+                     'library', s.library, 'remote_id', s.remote_id, \
+                     'poster_path', s.poster_path) \
+                     ORDER BY s.source_kind, s.connection_id) \
+                     FILTER (WHERE s.item_id IS NOT NULL), '[]'::json) AS sources \
+              FROM media_items m \
+              LEFT JOIN media_item_sources s ON s.item_id = m.id"
+            .to_string();
+        select.push_str(&kind_sql);
+        select.push_str(&q_sql);
+        select.push_str(" GROUP BY m.id ORDER BY m.kind, m.title");
+        if let Some(limit) = limit {
+            select.push_str(&format!(" LIMIT {limit}"));
+        }
+        select.push_str(&format!(" OFFSET {offset}"));
+
+        let mut page_query = sqlx::query(&select);
+        if !q.is_empty() {
+            page_query = page_query.bind(format!("%{q}%"));
+        }
+        let rows = page_query.fetch_all(pool).await?;
+        let mut items = Vec::new();
+        for row in rows {
+            let sources: Json<serde_json::Value> = row.try_get("sources")?;
+            items.push(serde_json::json!({
+                "match_key": row.try_get::<String, _>("match_key")?,
+                "kind": row.try_get::<String, _>("kind")?,
+                "title": row.try_get::<String, _>("title")?,
+                "year": row.try_get::<Option<i32>, _>("year")?,
+                "overview": row.try_get::<Option<String>, _>("overview")?,
+                "poster_path": row.try_get::<Option<String>, _>("poster_path")?,
+                "sources": sources.0,
+            }));
+        }
+        Ok((items, total))
     }
 
     /// Drop every table this plugin created and delete its key/value rows.

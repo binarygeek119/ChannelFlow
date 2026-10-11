@@ -288,15 +288,18 @@ function openSlotEditor(index) {
   renderAddPanel();
 
   async function searchCatalog(query) {
-    const panel = $("slot-search-results");
+    const panel = $("slot-catalog-results");
     query = (query || "").trim();
     if (query.length < 2) {
       panel.replaceChildren();
       return;
     }
+    const typeFilter = $("slot-media-type") ? $("slot-media-type").value : "";
+    let url = `/api/media?q=${encodeURIComponent(query)}&limit=12`;
+    if (typeFilter) url += `&kind=${encodeURIComponent(typeFilter)}`;
     let items = [];
     try {
-      const data = await request(`/api/media?q=${encodeURIComponent(query)}&limit=12`);
+      const data = await request(url);
       items = (data && data.items) || [];
     } catch (error) {
       items = [];
@@ -324,7 +327,7 @@ function openSlotEditor(index) {
           weight: 1,
         });
         renderCandidates();
-        $("slot-search").value = "";
+        $("slot-catalog-search").value = "";
         searchCatalog("");
       });
       panel.appendChild(button);

@@ -395,21 +395,21 @@ async function renderMediaItem(matchKey) {
   mediaPageKey = mediaTabForKind(item.kind);
 }
 
-// Ask the hosting plugin for the rich row (genres, runtime, ratings, cast)
-// when it offers an item-detail endpoint.
+// The rich row (genres, runtime, ratings, cast) now lives in the base catalog
+// — the item's own `detail` and `people` — so no plugin call is needed.
 async function fetchItemDetail(item) {
-  const source = (item.sources || []).find(
-    (entry) => entry.source_kind && MEDIA_DETAIL_PLUGINS[entry.source_kind] && entry.remote_id
-  );
-  if (!source) return null;
-  const pluginId = MEDIA_DETAIL_PLUGINS[source.source_kind];
-  try {
-    const path = `/api/plugins/${pluginId}/item/${encodeURIComponent(source.remote_id)}/detail`;
-    const data = await request(path);
-    return data.item || null;
-  } catch (error) {
-    return null;
-  }
+  if (!item) return null;
+  const detail = item.detail || {};
+  return {
+    runtime_ticks: item.runtime_seconds ? item.runtime_seconds * 10_000_000 : null,
+    genres: item.genres || [],
+    community_rating: detail.community_rating,
+    critics_rating: detail.critics_rating,
+    official_rating: item.official_rating,
+    studios: item.studios || [],
+    overview: item.overview,
+    people: item.people || [],
+  };
 }
 
 function formatRuntime(ticks) {

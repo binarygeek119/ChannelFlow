@@ -326,11 +326,14 @@ async fn auth_state(
     })))
 }
 
-/// The session idles out after six hours of no activity (the window slides on
-/// every request — see `store::session_valid`). Remember me decides whether
-/// the browser keeps the cookie past the current browser session, so a
-/// remembered login survives a restart and stays until it idles out.
+/// The session idles out after six hours of no activity for a normal login —
+/// or thirty days for one made with "remember me" — and the window slides on
+/// every request (see `store::session_valid`). Remember me decides both: the
+/// browser keeps the cookie past the current browser session (30 days), and
+/// the stored session gets the long idle window, so a remembered login really
+/// does survive until the cookie itself expires.
 const SESSION_TTL_HOURS: i64 = crate::store::SESSION_TTL_HOURS;
+const REMEMBER_SESSION_HOURS: i64 = crate::store::REMEMBER_SESSION_HOURS;
 /// How long a remembered cookie lives in the browser. It only has to outlast
 /// the idle window; the server is what actually enforces the timeout.
 const REMEMBER_COOKIE_SECS: u64 = 30 * 24 * 3600;
@@ -362,8 +365,16 @@ async fn login(
             .into_response());
     }
     let token = auth::new_secret();
-    let expires_at = chrono::Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS);
-    state.store.save_session(&token, expires_at).await?;
+    let ttl_hours = if input.remember {
+        REMEMBER_SESSION_HOURS
+    } else {
+        SESSION_TTL_HOURS
+    };
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(ttl_hours);
+    state
+        .store
+        .save_session(&token, expires_at, input.remember)
+        .await?;
     let cookie = if input.remember {
         format!(
             "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={REMEMBER_COOKIE_SECS}"

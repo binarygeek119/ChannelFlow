@@ -15,6 +15,12 @@ async function loadTasks() {
   } catch (error) {
     setTaskNote("Could not load the library scan task: " + error.message, true);
   }
+  try {
+    const data = await request("/api/tasks/news-scan");
+    renderNewsTask(data.config || {}, data.runs || []);
+  } catch (error) {
+    setNewsNote("Could not load the Past Tense News scan task: " + error.message, true);
+  }
 }
 
 function renderJellyfinTask(config, runs) {
@@ -84,6 +90,81 @@ $("jf-task-run").addEventListener("click", () => {
         `Ran ${run.connections || 0} connection(s): ${run.added || 0} added · ${run.updated || 0} updated · ${run.removed || 0} removed · ${run.errors || 0} errors`;
       setTaskNote(note, (run.errors || 0) > 0);
       return `Scan finished: ${run.added || 0} added · ${run.updated || 0} updated · ${run.errors || 0} errors (${run.connections || 0} connection(s))`;
+    }
+  );
+});
+
+// ── Past Tense News scan task ─────────────────────────────────────────────
+
+function setNewsNote(message, bad) {
+  const note = $("news-task-note");
+  if (!note) return;
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+function renderNewsRuns(runs) {
+  const box = $("news-task-runs");
+  if (!box) return;
+  if (!runs.length) {
+    box.innerHTML =
+      '<p class="hint">No runs yet — the daily timer (or Run now) fills this in.</p>';
+    return;
+  }
+  box.innerHTML =
+    "<h4>Recent runs</h4>" +
+    runs
+      .map((run) => {
+        const when = run.at ? new Date(run.at).toLocaleString() : "?";
+        return `<div class="task-run"><span class="task-run-when">${escapeHtml(when)}</span>
+          <span class="task-run-trigger">${escapeHtml(run.trigger || "?")}</span>
+          <span>${escapeHtml(String(run.added))} added · ${escapeHtml(String(run.errors))} errors · ${escapeHtml(String(run.connections))} connection(s)</span></div>`;
+      })
+      .join("");
+}
+
+function renderNewsTask(config, runs) {
+  $("news-task-enabled").checked = config.enabled !== false;
+  $("news-task-time").value = config.daily_time || "04:00";
+  renderNewsRuns(runs);
+}
+
+$("news-task-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const config = {
+    enabled: $("news-task-enabled").checked,
+    daily_time: $("news-task-time").value || "04:00",
+  };
+  const save = $("news-task-save");
+  save.disabled = true;
+  try {
+    const data = await request("/api/tasks/news-scan", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    });
+    renderNewsTask(data.config || {}, data.runs || []);
+    setNewsNote("Schedule saved.", false);
+  } catch (error) {
+    setNewsNote(error.message, true);
+  } finally {
+    save.disabled = false;
+  }
+});
+
+$("news-task-run").addEventListener("click", () => {
+  setNewsNote("");
+  taskPopup.run(
+    "Past Tense News scan",
+    () => request("/api/tasks/news-scan/run", { method: "POST", body: JSON.stringify({}) }),
+    (data) => {
+      renderNewsRuns(data.runs || []);
+      const run = data.run || {};
+      setNewsNote(
+        `Scanned ${run.connections || 0} folder connection(s): ${run.added || 0} added · ${run.errors || 0} errors`,
+        (run.errors || 0) > 0
+      );
+      return `News scan finished: ${run.added || 0} added · ${run.errors || 0} errors`;
     }
   );
 });

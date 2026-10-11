@@ -37,6 +37,37 @@
 
         <div class="panel">
           <div class="panel-head">
+            <h2>Past Tense News scan</h2>
+          </div>
+          <p class="hint">
+            Scans the Past Tense News event folders into the media database — it only touches the
+            news connections, so it never waits on a slow media-server walk. Runs daily on the
+            server's clock, or whenever you hit Run now.
+          </p>
+          <form id="news-task-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label">
+                <input type="checkbox" id="news-task-enabled" checked> Task enabled
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule</label>
+              <div class="field-row">
+                <label class="jf-mode">Daily at</label>
+                <input type="time" id="news-task-time" value="04:00">
+              </div>
+            </div>
+            <div class="ms-form-actions">
+              <button type="submit" class="primary" id="news-task-save">Save schedule</button>
+              <button type="button" class="ghost" id="news-task-run">Run now</button>
+            </div>
+            <p class="hint" id="news-task-note"></p>
+          </form>
+          <div class="task-runs" id="news-task-runs"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
             <h2>Maintenance</h2>
           </div>
           <p class="hint">

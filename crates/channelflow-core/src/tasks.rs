@@ -17,6 +17,8 @@ use crate::store::{Store, StoreError};
 
 const CONFIG_KEY: &str = "jellyfin_sync";
 const RUNS_KEY: &str = "jellyfin_sync_runs";
+const NEWS_CONFIG_KEY: &str = "news_scan";
+const NEWS_RUNS_KEY: &str = "news_scan_runs";
 const MAX_RUNS: usize = 20;
 /// Jellyfin is the only source with a built-in scan today; its plugin id owns
 /// the connection's tables.
@@ -100,17 +102,21 @@ pub async fn save(store: &Store, config: &SyncConfig) -> Result<(), StoreError> 
 }
 
 pub async fn runs(store: &Store) -> Vec<SyncRun> {
-    match store.task_get(RUNS_KEY).await {
+    runs_for(store, RUNS_KEY).await
+}
+
+async fn runs_for(store: &Store, key: &str) -> Vec<SyncRun> {
+    match store.task_get(key).await {
         Ok(Some(value)) => serde_json::from_value(value).unwrap_or_default(),
         _ => Vec::new(),
     }
 }
 
-async fn push_run(store: &Store, run: SyncRun) -> Result<(), StoreError> {
-    let mut list = runs(store).await;
+async fn push_run_for(store: &Store, key: &str, run: SyncRun) -> Result<(), StoreError> {
+    let mut list = runs_for(store, key).await;
     list.insert(0, run);
     list.truncate(MAX_RUNS);
-    store.task_set(RUNS_KEY, &serde_json::to_value(list)?).await
+    store.task_set(key, &serde_json::to_value(list)?).await
 }
 
 /// The cron expression a schedule means. Daily `HH:MM` becomes `M H * * *`.
@@ -158,6 +164,94 @@ pub async fn is_due(store: &Store, config: &SyncConfig, now: DateTime<Utc>) -> b
         .is_some_and(|next| next <= now)
 }
 
+/// The Past Tense News scan task: scans the news connections' event folders
+/// into the media database. Scheduled like the library scan, but only touches
+/// `news` connections (never the slow media-server walks).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewsScanConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_time")]
+    pub daily_time: String,
+}
+
+impl Default for NewsScanConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            daily_time: default_time(),
+        }
+    }
+}
+
+pub async fn news_load(store: &Store) -> NewsScanConfig {
+    match store.task_get(NEWS_CONFIG_KEY).await {
+        Ok(Some(value)) => serde_json::from_value(value).unwrap_or_default(),
+        _ => NewsScanConfig::default(),
+    }
+}
+
+pub async fn news_save(store: &Store, config: &NewsScanConfig) -> Result<(), StoreError> {
+    store
+        .task_set(NEWS_CONFIG_KEY, &serde_json::to_value(config)?)
+        .await
+}
+
+pub async fn news_runs(store: &Store) -> Vec<SyncRun> {
+    runs_for(store, NEWS_RUNS_KEY).await
+}
+
+/// Whether the news scan is due (daily at `config.daily_time`).
+pub async fn news_is_due(store: &Store, config: &NewsScanConfig, now: DateTime<Utc>) -> bool {
+    if !config.enabled {
+        return false;
+    }
+    let Some(expression) = news_cron_expression(&config.daily_time) else {
+        return false;
+    };
+    let Some(schedule) = parse(&expression) else {
+        return false;
+    };
+    let last = news_runs(store)
+        .await
+        .first()
+        .map(|run| run.at)
+        .unwrap_or_else(|| now - Duration::days(1));
+    schedule.after(&last).next().is_some_and(|next| next <= now)
+}
+
+pub fn news_cron_expression(daily_time: &str) -> Option<String> {
+    let (hour, minute) = daily_time.split_once(':')?;
+    let hour: u32 = hour.trim().parse().ok()?;
+    let minute: u32 = minute.trim().parse().ok()?;
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(format!("{minute} {hour} * * *"))
+}
+
+/// Scan every Past Tense News connection's event folders into the media DB.
+pub async fn run_news_scan(
+    store: &Store,
+    media: &MediaSources,
+    config_dir: &Path,
+    trigger: &str,
+) -> Result<SyncRun, StoreError> {
+    run_scanner(
+        store,
+        media,
+        config_dir,
+        trigger,
+        None,
+        Some("news"),
+        NEWS_RUNS_KEY,
+        "news-scan",
+        "Past Tense News scan",
+        None,
+    )
+    .await
+}
+
 /// Sync every connection (or one), each with the libraries toggled on for it.
 /// A connection with no stored selection syncs all of its libraries.
 pub async fn run_sync(
@@ -167,18 +261,50 @@ pub async fn run_sync(
     trigger: &str,
     only_connection: Option<i64>,
 ) -> Result<SyncRun, StoreError> {
+    run_scanner(
+        store,
+        media,
+        config_dir,
+        trigger,
+        only_connection,
+        None,
+        RUNS_KEY,
+        "jellyfin-sync",
+        "Jellyfin library scan",
+        Some(format!("/api/plugins/{JELLYFIN_PLUGIN}/progress")),
+    )
+    .await
+}
+
+/// Shared scan driver: runs each matching connection's source sync and records
+/// one run under `runs_key`, with the running-task slot filled while it goes.
+async fn run_scanner(
+    store: &Store,
+    media: &MediaSources,
+    config_dir: &Path,
+    trigger: &str,
+    only_connection: Option<i64>,
+    only_kind: Option<&str>,
+    runs_key: &str,
+    running_kind: &str,
+    running_title: &str,
+    progress_url: Option<String>,
+) -> Result<SyncRun, StoreError> {
     // A sync can outlive the tab that started it, so mark it running in a
     // process-wide slot the web UI can read on (re)load; clear it however the
     // sync ends. The slot is in-memory, so a server restart leaves nothing
     // stale behind.
     set_running(Some(RunningTask {
-        kind: "jellyfin-sync".to_string(),
-        title: "Jellyfin library scan".to_string(),
+        kind: running_kind.to_string(),
+        title: running_title.to_string(),
         started_at: Utc::now(),
-        progress_url: Some(format!("/api/plugins/{JELLYFIN_PLUGIN}/progress")),
+        progress_url,
     }));
-    let outcome = run_sync_inner(store, media, config_dir, trigger, only_connection).await;
+    let outcome = run_sync_inner(store, media, config_dir, trigger, only_connection, only_kind).await;
     set_running(None);
+    if let Ok(run) = &outcome {
+        let _ = push_run_for(store, runs_key, run.clone()).await;
+    }
     outcome
 }
 
@@ -215,6 +341,7 @@ async fn run_sync_inner(
     config_dir: &Path,
     trigger: &str,
     only_connection: Option<i64>,
+    only_kind: Option<&str>,
 ) -> Result<SyncRun, StoreError> {
     let registry = store.plugin_registry().await?;
     let installed = |id: &str| registry.get(id).is_some();
@@ -234,6 +361,9 @@ async fn run_sync_inner(
             continue;
         }
         let kind = row["kind"].as_str().unwrap_or_default().to_string();
+        if only_kind.is_some_and(|wanted| kind != wanted) {
+            continue;
+        }
         let Some(source) = media.find_installed(&kind, &installed) else {
             continue;
         };
@@ -277,7 +407,6 @@ async fn run_sync_inner(
         run.removed += report.removed;
         run.errors += report.errors;
     }
-    push_run(store, run.clone()).await?;
     tracing::info!(
         added = run.added,
         updated = run.updated,

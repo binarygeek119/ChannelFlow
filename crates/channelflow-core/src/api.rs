@@ -123,6 +123,11 @@ pub fn router(
             get(jellyfin_sync_get).put(jellyfin_sync_put),
         )
         .route("/api/tasks/jellyfin-sync/run", post(jellyfin_sync_run))
+        .route(
+            "/api/tasks/news-scan",
+            get(news_scan_get).put(news_scan_put),
+        )
+        .route("/api/tasks/news-scan/run", post(news_scan_run))
         .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
         .route("/api/media/source-index", get(media_source_index))
@@ -1778,6 +1783,46 @@ async fn jellyfin_sync_run(
     Ok(Json(json!({
         "run": run,
         "runs": tasks::runs(&state.store).await,
+    })))
+}
+
+/// The Past Tense News scan task's configuration and recent runs.
+async fn news_scan_get(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({
+        "config": tasks::news_load(&state.store).await,
+        "runs": tasks::news_runs(&state.store).await,
+    })))
+}
+
+async fn news_scan_put(
+    State(state): State<AppState>,
+    Json(config): Json<tasks::NewsScanConfig>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if tasks::news_cron_expression(&config.daily_time).is_none() {
+        return Err(StoreError::Plugin("enter a daily time like 03:00".to_string()).into());
+    }
+    tasks::news_save(&state.store, &config).await?;
+    Ok(Json(json!({
+        "config": config,
+        "runs": tasks::news_runs(&state.store).await,
+    })))
+}
+
+/// Scan the Past Tense News folders into the media database now.
+async fn news_scan_run(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    let store = state.store.clone();
+    let media = state.media.clone();
+    // In its own task so it keeps going if the browser navigates away.
+    let handle = tokio::spawn(async move {
+        tasks::run_news_scan(&store, &media, &config_dir, "manual").await
+    });
+    let run = handle
+        .await
+        .map_err(|error| StoreError::Plugin(format!("the scan task ended unexpectedly: {error}")))??;
+    Ok(Json(json!({
+        "run": run,
+        "runs": tasks::news_runs(&state.store).await,
     })))
 }
 

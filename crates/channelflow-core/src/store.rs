@@ -244,7 +244,7 @@ impl Store {
         }
         let channel = self
             .create(NewChannel {
-                number: 1,
+                number: 1.0,
                 name: "ChannelFlow One".to_string(),
                 description: "First channel — edit or replace me".to_string(),
                 enabled: true,
@@ -1353,7 +1353,7 @@ mod file {
     pub fn update(root: &Path, id: Uuid, input: UpdateChannel) -> Result<Channel, StoreError> {
         let mut channel = get(root, id)?;
         if let Some(number) = input.number {
-            if number == 0 {
+            if number == 0.0 {
                 return Err(StoreError::Invalid("channel number must be at least 1"));
             }
             reserve(root, number, Some(id))?;
@@ -1972,7 +1972,7 @@ mod pg {
     ) -> Result<Channel, StoreError> {
         let mut channel = get(pool, id).await?;
         if let Some(number) = input.number {
-            if number == 0 {
+            if number == 0.0 {
                 return Err(StoreError::Invalid("channel number must be at least 1"));
             }
             reserve(pool, number, Some(id)).await?;
@@ -2488,7 +2488,7 @@ fn checked_new(mut input: NewChannel) -> Result<NewChannel, StoreError> {
     if name.is_empty() {
         return Err(StoreError::Invalid("channel name cannot be empty"));
     }
-    if input.number == 0 {
+    if input.number == 0.0 {
         return Err(StoreError::Invalid("channel number must be at least 1"));
     }
     input.name = name.to_string();
@@ -2645,7 +2645,7 @@ mod tests {
         let store = Store::open(&dir).expect("open file store");
         let channel = store
             .create(NewChannel {
-                number: 1,
+                number: 1.0,
                 name: "Migrating".to_string(),
                 description: String::new(),
                 enabled: true,
@@ -2717,7 +2717,7 @@ mod tests {
 
         let created = store
             .create(NewChannel {
-                number: 1,
+                number: 1.0,
                 name: "One".to_string(),
                 description: String::new(),
                 enabled: true,
@@ -2730,7 +2730,7 @@ mod tests {
             .update(
                 created.id,
                 UpdateChannel {
-                    number: Some(2),
+                    number: Some(2.0),
                     name: Some("Two".to_string()),
                     description: None,
                     enabled: None,
@@ -2738,12 +2738,12 @@ mod tests {
             )
             .await
             .expect("update");
-        assert_eq!(updated.number, 2);
+        assert_eq!(updated.number, 2.0);
         assert_eq!(updated.name, "Two");
 
         let duplicate = store
             .create(NewChannel {
-                number: 2,
+                number: 2.0,
                 name: "Clash".to_string(),
                 description: String::new(),
                 enabled: true,

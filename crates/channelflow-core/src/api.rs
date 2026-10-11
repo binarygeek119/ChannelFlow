@@ -336,16 +336,13 @@ async fn auth_state(
     })))
 }
 
-/// The session idles out after six hours of no activity for a normal login —
-/// or thirty days for one made with "remember me" — and the window slides on
-/// every request (see `store::session_valid`). Remember me decides both: the
-/// browser keeps the cookie past the current browser session (30 days), and
-/// the stored session gets the long idle window, so a remembered login really
-/// does survive until the cookie itself expires.
+/// Sessions last the full login-cookie lifetime (30 days) and slide forward on
+/// every request, so there is no short idle timeout — a login stays valid as
+/// long as the browser keeps the cookie. The remember-me box decides whether
+/// the browser keeps the cookie across restarts; it does not shorten how long
+/// a session lives.
 const SESSION_TTL_HOURS: i64 = crate::store::SESSION_TTL_HOURS;
-const REMEMBER_SESSION_HOURS: i64 = crate::store::REMEMBER_SESSION_HOURS;
-/// How long a remembered cookie lives in the browser. It only has to outlast
-/// the idle window; the server is what actually enforces the timeout.
+/// How long the login cookie lives in the browser (the default expiry).
 const REMEMBER_COOKIE_SECS: u64 = 30 * 24 * 3600;
 
 #[derive(Deserialize)]
@@ -375,23 +372,16 @@ async fn login(
             .into_response());
     }
     let token = auth::new_secret();
-    let ttl_hours = if input.remember {
-        REMEMBER_SESSION_HOURS
-    } else {
-        SESSION_TTL_HOURS
-    };
-    let expires_at = chrono::Utc::now() + chrono::Duration::hours(ttl_hours);
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS);
     state
         .store
         .save_session(&token, expires_at, input.remember)
         .await?;
-    let cookie = if input.remember {
-        format!(
-            "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={REMEMBER_COOKIE_SECS}"
-        )
-    } else {
-        format!("channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax")
-    };
+    // The cookie lasts the default 30 days either way; remember just decides
+    // whether the browser keeps it across restarts.
+    let cookie = format!(
+        "channelflow_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={REMEMBER_COOKIE_SECS}"
+    );
     Ok(([(header::SET_COOKIE, cookie)], Json(json!({ "ok": true }))).into_response())
 }
 

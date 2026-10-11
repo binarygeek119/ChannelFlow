@@ -66,12 +66,10 @@ const SERVER_API_KEY: &str = "api_key";
 /// The paired ChannelFlow TV apps, each with its own random API key.
 const PAIRED_CLIENTS: &str = "paired_clients";
 /// How long a login stays valid with no activity. It slides forward on every
-/// authenticated request, so an in-use session does not expire mid-use; a
-/// session idle for this long needs a fresh login.
-pub const SESSION_TTL_HOURS: i64 = 6;
-/// Idle window for a "remember me" login: long enough to survive days (and a
-/// browser restart) without being used, matching the remembered cookie.
-pub const REMEMBER_SESSION_HOURS: i64 = 30 * 24;
+/// authenticated request and matches the 30-day login cookie, so an in-use
+/// session never expires mid-use and a set-aside one lasts as long as the
+/// browser keeps the cookie.
+pub const SESSION_TTL_HOURS: i64 = 30 * 24;
 const RESET_KEY: &str = "auth_reset";
 const RESET_AT_KEY: &str = "auth_reset_at";
 const DATABASE_URL_KEY: &str = "database_url";
@@ -630,11 +628,11 @@ impl Store {
         self.plugin_set(CORE_NAMESPACE, AUTH_KEY, &value).await
     }
 
-    /// Whether `token` is the current session and it has not expired. A
-    /// session lives a fixed window from login; after that a stale cookie is
-    /// simply not a session. Remembered sessions (a "remember me" login) get
-    /// the long window, so they survive days of idle use; normal sessions idle
-    /// out after SESSION_TTL_HOURS.
+    /// Whether `token` is the current session and it has not expired. Sessions
+    /// live the full login-cookie lifetime (30 days) and the window slides
+    /// forward on every authenticated request, so an in-use login never
+    /// expires mid-session and a set-aside one lasts as long as the browser
+    /// keeps the cookie — there is no short idle timeout.
     pub async fn session_valid(&self, token: &str) -> Result<bool, StoreError> {
         let value = match self.plugin_get(CORE_NAMESPACE, SESSION_KEY).await? {
             Some(serde_json::Value::Object(map)) => map,
@@ -652,24 +650,11 @@ impl Store {
         if expires_at.is_some_and(|expires| Utc::now() >= expires) {
             return Ok(false);
         }
-        let remembered = value
-            .get("remembered")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        // Sliding window: every authenticated request pushes the idle timeout
-        // forward, so an in-use login never expires mid-session. A login goes
-        // stale only after its window (SESSION_TTL_HOURS idle for a plain
-        // login, REMEMBER_SESSION_HOURS for one made with "remember me").
-        let ttl_hours = if remembered {
-            REMEMBER_SESSION_HOURS
-        } else {
-            SESSION_TTL_HOURS
-        };
         let _ = self
             .save_session(
                 &stored,
-                Utc::now() + chrono::Duration::hours(ttl_hours),
-                remembered,
+                Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS),
+                false,
             )
             .await;
         Ok(true)

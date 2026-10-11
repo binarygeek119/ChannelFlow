@@ -226,7 +226,19 @@ function openGuideProgram(id) {
     `<p class="hint">${escapeHtml(`${channel ? channel.number + " · " + channel.name + " · " : ""}${when}`)}</p>` +
     `${meta ? `<p class="hint">${escapeHtml(meta)}</p>` : ""}` +
     `${program.description ? `<p>${escapeHtml(program.description)}</p>` : ""}` +
-    `</div></div>`;
+    `</div>` +
+    (channel
+      ? `<div class="actions"><button type="button" class="primary" id="guide-watch">Watch channel</button></div>`
+      : "") +
+    `</div>`;
+  const watch = $("guide-watch");
+  if (watch && channel) {
+    watch.addEventListener("click", () => {
+      // Open the channel's live feed — for a WeatherStar channel that is the
+      // live loop showing the current conditions.
+      window.open(`/live/${channel.number}.m3u8`, "_blank");
+    });
+  }
   dialog.showModal();
 }
 

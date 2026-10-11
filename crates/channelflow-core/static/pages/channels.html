@@ -40,6 +40,74 @@
               <input type="checkbox" id="enabled" checked>
               <span>Enabled</span>
             </label>
+            <div class="watermark-box">
+              <label class="check">
+                <input type="checkbox" id="wm-enabled">
+                <span>Watermark</span>
+              </label>
+              <fieldset class="watermark-fields" id="wm-fields" hidden>
+                <label>
+                  <span>Watermark image</span>
+                  <input type="file" id="wm-file" accept="image/png,image/jpeg" hidden>
+                  <div class="wm-upload">
+                    <img id="wm-preview" class="wm-preview" alt="" hidden>
+                    <span class="hint" id="wm-file-name"></span>
+                    <span class="wm-upload-actions">
+                      <button type="button" class="ghost" id="wm-pick">Choose image…</button>
+                      <button type="button" class="ghost" id="wm-clear-image" hidden>Remove image</button>
+                    </span>
+                  </div>
+                </label>
+                <label>
+                  <span>Placement</span>
+                  <select id="wm-position">
+                    <option value="bottom-right" selected>Bottom right</option>
+                    <option value="bottom-left">Bottom left</option>
+                    <option value="top-left">Top left</option>
+                    <option value="top-right">Top right</option>
+                  </select>
+                </label>
+                <div class="wm-row">
+                  <label>
+                    <span>Offset X (px)</span>
+                    <input type="number" id="wm-offset-x" min="-400" max="400" step="1" value="12">
+                  </label>
+                  <label>
+                    <span>Offset Y (px)</span>
+                    <input type="number" id="wm-offset-y" min="-400" max="400" step="1" value="12">
+                  </label>
+                </div>
+                <label>
+                  <span>Scale <b id="wm-scale-value">100</b>%</span>
+                  <input type="range" id="wm-scale" min="50" max="200" step="5" value="100">
+                </label>
+                <label>
+                  <span>Opacity <b id="wm-opacity-value">100</b>%</span>
+                  <input type="range" id="wm-opacity" min="0" max="100" step="5" value="100">
+                </label>
+                <fieldset class="wm-fades">
+                  <legend>Commercial-break fades</legend>
+                  <label class="check">
+                    <input type="checkbox" id="wm-fade-break">
+                    <span>Fade the logo out before a break starts</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="wm-fade-back">
+                    <span>Fade the logo back in after the show returns</span>
+                  </label>
+                  <div class="wm-row">
+                    <label>
+                      <span>Re-enter delay (s)</span>
+                      <input type="number" id="wm-fade-delay" min="0" max="120" step="0.5" value="5">
+                    </label>
+                    <label>
+                      <span>Fade duration (s)</span>
+                      <input type="number" id="wm-fade-duration" min="0" max="30" step="0.5" value="1.5">
+                    </label>
+                  </div>
+                </fieldset>
+              </fieldset>
+            </div>
             <div class="actions">
               <button type="submit" id="save" class="primary">Add channel</button>
               <button type="button" id="cancel" class="ghost" hidden>Cancel</button>

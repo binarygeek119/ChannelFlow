@@ -1,1 +1,63 @@
 /* Channel list styles live in the shared app.css */
+
+/* Watermark editor in the Add/Edit channel form. */
+.watermark-box {
+    border: 1px solid var(--border);
+    border-radius: 0.3rem;
+    padding: 0.6rem 0.7rem;
+    margin-top: 0.3rem;
+}
+.watermark-fields {
+    border: 0;
+    padding: 0.4rem 0 0;
+    margin: 0.4rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+.watermark-fields label {
+    margin: 0;
+}
+.wm-row {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-end;
+}
+.wm-row label {
+    flex: 1;
+    margin: 0;
+}
+.wm-upload {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+.wm-preview {
+    width: 5.5rem;
+    height: 3rem;
+    object-fit: contain;
+    background: #141414;
+    border-radius: 0.25em;
+    padding: 0.2rem;
+}
+.wm-upload-actions {
+    display: inline-flex;
+    gap: 0.4rem;
+}
+.wm-fades {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 0.3rem;
+    padding: 0.5rem 0.6rem;
+    margin: 0;
+}
+.wm-fades legend {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding: 0 0.3rem;
+}

@@ -248,6 +248,7 @@ impl Store {
                 name: "ChannelFlow One".to_string(),
                 description: "First channel — edit or replace me".to_string(),
                 enabled: true,
+                watermark: None,
             })
             .await?;
         tracing::info!(number = channel.number, name = %channel.name, "seeded first channel");
@@ -1342,6 +1343,7 @@ mod file {
             name: input.name,
             description: input.description,
             enabled: input.enabled,
+            watermark: input.watermark,
             transcode: serde_json::Value::Object(serde_json::Map::new()),
             created_at: now,
             updated_at: now,
@@ -1358,6 +1360,9 @@ mod file {
             }
             reserve(root, number, Some(id))?;
             channel.number = number;
+        }
+        if input.watermark.is_some() {
+            channel.watermark = input.watermark.unwrap_or(None);
         }
         if let Some(name) = input.name {
             let name = name.trim();
@@ -1749,6 +1754,7 @@ mod pg {
                 description TEXT NOT NULL DEFAULT '',
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 transcode JSONB NOT NULL DEFAULT '{}'::jsonb,
+                watermark JSONB NOT NULL DEFAULT 'null'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )",
@@ -1800,6 +1806,12 @@ mod pg {
         // subchannel numbers (119.1) fit. A no-op once it already is.
         let _ = sqlx::query(
             "ALTER TABLE channels ALTER COLUMN number TYPE DOUBLE PRECISION USING number::double precision",
+        )
+        .execute(pool)
+        .await;
+        // The watermark overlay column for installs that predate it.
+        let _ = sqlx::query(
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark JSONB NOT NULL DEFAULT 'null'::jsonb",
         )
         .execute(pool)
         .await;
@@ -1957,6 +1969,7 @@ mod pg {
             name: input.name,
             description: input.description,
             enabled: input.enabled,
+            watermark: input.watermark,
             transcode: serde_json::Value::Object(serde_json::Map::new()),
             created_at: now,
             updated_at: now,
@@ -1977,6 +1990,9 @@ mod pg {
             }
             reserve(pool, number, Some(id)).await?;
             channel.number = number;
+        }
+        if input.watermark.is_some() {
+            channel.watermark = input.watermark.unwrap_or(None);
         }
         if let Some(name) = input.name {
             let name = name.trim();
@@ -2405,7 +2421,7 @@ mod pg {
     }
 
     fn channel_columns() -> &'static str {
-        "SELECT id, number, name, description, enabled, transcode, created_at, updated_at \
+        "SELECT id, number, name, description, enabled, transcode, watermark, created_at, updated_at \
          FROM channels"
     }
 
@@ -2416,6 +2432,9 @@ mod pg {
             name: row.try_get("name")?,
             description: row.try_get("description")?,
             enabled: row.try_get("enabled")?,
+            watermark: row
+                .try_get::<Json<Option<crate::model::Watermark>>, _>("watermark")?
+                .0,
             transcode: row.try_get::<Json<serde_json::Value>, _>("transcode")?.0,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -2425,8 +2444,8 @@ mod pg {
     async fn insert(pool: &PgPool, channel: &Channel) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO channels
-                (id, number, name, description, enabled, transcode, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                (id, number, name, description, enabled, transcode, watermark, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(channel.id)
         .bind(channel.number)
@@ -2434,6 +2453,7 @@ mod pg {
         .bind(&channel.description)
         .bind(channel.enabled)
         .bind(Json(channel.transcode.clone()))
+        .bind(Json(channel.watermark.clone()))
         .bind(channel.created_at)
         .bind(channel.updated_at)
         .execute(pool)
@@ -2445,7 +2465,7 @@ mod pg {
         sqlx::query(
             "UPDATE channels
              SET number = $2, name = $3, description = $4, enabled = $5,
-                 transcode = $6, updated_at = $7
+                 transcode = $6, watermark = $7, updated_at = $8
              WHERE id = $1",
         )
         .bind(channel.id)
@@ -2454,6 +2474,7 @@ mod pg {
         .bind(&channel.description)
         .bind(channel.enabled)
         .bind(Json(channel.transcode.clone()))
+        .bind(Json(channel.watermark.clone()))
         .bind(channel.updated_at)
         .execute(pool)
         .await?;
@@ -2649,6 +2670,7 @@ mod tests {
                 name: "Migrating".to_string(),
                 description: String::new(),
                 enabled: true,
+                watermark: None,
             })
             .await
             .expect("create");
@@ -2721,6 +2743,7 @@ mod tests {
                 name: "One".to_string(),
                 description: String::new(),
                 enabled: true,
+                watermark: None,
             })
             .await
             .expect("create");
@@ -2734,6 +2757,7 @@ mod tests {
                     name: Some("Two".to_string()),
                     description: None,
                     enabled: None,
+                    watermark: None,
                 },
             )
             .await
@@ -2747,6 +2771,7 @@ mod tests {
                 name: "Clash".to_string(),
                 description: String::new(),
                 enabled: true,
+                watermark: None,
             })
             .await;
         assert!(matches!(

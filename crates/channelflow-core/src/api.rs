@@ -24,6 +24,8 @@ use crate::plugin::{repo, PluginManager};
 use crate::store::{Store, StoreError};
 use crate::tasks;
 
+use base64::Engine as _;
+
 /// Facts about the running process that only `main` can know: where the config
 /// directory is, what port is bound, and when the process started.
 #[derive(Clone)]
@@ -99,10 +101,18 @@ pub fn router(
         .route("/api/auth/forgot", post(forgot))
         .route("/api/auth/reset", post(reset_password))
         .route("/api/setup/database", post(setup_database))
-        .route("/api/channels", get(list_channels).post(create_channel))
+        .route(
+            "/api/channels",
+            get(list_channels)
+                .post(create_channel)
+                .layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route(
             "/api/channels/{id}",
-            get(get_channel).put(update_channel).delete(delete_channel),
+            get(get_channel)
+                .put(update_channel)
+                .delete(delete_channel)
+                .layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/{id}/update", put(update_plugin))
@@ -1098,8 +1108,30 @@ async fn create_channel(
     State(state): State<AppState>,
     Json(input): Json<NewChannel>,
 ) -> Result<(StatusCode, Json<Channel>), ApiError> {
-    let channel = state.store.create(input).await?;
-    Ok((StatusCode::CREATED, Json(channel)))
+    // Store the channel first (it owns the id), then write the watermark file
+    // and record its path with a follow-up update.
+    let new_image = input.watermark.as_ref().and_then(|wm| wm.image_data.clone());
+    let created = state.store.create(input).await?;
+    if let Some(encoded) = new_image {
+        let path = write_watermark_image(&state, created.id, &encoded)?;
+        let mut watermark = created.watermark.unwrap_or_default();
+        watermark.image_path = Some(path);
+        let updated = state
+            .store
+            .update(
+                created.id,
+                UpdateChannel {
+                    number: None,
+                    name: None,
+                    description: None,
+                    enabled: None,
+                    watermark: Some(Some(watermark)),
+                },
+            )
+            .await?;
+        return Ok((StatusCode::CREATED, Json(updated)));
+    }
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 async fn update_channel(
@@ -1107,13 +1139,87 @@ async fn update_channel(
     Path(id): Path<Uuid>,
     Json(input): Json<UpdateChannel>,
 ) -> Result<Json<Channel>, ApiError> {
-    Ok(Json(state.store.update(id, input).await?))
+    // A fresh upload replaces the stored art; a cleared watermark removes it.
+    let new_image = input
+        .watermark
+        .as_ref()
+        .and_then(|part| part.as_ref())
+        .and_then(|wm| wm.image_data.clone());
+    let clearing = matches!(input.watermark, Some(None));
+    if new_image.is_some() || clearing {
+        if let Ok(existing) = state.store.get(id).await {
+            if let Some(old_path) = existing.watermark.as_ref().and_then(|wm| wm.image_path.as_ref()) {
+                let _ = std::fs::remove_file(state.store.images_dir().join(old_path));
+            }
+        }
+    }
+    let updated = state.store.update(id, input).await?;
+    if let Some(encoded) = new_image {
+        let path = write_watermark_image(&state, id, &encoded)?;
+        let mut watermark = updated.watermark.unwrap_or_default();
+        watermark.image_path = Some(path);
+        let updated = state
+            .store
+            .update(
+                id,
+                UpdateChannel {
+                    number: None,
+                    name: None,
+                    description: None,
+                    enabled: None,
+                    watermark: Some(Some(watermark)),
+                },
+            )
+            .await?;
+        return Ok(Json(updated));
+    }
+    Ok(Json(updated))
+}
+
+/// Decode uploaded watermark bytes, reject anything that is not a PNG/JPEG,
+/// and write them under `<images>/watermarks/{id}.<ext>`. Returns the
+/// images-root-relative path the channel document records.
+fn write_watermark_image(
+    state: &AppState,
+    id: Uuid,
+    encoded: &str,
+) -> Result<String, ApiError> {
+    let encoded = encoded.split(',').next_back().unwrap_or(encoded).trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| StoreError::Invalid("the watermark file is not valid base64"))?;
+    if bytes.len() > 3 * 1024 * 1024 {
+        return Err(StoreError::Invalid("the watermark file is larger than 3 MB").into());
+    }
+    let ext = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "jpg"
+    } else {
+        return Err(StoreError::Invalid("the watermark must be a PNG or JPEG image").into());
+    };
+    let dir = state.store.images_dir().join("watermarks");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| StoreError::Plugin(format!("could not create the watermarks store: {error}")))?;
+    let file = dir.join(format!("{id}.{ext}"));
+    std::fs::write(&file, &bytes)
+        .map_err(|error| StoreError::Plugin(format!("could not store the watermark: {error}")))?;
+    Ok(format!("watermarks/{id}.{ext}"))
 }
 
 async fn delete_channel(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
+    if let Ok(existing) = state.store.get(id).await {
+        if let Some(path) = existing
+            .watermark
+            .as_ref()
+            .and_then(|wm| wm.image_path.clone())
+        {
+            let _ = std::fs::remove_file(state.store.images_dir().join(path));
+        }
+    }
     state.store.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

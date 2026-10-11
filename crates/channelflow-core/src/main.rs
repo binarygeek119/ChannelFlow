@@ -348,6 +348,26 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Lists plugin: {error}"))?;
 
+    // The Holiday Channel plugin owns the seasonal calendar: which holiday's
+    // window the date falls in, the period logos, and the matching lineup.
+    let holiday_plugin = channelflow_plugin_holidaychannel::plugin();
+    let holiday_manifest = holiday_plugin.metadata().clone();
+    let holiday_api = PluginApi {
+        id: holiday_manifest.id.clone(),
+        storage: store.plugin_storage(&holiday_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&holiday_manifest.id),
+        logger: PluginLogger::new(&holiday_manifest.id),
+        core: Arc::new(store.core_data()),
+        database: store.plugin_database(&holiday_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(holiday_plugin, holiday_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Holiday Channel plugin: {error}"))?;
+
     // The Local plugin is a file-based media source (no server): its page
     // browses folders and creates connections; the sync scans folders for
     // .nfo metadata + poster.jpg/png.

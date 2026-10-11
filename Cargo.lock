@@ -338,6 +338,7 @@ dependencies = [
  "channelflow-plugin-commercialbrainz",
  "channelflow-plugin-emergency",
  "channelflow-plugin-ersatztv",
+ "channelflow-plugin-holidaychannel",
  "channelflow-plugin-jellyfin",
  "channelflow-plugin-lists",
  "channelflow-plugin-local",
@@ -366,7 +367,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-ai"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -395,7 +396,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-api"
 version = "2.0.0"
-source = "git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0#d2c3b4f09afe0a2857e6ade97b241754910c78ce"
+source = "git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0#bfa5236aae28f5c29bd4ee114693e9e08a7efdf3"
 dependencies = [
  "async-trait",
  "axum",
@@ -409,7 +410,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-commercialbrainz"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -424,7 +425,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-emergency"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -438,7 +439,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-ersatztv"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -452,9 +453,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "channelflow-plugin-holidaychannel"
+version = "2.0.0"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
+dependencies = [
+ "async-trait",
+ "axum",
+ "channelflow-plugin-api 2.0.0 (git+https://github.com/binarygeek119/ChannelFlow?branch=2.0.0)",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "channelflow-plugin-jellyfin"
 version = "2.0.26"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -472,7 +488,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-lists"
 version = "2.0.0"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -488,7 +504,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-local"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -503,7 +519,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-news"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -518,7 +534,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-offair"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -532,7 +548,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-pasttense"
 version = "2.0.1"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -546,7 +562,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-presets"
 version = "2.0.1"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",
@@ -560,7 +576,7 @@ dependencies = [
 [[package]]
 name = "channelflow-plugin-weather"
 version = "2.0.2"
-source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#2229e1f548e784e57284bd851558f6639fa84ac9"
+source = "git+https://github.com/binarygeek119/ChannelFlow-Plugins?branch=main#0ef5248ea316dbd7a7496dfdfa695a09ddfa1833"
 dependencies = [
  "async-trait",
  "axum",

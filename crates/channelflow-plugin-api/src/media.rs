@@ -290,6 +290,24 @@ pub struct CatalogItem {
     /// absent the base matches on kind + title + year.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub match_id: Option<String>,
+    /// The item's runtime in seconds (a source's ticks divided by 1e7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_seconds: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    /// MPAA-style rating (G, PG, PG-13, TV-14, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub official_rating: Option<String>,
+    /// Release / first-air date, `YYYY-MM-DD` (a source's ISO timestamp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub premiere_date: Option<String>,
+    /// For a series: the year its first episode aired.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_episode_year: Option<i32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub studios: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl CatalogItem {
@@ -303,6 +321,13 @@ impl CatalogItem {
             poster_path: None,
             library: String::new(),
             match_id: None,
+            runtime_seconds: None,
+            genres: Vec::new(),
+            official_rating: None,
+            premiere_date: None,
+            first_episode_year: None,
+            studios: Vec::new(),
+            tags: Vec::new(),
         }
     }
 
@@ -328,6 +353,41 @@ impl CatalogItem {
 
     pub fn match_id(mut self, match_id: Option<String>) -> Self {
         self.match_id = match_id;
+        self
+    }
+
+    pub fn runtime_seconds(mut self, runtime_seconds: Option<i64>) -> Self {
+        self.runtime_seconds = runtime_seconds;
+        self
+    }
+
+    pub fn genres(mut self, genres: Vec<String>) -> Self {
+        self.genres = genres;
+        self
+    }
+
+    pub fn official_rating(mut self, official_rating: Option<String>) -> Self {
+        self.official_rating = official_rating;
+        self
+    }
+
+    pub fn premiere_date(mut self, premiere_date: Option<String>) -> Self {
+        self.premiere_date = premiere_date;
+        self
+    }
+
+    pub fn first_episode_year(mut self, first_episode_year: Option<i32>) -> Self {
+        self.first_episode_year = first_episode_year;
+        self
+    }
+
+    pub fn studios(mut self, studios: Vec<String>) -> Self {
+        self.studios = studios;
+        self
+    }
+
+    pub fn tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
         self
     }
 }

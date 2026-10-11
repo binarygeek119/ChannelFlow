@@ -1655,6 +1655,27 @@ mod file {
                     if item.poster_path.is_some() {
                         entry["poster_path"] = serde_json::json!(item.poster_path);
                     }
+                    if item.runtime_seconds.is_some() {
+                        entry["runtime_seconds"] = serde_json::json!(item.runtime_seconds);
+                    }
+                    if !item.genres.is_empty() {
+                        entry["genres"] = serde_json::json!(item.genres);
+                    }
+                    if item.official_rating.is_some() {
+                        entry["official_rating"] = serde_json::json!(item.official_rating);
+                    }
+                    if item.premiere_date.is_some() {
+                        entry["premiere_date"] = serde_json::json!(item.premiere_date);
+                    }
+                    if item.first_episode_year.is_some() {
+                        entry["first_episode_year"] = serde_json::json!(item.first_episode_year);
+                    }
+                    if !item.studios.is_empty() {
+                        entry["studios"] = serde_json::json!(item.studios);
+                    }
+                    if !item.tags.is_empty() {
+                        entry["tags"] = serde_json::json!(item.tags);
+                    }
                     let already = entry["sources"].as_array().is_some_and(|sources| {
                         sources.iter().any(|source| {
                             source["source_kind"].as_str() == Some(source_kind)
@@ -1677,6 +1698,13 @@ mod file {
                     "year": item.year,
                     "overview": item.overview,
                     "poster_path": item.poster_path,
+                    "runtime_seconds": item.runtime_seconds,
+                    "genres": item.genres,
+                    "official_rating": item.official_rating,
+                    "premiere_date": item.premiere_date,
+                    "first_episode_year": item.first_episode_year,
+                    "studios": item.studios,
+                    "tags": item.tags,
                     "sources": [source],
                 })),
             }
@@ -1768,6 +1796,20 @@ mod file {
 
 /// The Postgres backend. The tables are invented here and owned by
 /// ChannelFlow; next's own schema lives in the same server untouched.
+    /// Normalise a JSONB array column back to `Vec<String>`.
+    fn json_array(value: serde_json::Value) -> Vec<String> {
+        match value {
+            serde_json::Value::Array(items) => items
+                .into_iter()
+                .filter_map(|item| match item {
+                    serde_json::Value::String(text) => Some(text),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
 mod pg {
     use super::*;
 
@@ -1812,6 +1854,13 @@ mod pg {
                 year INTEGER,
                 overview TEXT,
                 poster_path TEXT,
+                runtime_seconds BIGINT,
+                genres JSONB DEFAULT '[]'::jsonb,
+                official_rating TEXT,
+                premiere_date TEXT,
+                first_episode_year INTEGER,
+                studios JSONB DEFAULT '[]'::jsonb,
+                tags JSONB DEFAULT '[]'::jsonb,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
             "CREATE TABLE IF NOT EXISTS media_item_sources (
@@ -1836,6 +1885,22 @@ mod pg {
         )
         .execute(pool)
         .await;
+        // Older installs lack the extended media metadata columns.
+        for column in [
+            ("media_items", "runtime_seconds", "BIGINT"),
+            ("media_items", "genres", "JSONB DEFAULT '[]'::jsonb"),
+            ("media_items", "official_rating", "TEXT"),
+            ("media_items", "premiere_date", "TEXT"),
+            ("media_items", "first_episode_year", "INTEGER"),
+            ("media_items", "studios", "JSONB DEFAULT '[]'::jsonb"),
+            ("media_items", "tags", "JSONB DEFAULT '[]'::jsonb"),
+        ] {
+            let statement = format!(
+                "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}",
+                column.0, column.1, column.2
+            );
+            let _ = sqlx::query(&statement).execute(pool).await;
+        }
         // The watermark overlay column for installs that predate it.
         let _ = sqlx::query(
             "ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark JSONB NOT NULL DEFAULT 'null'::jsonb",
@@ -2219,13 +2284,21 @@ mod pg {
         for item in items {
             let key = super::match_key(&item.kind, item.match_id.as_deref(), &item.title, item.year);
             let row = sqlx::query(
-                "INSERT INTO media_items (match_key, kind, title, year, overview, poster_path, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, now()) \
+                "INSERT INTO media_items (match_key, kind, title, year, overview, poster_path, \
+                     runtime_seconds, genres, official_rating, premiere_date, first_episode_year, studios, tags, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()) \
                  ON CONFLICT (match_key) DO UPDATE SET \
                      title = EXCLUDED.title, \
                      year = COALESCE(EXCLUDED.year, media_items.year), \
                      overview = COALESCE(EXCLUDED.overview, media_items.overview), \
                      poster_path = COALESCE(EXCLUDED.poster_path, media_items.poster_path), \
+                     runtime_seconds = COALESCE(EXCLUDED.runtime_seconds, media_items.runtime_seconds), \
+                     genres = CASE WHEN jsonb_array_length(EXCLUDED.genres) > 0 THEN EXCLUDED.genres ELSE media_items.genres END, \
+                     official_rating = COALESCE(EXCLUDED.official_rating, media_items.official_rating), \
+                     premiere_date = COALESCE(EXCLUDED.premiere_date, media_items.premiere_date), \
+                     first_episode_year = COALESCE(EXCLUDED.first_episode_year, media_items.first_episode_year), \
+                     studios = CASE WHEN jsonb_array_length(EXCLUDED.studios) > 0 THEN EXCLUDED.studios ELSE media_items.studios END, \
+                     tags = CASE WHEN jsonb_array_length(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE media_items.tags END, \
                      updated_at = now() \
                  RETURNING id",
             )
@@ -2235,6 +2308,13 @@ mod pg {
             .bind(item.year)
             .bind(&item.overview)
             .bind(&item.poster_path)
+            .bind(item.runtime_seconds)
+            .bind(serde_json::to_string(&item.genres).unwrap_or_else(|_| "[]".to_string()))
+            .bind(&item.official_rating)
+            .bind(&item.premiere_date)
+            .bind(item.first_episode_year)
+            .bind(serde_json::to_string(&item.studios).unwrap_or_else(|_| "[]".to_string()))
+            .bind(serde_json::to_string(&item.tags).unwrap_or_else(|_| "[]".to_string()))
             .fetch_one(&mut *tx)
             .await?;
             let item_id: i64 = row.try_get("id")?;
@@ -2285,6 +2365,8 @@ mod pg {
     pub async fn media_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
         let rows = sqlx::query(
             "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
+                    m.runtime_seconds, m.genres, m.official_rating, m.premiere_date, \
+                    m.first_episode_year, m.studios, m.tags, \
                     COALESCE(json_agg(json_build_object( \
                         'source_kind', s.source_kind, 'connection_id', s.connection_id, \
                         'library', s.library, 'remote_id', s.remote_id, \
@@ -2309,6 +2391,13 @@ mod pg {
                 "year": row.try_get::<Option<i32>, _>("year")?,
                 "overview": row.try_get::<Option<String>, _>("overview")?,
                 "poster_path": row.try_get::<Option<String>, _>("poster_path")?,
+                "runtime_seconds": row.try_get::<Option<i64>, _>("runtime_seconds")?,
+                "genres": json_array(row.try_get::<Json<serde_json::Value>, _>("genres")?.0),
+                "official_rating": row.try_get::<Option<String>, _>("official_rating")?,
+                "premiere_date": row.try_get::<Option<String>, _>("premiere_date")?,
+                "first_episode_year": row.try_get::<Option<i32>, _>("first_episode_year")?,
+                "studios": json_array(row.try_get::<Json<serde_json::Value>, _>("studios")?.0),
+                "tags": json_array(row.try_get::<Json<serde_json::Value>, _>("tags")?.0),
                 "sources": sources,
             }));
         }
@@ -2366,6 +2455,8 @@ mod pg {
         let total: i64 = count_query.fetch_one(pool).await?.try_get("c")?;
 
         let mut select = "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
+                 m.runtime_seconds, m.genres, m.official_rating, m.premiere_date, \
+                 m.first_episode_year, m.studios, m.tags, \
                  COALESCE(json_agg(json_build_object( \
                      'source_kind', s.source_kind, 'connection_id', s.connection_id, \
                      'library', s.library, 'remote_id', s.remote_id, \
@@ -2398,6 +2489,13 @@ mod pg {
                 "year": row.try_get::<Option<i32>, _>("year")?,
                 "overview": row.try_get::<Option<String>, _>("overview")?,
                 "poster_path": row.try_get::<Option<String>, _>("poster_path")?,
+                "runtime_seconds": row.try_get::<Option<i64>, _>("runtime_seconds")?,
+                "genres": json_array(row.try_get::<Json<serde_json::Value>, _>("genres")?.0),
+                "official_rating": row.try_get::<Option<String>, _>("official_rating")?,
+                "premiere_date": row.try_get::<Option<String>, _>("premiere_date")?,
+                "first_episode_year": row.try_get::<Option<i32>, _>("first_episode_year")?,
+                "studios": json_array(row.try_get::<Json<serde_json::Value>, _>("studios")?.0),
+                "tags": json_array(row.try_get::<Json<serde_json::Value>, _>("tags")?.0),
                 "sources": sources.0,
             }));
         }

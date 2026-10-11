@@ -67,6 +67,11 @@ pub struct PluginManifest {
     /// The permissions the plugin requests, e.g. `storage:read`.
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// The plugins this one needs installed to work (their manifest ids), e.g.
+    /// the Emergency Broadcast System requires `com.channelflow.weather`. The
+    /// base can list these and offer to auto-install the missing ones.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
     /// Per-platform shared library names, for dynamic loading.
     #[serde(default)]
     pub entrypoint: std::collections::BTreeMap<String, String>,

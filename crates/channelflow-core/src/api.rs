@@ -1377,6 +1377,29 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
         let manager = state.plugins.lock().await;
         manager.catalog()
     };
+    let installed_ids: std::collections::HashSet<String> = registry
+        .installed
+        .iter()
+        .map(|installed| installed.id.clone())
+        .collect();
+    // The plugins this one declares it needs, via its catalog entry (bundled
+    // plugins) or an empty list.
+    let deps_of = |catalog_entry: Option<&serde_json::Value>| -> Vec<String> {
+        catalog_entry
+            .and_then(|entry| entry["dependencies"].as_array())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let missing_of = |deps: &[String]| -> Vec<String> {
+        deps.iter()
+            .filter(|id| !installed_ids.contains(*id))
+            .cloned()
+            .collect()
+    };
     // The newest version every registered repository offers, so an installed
     // plugin can show an Update action when a newer one is listed.
     let newest = newest_by_id(state).await;
@@ -1396,6 +1419,8 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
             let has_update = newest
                 .get(&installed.id)
                 .is_some_and(|latest| version_is_newer(latest, &version));
+            let dependencies = deps_of(known);
+            let missing_dependencies = missing_of(&dependencies);
             match known {
                 Some(entry) => json!({
                     "id": installed.id,
@@ -1408,6 +1433,8 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "description": entry["description"],
                     "health": entry["health"],
                     "permissions": entry["permissions"],
+                    "dependencies": dependencies,
+                    "missing_dependencies": missing_dependencies,
                     "ui_contributions": entry["ui_contributions"],
                     "update_available": has_update,
                     "update_to": newest.get(&installed.id),
@@ -1423,6 +1450,8 @@ async fn installed_view(state: &AppState) -> Result<serde_json::Value, ApiError>
                     "description": "This plugin is not part of this build.",
                     "health": serde_json::Value::Null,
                     "permissions": [],
+                    "dependencies": dependencies,
+                    "missing_dependencies": missing_dependencies,
                     "ui_contributions": [],
                     "update_available": has_update,
                     "update_to": newest.get(&installed.id),

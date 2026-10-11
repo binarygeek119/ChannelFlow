@@ -751,3 +751,32 @@ code {
     font-size: 0.85rem;
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
 }
+
+/* A plugin page alerting that one of its dependencies is missing. */
+.plugin-dep-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.8rem;
+    padding: 0.65rem 0.8rem;
+    background: rgba(220, 38, 38, 0.12);
+    border: 1px solid rgba(220, 38, 38, 0.45);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.88rem;
+}
+.plugin-dep-banner strong { color: #ff8787; }
+.plugin-dep-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.15rem;
+}
+.plugin-dep-item code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.1em 0.4em;
+    border-radius: 0.25em;
+}
+.plugin-deps-bad { color: #ff8787; font-size: 0.8rem; margin-top: 0.15rem; }
+.plugin-deps-bad code { background: rgba(255, 255, 255, 0.08); padding: 0 0.3em; border-radius: 0.25em; }
+.plugin-deps-bad button { margin-left: 0.4rem; font-size: 0.78rem; padding: 0.1em 0.6em; }

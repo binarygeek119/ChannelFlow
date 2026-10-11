@@ -107,6 +107,69 @@ const pluginPageKeys = new Set();
 // never from <config>/webui.
 const pluginPageOwner = {};
 
+// The installed plugins (with their dependency state) and a best-effort map
+// of plugin id -> display name from the store, for the dependency alerts.
+let installedPlugins = [];
+let dependencyNames = {};
+
+async function loadDependencyNames() {
+  try {
+    const data = await request("/api/plugins/catalog");
+    const entries = data.plugins || data.entries || [];
+    entries.forEach((entry) => {
+      if (entry.id && entry.name) dependencyNames[entry.id] = entry.name;
+    });
+  } catch (error) {
+    // The store may be unreachable; the alert falls back to the plugin id.
+  }
+}
+
+// A plugin that depends on another (e.g. Emergency Broadcast
+// System needs the Weather plugin) shows an alert banner on its page when the
+// dependency is missing, with an install button (confirm before installing).
+function renderPluginDependencyBanner(section, ownerId) {
+  if (!section || !installedPlugins.length) return;
+  const owner = installedPlugins.find((plugin) => plugin.id === ownerId);
+  if (!owner) return;
+  const missing = (owner.missing_dependencies || []).filter(Boolean);
+  if (!missing.length) return;
+  const banner = document.createElement("div");
+  banner.className = "plugin-dep-banner";
+  banner.setAttribute("role", "alert");
+  banner.innerHTML =
+    `<strong>${escapeHtml(owner.name)} needs ${missing.length > 1 ? "these plugin" : "this plugin"} to work:</strong><br>` +
+    missing
+      .map((dep) => {
+        const label = dependencyNames[dep] || dep;
+        return `<span class="plugin-dep-item"><code>${escapeHtml(label)}</code>` +
+          `<button type="button" class="primary" data-install-dep="${escapeHtml(dep)}">Install</button></span>`;
+      })
+      .join(" ");
+  banner.querySelectorAll("[data-install-dep]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dep = button.dataset.installDep;
+      const label = dependencyNames[dep] || dep;
+      if (!confirm(`Auto-install the ${label} plugin so ${owner.name} can work?`)) return;
+      installDependency(dep, owner.name);
+    });
+  });
+  section.prepend(banner);
+}
+
+async function installDependency(depId, ownerName) {
+  try {
+    await request("/api/plugins/install", {
+      method: "POST",
+      body: JSON.stringify({ id: depId, url: "" }),
+    });
+    location.reload();
+  } catch (error) {
+    alert(
+      `Could not install ${dependencyNames[depId] || depId} for ${ownerName}: ${error.message}`
+    );
+  }
+}
+
 // Plugin-declared pages add their own drawer entries. The catalog only lists
 // installed plugins, so an AI plugin that is not installed leaves no AI tab —
 // exactly the same rule that governs the connection types.
@@ -123,9 +186,11 @@ async function loadPluginPages() {
   let plugins;
   try {
     plugins = (await request("/api/plugins")).plugins || [];
+    installedPlugins = plugins;
   } catch (error) {
     return;
   }
+  loadDependencyNames();
   const nav = document.getElementById("drawer-nav");
   if (!nav) return;
   const pageLinks = [];
@@ -275,6 +340,11 @@ async function showTab(key) {
     element.hidden = element.id !== section.id;
   });
   section.hidden = false;
+
+  // A plugin whose page this is may need another plugin that is not
+  // installed yet — surface that above its content.
+  const owner = pluginPageOwner[key];
+  if (owner) renderPluginDependencyBanner(section, owner);
 
   const page = CF.pages[key];
   if (page && page.onShow) page.onShow();

@@ -45,9 +45,14 @@ function renderInstalled(plugins) {
       const perms = (plugin.permissions || []).length
         ? plugin.permissions.map((p) => `<code>${escapeHtml(p)}</code>`).join(" ")
         : "none";
+      const needs = (plugin.missing_dependencies || []).filter(Boolean).length
+        ? `<div class="plugin-deps-bad">Needs: ${(plugin.missing_dependencies || [])
+            .map((dep) => `<code>${escapeHtml(dep)}</code>`)
+            .join(" ")}</div>`
+        : "";
       return `<tr>
         <td><span class="channel-name">${escapeHtml(plugin.name)}</span>
-            <div class="channel-desc">${escapeHtml(plugin.id)} · ${status}</div></td>
+            <div class="channel-desc">${escapeHtml(plugin.id)} · ${status}${needs}</div></td>
         <td>${escapeHtml(plugin.category || "—")}</td>
         <td>${escapeHtml(plugin.version)}</td>
         <td class="perms">${perms}</td>

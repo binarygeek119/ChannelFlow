@@ -46,6 +46,7 @@ impl ManagedPlugin {
             "compatible": self.compatible,
             "enabled": self.enabled,
             "permissions": manifest.permissions,
+            "dependencies": manifest.dependencies,
             "ui_contributions": manifest.ui_contributions,
             "health": self.plugin.health(),
         })

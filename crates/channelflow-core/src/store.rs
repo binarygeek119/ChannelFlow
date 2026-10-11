@@ -1861,6 +1861,7 @@ mod pg {
                 first_episode_year INTEGER,
                 studios JSONB DEFAULT '[]'::jsonb,
                 tags JSONB DEFAULT '[]'::jsonb,
+                detail JSONB,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )",
             "CREATE TABLE IF NOT EXISTS media_item_sources (
@@ -1875,6 +1876,22 @@ mod pg {
             )",
             "CREATE INDEX IF NOT EXISTS media_item_sources_conn \
                 ON media_item_sources (connection_id, library)",
+            "CREATE TABLE IF NOT EXISTS media_people (
+                id BIGSERIAL PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                image_path TEXT
+            )",
+            "CREATE TABLE IF NOT EXISTS media_item_people (
+                item_id BIGINT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                person_id BIGINT NOT NULL REFERENCES media_people(id) ON DELETE CASCADE,
+                role_type TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT '',
+                character TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (item_id, person_id, role_type, role)
+            )",
+            "CREATE INDEX IF NOT EXISTS media_item_people_item_idx \
+                ON media_item_people (item_id, sort_order)",
         ] {
             sqlx::query(statement).execute(pool).await?;
         }
@@ -1894,6 +1911,7 @@ mod pg {
             ("media_items", "first_episode_year", "INTEGER"),
             ("media_items", "studios", "JSONB DEFAULT '[]'::jsonb"),
             ("media_items", "tags", "JSONB DEFAULT '[]'::jsonb"),
+            ("media_items", "detail", "JSONB"),
         ] {
             let statement = format!(
                 "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}",
@@ -2285,8 +2303,8 @@ mod pg {
             let key = super::match_key(&item.kind, item.match_id.as_deref(), &item.title, item.year);
             let row = sqlx::query(
                 "INSERT INTO media_items (match_key, kind, title, year, overview, poster_path, \
-                     runtime_seconds, genres, official_rating, premiere_date, first_episode_year, studios, tags, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()) \
+                     runtime_seconds, genres, official_rating, premiere_date, first_episode_year, studios, tags, detail, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now()) \
                  ON CONFLICT (match_key) DO UPDATE SET \
                      title = EXCLUDED.title, \
                      year = COALESCE(EXCLUDED.year, media_items.year), \
@@ -2299,6 +2317,7 @@ mod pg {
                      first_episode_year = COALESCE(EXCLUDED.first_episode_year, media_items.first_episode_year), \
                      studios = CASE WHEN jsonb_array_length(EXCLUDED.studios) > 0 THEN EXCLUDED.studios ELSE media_items.studios END, \
                      tags = CASE WHEN jsonb_array_length(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE media_items.tags END, \
+                     detail = COALESCE(EXCLUDED.detail, media_items.detail), \
                      updated_at = now() \
                  RETURNING id",
             )
@@ -2315,6 +2334,7 @@ mod pg {
             .bind(item.first_episode_year)
             .bind(serde_json::to_string(&item.studios).unwrap_or_else(|_| "[]".to_string()))
             .bind(serde_json::to_string(&item.tags).unwrap_or_else(|_| "[]".to_string()))
+            .bind(&item.detail)
             .fetch_one(&mut *tx)
             .await?;
             let item_id: i64 = row.try_get("id")?;

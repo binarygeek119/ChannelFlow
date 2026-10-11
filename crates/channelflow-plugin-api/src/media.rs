@@ -308,6 +308,28 @@ pub struct CatalogItem {
     pub studios: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Everything an item's page shows beyond the summary fields, stored
+    /// verbatim by the base: tagline, community/critics ratings, container,
+    /// aspect ratio, language, its files → streams → chapters, and any
+    /// source-specific ids (e.g. a music item's album/artist link).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
+    /// Cast and crew, for the People pages. The base keeps a people table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<PersonCredit>,
+}
+
+/// One cast/crew credit a source reports for an item.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonCredit {
+    pub name: String,
+    /// `Actor`, `Director`, `Writer`, …
+    #[serde(default)]
+    pub role_type: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub character: String,
 }
 
 impl CatalogItem {
@@ -328,6 +350,8 @@ impl CatalogItem {
             first_episode_year: None,
             studios: Vec::new(),
             tags: Vec::new(),
+            detail: None,
+            people: Vec::new(),
         }
     }
 
@@ -388,6 +412,16 @@ impl CatalogItem {
 
     pub fn tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
+        self
+    }
+
+    pub fn detail(mut self, detail: Option<serde_json::Value>) -> Self {
+        self.detail = detail;
+        self
+    }
+
+    pub fn people(mut self, people: Vec<PersonCredit>) -> Self {
+        self.people = people;
         self
     }
 }

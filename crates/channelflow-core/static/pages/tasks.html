@@ -68,6 +68,38 @@
 
         <div class="panel">
           <div class="panel-head">
+            <h2>Local Files scan</h2>
+          </div>
+          <p class="hint">
+            Scans each Local Files connection's media folders into the database — one item per
+            media file, with its .nfo metadata and poster. It only touches the local connections,
+            so it never waits on a slow media-server walk. Runs daily on the server's clock, or
+            whenever you hit Run now.
+          </p>
+          <form id="local-task-form" class="ms-form" autocomplete="off">
+            <div class="field">
+              <label class="field-label">
+                <input type="checkbox" id="local-task-enabled" checked> Task enabled
+              </label>
+            </div>
+            <div class="field">
+              <label class="field-label">Schedule</label>
+              <div class="field-row">
+                <label class="jf-mode">Daily at</label>
+                <input type="time" id="local-task-time" value="05:00">
+              </div>
+            </div>
+            <div class="ms-form-actions">
+              <button type="submit" class="primary" id="local-task-save">Save schedule</button>
+              <button type="button" class="ghost" id="local-task-run">Run now</button>
+            </div>
+            <p class="hint" id="local-task-note"></p>
+          </form>
+          <div class="task-runs" id="local-task-runs"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
             <h2>Maintenance</h2>
           </div>
           <p class="hint">

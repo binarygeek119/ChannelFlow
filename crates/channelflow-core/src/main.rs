@@ -502,6 +502,29 @@ async fn main() -> Result<()> {
         });
     }
 
+    // And the Local Files scan on its own daily timer: it only touches the
+    // local connections, so the media-server walks never delay it.
+    {
+        let store = store.clone();
+        let media = media_sources.clone();
+        let config_dir = config.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(30));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                let config = tasks::local_load(&store).await;
+                if tasks::local_is_due(&store, &config, chrono::Utc::now()).await {
+                    if let Err(error) =
+                        tasks::run_local_scan(&store, &media, &config_dir, "schedule").await
+                    {
+                        tracing::warn!(%error, "scheduled Local Files scan failed");
+                    }
+                }
+            }
+        });
+    }
+
     axum::serve(
         listener,
         api::router(store, about, plugins, media_sources, http, plugin_routers),

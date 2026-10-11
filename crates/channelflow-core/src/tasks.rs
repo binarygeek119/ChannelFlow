@@ -1,7 +1,8 @@
-//! Background tasks. Today there is one: the Jellyfin library scan, which
-//! syncs the toggled-on libraries on a daily timer or a cron override. The
-//! core drives the media-source sync directly through the SDK, so the task
-//! runs without a browser; results are kept for the Tasks page.
+//! Background tasks. The Jellyfin library scan syncs the toggled-on libraries
+//! on a daily timer or a cron override, and the Local Files and Past Tense
+//! News scans walk their file folders daily. The core drives the media-source
+//! sync directly through the SDK, so the tasks run without a browser; results
+//! are kept for the Tasks page.
 
 use std::path::Path;
 use std::str::FromStr;
@@ -19,6 +20,8 @@ const CONFIG_KEY: &str = "jellyfin_sync";
 const RUNS_KEY: &str = "jellyfin_sync_runs";
 const NEWS_CONFIG_KEY: &str = "news_scan";
 const NEWS_RUNS_KEY: &str = "news_scan_runs";
+const LOCAL_CONFIG_KEY: &str = "local_scan";
+const LOCAL_RUNS_KEY: &str = "local_scan_runs";
 const MAX_RUNS: usize = 20;
 /// Jellyfin is the only source with a built-in scan today; its plugin id owns
 /// the connection's tables.
@@ -164,18 +167,17 @@ pub async fn is_due(store: &Store, config: &SyncConfig, now: DateTime<Utc>) -> b
         .is_some_and(|next| next <= now)
 }
 
-/// The Past Tense News scan task: scans the news connections' event folders
-/// into the media database. Scheduled like the library scan, but only touches
-/// `news` connections (never the slow media-server walks).
+/// A simple daily-at-`HH:MM` scan task config, shared by the Local Files and
+/// Past Tense News scan tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NewsScanConfig {
+pub struct DailyScanConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_time")]
     pub daily_time: String,
 }
 
-impl Default for NewsScanConfig {
+impl Default for DailyScanConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled(),
@@ -184,43 +186,13 @@ impl Default for NewsScanConfig {
     }
 }
 
-pub async fn news_load(store: &Store) -> NewsScanConfig {
-    match store.task_get(NEWS_CONFIG_KEY).await {
-        Ok(Some(value)) => serde_json::from_value(value).unwrap_or_default(),
-        _ => NewsScanConfig::default(),
-    }
-}
+/// The Past Tense News scan task's config.
+pub type NewsScanConfig = DailyScanConfig;
+/// The Local Files scan task's config.
+pub type LocalScanConfig = DailyScanConfig;
 
-pub async fn news_save(store: &Store, config: &NewsScanConfig) -> Result<(), StoreError> {
-    store
-        .task_set(NEWS_CONFIG_KEY, &serde_json::to_value(config)?)
-        .await
-}
-
-pub async fn news_runs(store: &Store) -> Vec<SyncRun> {
-    runs_for(store, NEWS_RUNS_KEY).await
-}
-
-/// Whether the news scan is due (daily at `config.daily_time`).
-pub async fn news_is_due(store: &Store, config: &NewsScanConfig, now: DateTime<Utc>) -> bool {
-    if !config.enabled {
-        return false;
-    }
-    let Some(expression) = news_cron_expression(&config.daily_time) else {
-        return false;
-    };
-    let Some(schedule) = parse(&expression) else {
-        return false;
-    };
-    let last = news_runs(store)
-        .await
-        .first()
-        .map(|run| run.at)
-        .unwrap_or_else(|| now - Duration::days(1));
-    schedule.after(&last).next().is_some_and(|next| next <= now)
-}
-
-pub fn news_cron_expression(daily_time: &str) -> Option<String> {
+/// `HH:MM` (server time) as a daily cron expression `M H * * *`.
+pub fn daily_cron_expression(daily_time: &str) -> Option<String> {
     let (hour, minute) = daily_time.split_once(':')?;
     let hour: u32 = hour.trim().parse().ok()?;
     let minute: u32 = minute.trim().parse().ok()?;
@@ -228,6 +200,65 @@ pub fn news_cron_expression(daily_time: &str) -> Option<String> {
         return None;
     }
     Some(format!("{minute} {hour} * * *"))
+}
+
+async fn load_config(store: &Store, key: &str) -> DailyScanConfig {
+    match store.task_get(key).await {
+        Ok(Some(value)) => serde_json::from_value(value).unwrap_or_default(),
+        _ => DailyScanConfig::default(),
+    }
+}
+
+async fn save_config(store: &Store, key: &str, config: &DailyScanConfig) -> Result<(), StoreError> {
+    store.task_set(key, &serde_json::to_value(config)?).await
+}
+
+/// Whether a daily scan task is due: the next daily occurrence after the last
+/// run (or the past day, if there has never been one) has arrived.
+async fn is_due_config(
+    store: &Store,
+    runs_key: &str,
+    config: &DailyScanConfig,
+    now: DateTime<Utc>,
+) -> bool {
+    if !config.enabled {
+        return false;
+    }
+    let Some(expression) = daily_cron_expression(&config.daily_time) else {
+        return false;
+    };
+    let Some(schedule) = parse(&expression) else {
+        return false;
+    };
+    let last = runs_for(store, runs_key)
+        .await
+        .first()
+        .map(|run| run.at)
+        .unwrap_or_else(|| now - Duration::days(1));
+    schedule.after(&last).next().is_some_and(|next| next <= now)
+}
+
+/// The Past Tense News scan task: scans the news connections' event folders
+/// into the media database. Scheduled like the library scan, but only touches
+/// `news` connections (never the slow media-server walks).
+pub async fn news_load(store: &Store) -> DailyScanConfig {
+    load_config(store, NEWS_CONFIG_KEY).await
+}
+
+pub async fn news_save(store: &Store, config: &DailyScanConfig) -> Result<(), StoreError> {
+    save_config(store, NEWS_CONFIG_KEY, config).await
+}
+
+pub async fn news_runs(store: &Store) -> Vec<SyncRun> {
+    runs_for(store, NEWS_RUNS_KEY).await
+}
+
+pub async fn news_is_due(store: &Store, config: &DailyScanConfig, now: DateTime<Utc>) -> bool {
+    is_due_config(store, NEWS_RUNS_KEY, config, now).await
+}
+
+pub fn news_cron_expression(daily_time: &str) -> Option<String> {
+    daily_cron_expression(daily_time)
 }
 
 /// Scan every Past Tense News connection's event folders into the media DB.
@@ -247,6 +278,51 @@ pub async fn run_news_scan(
         NEWS_RUNS_KEY,
         "news-scan",
         "Past Tense News scan",
+        None,
+    )
+    .await
+}
+
+/// The Local Files scan task: scans each local connection's configured media
+/// folders into the database (one item per media file, with its .nfo metadata
+/// and poster). Like the news scan it only touches `local` connections.
+pub async fn local_load(store: &Store) -> DailyScanConfig {
+    load_config(store, LOCAL_CONFIG_KEY).await
+}
+
+pub async fn local_save(store: &Store, config: &DailyScanConfig) -> Result<(), StoreError> {
+    save_config(store, LOCAL_CONFIG_KEY, config).await
+}
+
+pub async fn local_runs(store: &Store) -> Vec<SyncRun> {
+    runs_for(store, LOCAL_RUNS_KEY).await
+}
+
+pub async fn local_is_due(store: &Store, config: &DailyScanConfig, now: DateTime<Utc>) -> bool {
+    is_due_config(store, LOCAL_RUNS_KEY, config, now).await
+}
+
+pub fn local_cron_expression(daily_time: &str) -> Option<String> {
+    daily_cron_expression(daily_time)
+}
+
+/// Scan every Local Files connection's folders into the media DB.
+pub async fn run_local_scan(
+    store: &Store,
+    media: &MediaSources,
+    config_dir: &Path,
+    trigger: &str,
+) -> Result<SyncRun, StoreError> {
+    run_scanner(
+        store,
+        media,
+        config_dir,
+        trigger,
+        None,
+        Some("local"),
+        LOCAL_RUNS_KEY,
+        "local-scan",
+        "Local Files scan",
         None,
     )
     .await

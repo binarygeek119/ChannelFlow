@@ -128,6 +128,11 @@ pub fn router(
             get(news_scan_get).put(news_scan_put),
         )
         .route("/api/tasks/news-scan/run", post(news_scan_run))
+        .route(
+            "/api/tasks/local-scan",
+            get(local_scan_get).put(local_scan_put),
+        )
+        .route("/api/tasks/local-scan/run", post(local_scan_run))
         .route("/api/tasks/running", get(tasks_running))
         .route("/api/media", get(media_catalog_list))
         .route("/api/media/source-index", get(media_source_index))
@@ -1823,6 +1828,46 @@ async fn news_scan_run(State(state): State<AppState>) -> Result<Json<serde_json:
     Ok(Json(json!({
         "run": run,
         "runs": tasks::news_runs(&state.store).await,
+    })))
+}
+
+/// The Local Files scan task's configuration and recent runs.
+async fn local_scan_get(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({
+        "config": tasks::local_load(&state.store).await,
+        "runs": tasks::local_runs(&state.store).await,
+    })))
+}
+
+async fn local_scan_put(
+    State(state): State<AppState>,
+    Json(config): Json<tasks::LocalScanConfig>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if tasks::local_cron_expression(&config.daily_time).is_none() {
+        return Err(StoreError::Plugin("enter a daily time like 03:00".to_string()).into());
+    }
+    tasks::local_save(&state.store, &config).await?;
+    Ok(Json(json!({
+        "config": config,
+        "runs": tasks::local_runs(&state.store).await,
+    })))
+}
+
+/// Scan the Local Files folders into the media database now.
+async fn local_scan_run(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_dir = std::path::PathBuf::from(&state.about.config_folder);
+    let store = state.store.clone();
+    let media = state.media.clone();
+    // In its own task so it keeps going if the browser navigates away.
+    let handle = tokio::spawn(async move {
+        tasks::run_local_scan(&store, &media, &config_dir, "manual").await
+    });
+    let run = handle
+        .await
+        .map_err(|error| StoreError::Plugin(format!("the scan task ended unexpectedly: {error}")))??;
+    Ok(Json(json!({
+        "run": run,
+        "runs": tasks::local_runs(&state.store).await,
     })))
 }
 

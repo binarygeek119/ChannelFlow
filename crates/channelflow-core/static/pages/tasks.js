@@ -21,6 +21,12 @@ async function loadTasks() {
   } catch (error) {
     setNewsNote("Could not load the Past Tense News scan task: " + error.message, true);
   }
+  try {
+    const data = await request("/api/tasks/local-scan");
+    renderLocalTask(data.config || {}, data.runs || []);
+  } catch (error) {
+    setLocalNote("Could not load the Local Files scan task: " + error.message, true);
+  }
 }
 
 function renderJellyfinTask(config, runs) {
@@ -165,6 +171,81 @@ $("news-task-run").addEventListener("click", () => {
         (run.errors || 0) > 0
       );
       return `News scan finished: ${run.added || 0} added · ${run.errors || 0} errors`;
+    }
+  );
+});
+
+// ── Local Files scan task ─────────────────────────────────────────────────
+
+function setLocalNote(message, bad) {
+  const note = $("local-task-note");
+  if (!note) return;
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+function renderLocalRuns(runs) {
+  const box = $("local-task-runs");
+  if (!box) return;
+  if (!runs.length) {
+    box.innerHTML =
+      '<p class="hint">No runs yet — the daily timer (or Run now) fills this in.</p>';
+    return;
+  }
+  box.innerHTML =
+    "<h4>Recent runs</h4>" +
+    runs
+      .map((run) => {
+        const when = run.at ? new Date(run.at).toLocaleString() : "?";
+        return `<div class="task-run"><span class="task-run-when">${escapeHtml(when)}</span>
+          <span class="task-run-trigger">${escapeHtml(run.trigger || "?")}</span>
+          <span>${escapeHtml(String(run.added))} added · ${escapeHtml(String(run.errors))} errors · ${escapeHtml(String(run.connections))} connection(s)</span></div>`;
+      })
+      .join("");
+}
+
+function renderLocalTask(config, runs) {
+  $("local-task-enabled").checked = config.enabled !== false;
+  $("local-task-time").value = config.daily_time || "05:00";
+  renderLocalRuns(runs);
+}
+
+$("local-task-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const config = {
+    enabled: $("local-task-enabled").checked,
+    daily_time: $("local-task-time").value || "05:00",
+  };
+  const save = $("local-task-save");
+  save.disabled = true;
+  try {
+    const data = await request("/api/tasks/local-scan", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    });
+    renderLocalTask(data.config || {}, data.runs || []);
+    setLocalNote("Schedule saved.", false);
+  } catch (error) {
+    setLocalNote(error.message, true);
+  } finally {
+    save.disabled = false;
+  }
+});
+
+$("local-task-run").addEventListener("click", () => {
+  setLocalNote("");
+  taskPopup.run(
+    "Local Files scan",
+    () => request("/api/tasks/local-scan/run", { method: "POST", body: JSON.stringify({}) }),
+    (data) => {
+      renderLocalRuns(data.runs || []);
+      const run = data.run || {};
+      setLocalNote(
+        `Scanned ${run.connections || 0} folder connection(s): ${run.added || 0} added · ${run.errors || 0} errors`,
+        (run.errors || 0) > 0
+      );
+      return `Local Files scan finished: ${run.added || 0} added · ${run.errors || 0} errors`;
     }
   );
 });

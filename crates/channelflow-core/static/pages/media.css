@@ -526,6 +526,14 @@
     text-overflow: ellipsis;
 }
 .media-episode-sub { font-size: 0.74rem; color: var(--muted); }
+.media-episode-sub {
+    margin-top: 0.15rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.media-episode-actions { margin-top: 0.45rem; }
+.media-episode-play { text-decoration: none; display: inline-block; }
 
 .media-series-link {
     background: none;

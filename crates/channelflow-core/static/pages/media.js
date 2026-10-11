@@ -47,6 +47,11 @@ function mediaItemKeyFromPath(path) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function newsItemKeyFromPath(path) {
+  const match = path.match(/^\/webui\/media\/news-item\/(.+)$/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function mediaTabForKind(kind) {
   const tab = MEDIA_TABS.find((entry) => entry.kinds.includes(kind));
   return tab ? tab.key : "movies";
@@ -92,6 +97,11 @@ async function loadMedia() {
   const itemKey = mediaItemKeyFromPath(location.pathname);
   if (itemKey) {
     await renderMediaItem(itemKey);
+    return;
+  }
+  const newsKey = newsItemKeyFromPath(location.pathname);
+  if (newsKey) {
+    await renderNewsEvent(newsKey);
     return;
   }
   mediaPageKey = mediaTabFromPath(location.pathname) || "movies";
@@ -204,7 +214,8 @@ function mediaCard(item, shape) {
         badges +
       `</div>` +
     `</div>`;
-  const openDetail = () => openMediaItem(item.match_key);
+  const openDetail = () =>
+    item.kind === "news" ? openNewsEvent(item.match_key) : openMediaItem(item.match_key);
   card.addEventListener("click", (event) => {
     if (event.target.closest("a.cardOverlayFab")) return; // the play badge
     openDetail();
@@ -1048,6 +1059,115 @@ async function renderTvEpisode(detail, route) {
     (play ? `<div class="media-detail-actions">${play}</div>` : "") +
     (episode.overview ? `<p class="media-detail-overview">${escapeHtml(episode.overview)}</p>` : "");
   detail.appendChild(body);
+}
+
+// ── Past Tense News: event → coverage files (episode-style) ────────────────
+
+function openNewsEvent(matchKey) {
+  history.pushState(null, "", `/webui/media/news-item/${encodeURIComponent(matchKey)}`);
+  renderNewsEvent(matchKey);
+}
+
+async function renderNewsEvent(matchKey) {
+  const detail = $("media-detail");
+  if (!detail) return;
+  detail.hidden = false;
+  detail.textContent = "";
+  detail.innerHTML = '<p class="hint">Loading…</p>';
+  document.querySelectorAll("#tab-media .library-page").forEach((page) => {
+    page.hidden = true;
+  });
+  const tabs = $("media-inner-tabs");
+  if (tabs && tabs.closest(".panel")) tabs.closest(".panel").hidden = true;
+  let item = null;
+  try {
+    const data = await request(`/api/media/${encodeURIComponent(matchKey)}`);
+    item = data.item || null;
+  } catch (error) {
+    item = null;
+  }
+  if (!item || item.kind !== "news") {
+    detail.textContent = "";
+    detail.appendChild(mediaDetailBackBar("news"));
+    detail.appendChild(
+      libraryCard('<p class="hint bad">That event isn\u2019t in the catalog any more.</p>')
+    );
+    return;
+  }
+  const source = (item.sources || []).find(
+    (entry) => entry.source_kind === "news" && entry.remote_id
+  );
+  const folder = source ? source.remote_id : null;
+  let eventInfo = { files: [] };
+  if (folder) {
+    try {
+      eventInfo = await request(
+        `/api/plugins/com.channelflow.pasttense/files?path=${encodeURIComponent(folder)}`
+      );
+    } catch (error) {
+      eventInfo = { files: [] };
+    }
+  }
+  const files = eventInfo.files || [];
+  detail.textContent = "";
+  detail.appendChild(mediaDetailBackBar("news"));
+  const chips = [];
+  if (item.year) chips.push(String(item.year));
+  chips.push(`${files.length} coverage file${files.length === 1 ? "" : "s"}`);
+  const overview = item.overview && item.overview !== "(no overview)" ? item.overview : "";
+  const header = document.createElement("div");
+  header.className = "media-detail-main";
+  header.innerHTML =
+    `<div class="media-detail-info">` +
+    `<h1>${escapeHtml(item.title)}</h1>` +
+    `<div class="media-detail-sub">Past Tense News event</div>` +
+    (chips.length
+      ? `<div class="media-detail-meta">${chips.map((chip) => `<span class="media-detail-chip">${escapeHtml(chip)}</span>`).join("")}</div>`
+      : "") +
+    (overview ? `<p class="media-detail-overview">${escapeHtml(overview)}</p>` : "") +
+    `<p class="hint">Each card is one coverage video; ▶ Watch opens the video's page.</p>` +
+    `</div>`;
+  detail.appendChild(header);
+  if (!files.length) {
+    detail.appendChild(
+      libraryCard('<p class="hint">No coverage files in this event folder yet.</p>')
+    );
+    return;
+  }
+  const heading = document.createElement("h2");
+  heading.className = "media-detail-section";
+  heading.textContent = "Coverage";
+  detail.appendChild(heading);
+  const grid = document.createElement("div");
+  grid.className = "media-episodes";
+  files.forEach((file) => grid.appendChild(newsFileCard(file)));
+  detail.appendChild(grid);
+  mediaPageKey = "news";
+}
+
+function newsFileCard(file) {
+  const card = document.createElement("div");
+  card.className = "media-episode-card";
+  card.tabIndex = 0;
+  const image = file.thumb_url
+    ? `<img class="media-episode-shot" src="${escapeHtml(file.thumb_url)}" alt="" loading="lazy" ` +
+      `referrerpolicy="no-referrer" onerror="this.remove(); this.closest('.media-episode-frame').querySelector('.media-episode-fallback').style.display='flex';">`
+    : "";
+  const play = file.web_url
+    ? `<a class="primary media-play media-episode-play" href="${escapeHtml(file.web_url)}" ` +
+      `target="_blank" rel="noopener">▶ Watch</a>`
+    : "";
+  card.innerHTML =
+    `<div class="media-episode-frame">` +
+    `<span class="media-episode-fallback"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg></span>` +
+    image +
+    `</div>` +
+    `<div class="media-episode-title" title="${escapeHtml(file.title || "")}">${escapeHtml(file.title || "")}</div>` +
+    (file.plot && file.plot !== file.title
+      ? `<div class="media-episode-sub" title="${escapeHtml(file.plot)}">${escapeHtml(file.plot)}</div>`
+      : "") +
+    (play ? `<div class="media-episode-actions">${play}</div>` : "");
+  return card;
 }
 
 CF.define("media", { onShow: loadMedia });

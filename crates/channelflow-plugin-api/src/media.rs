@@ -35,7 +35,9 @@ pub enum MediaType {
 /// One configured connection to a media-source server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub url: String,
     #[serde(default)]
     pub api_key: String,

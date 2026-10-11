@@ -236,7 +236,11 @@ els.rows.addEventListener("click", async (event) => {
       return;
     }
     if (button.dataset.action === "transcode") {
-      await openChannelTranscode(id);
+      // The per-channel transcode editor is not wired into the shell yet;
+      // take the user to the Transcode settings page (instance defaults)
+      // rather than calling a function that only exists on that page.
+      history.pushState(null, "", "/webui/transcode");
+      await showTab("transcode");
       return;
     }
     if (button.dataset.action === "toggle") {

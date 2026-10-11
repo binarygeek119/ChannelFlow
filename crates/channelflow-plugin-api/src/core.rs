@@ -54,6 +54,19 @@ pub trait CoreData: Send + Sync {
     /// The ids of the plugins installed in the registry (e.g. to decide which
     /// contributed presets to show).
     async fn installed_plugins(&self) -> Result<Vec<String>, CoreDataError>;
+    /// Replace the guide programmes a channel shows. A plugin that produces
+    /// scheduled blocks (a weather forecast, say) writes them here; the core
+    /// keeps them and serves the guide. Programmes for other channels are
+    /// left alone. The default is a no-op so read-only plugins need not
+    /// implement it.
+    async fn set_channel_guide(
+        &self,
+        channel_id: &str,
+        programs: Vec<serde_json::Value>,
+    ) -> Result<(), CoreDataError> {
+        let _ = (channel_id, programs);
+        Ok(())
+    }
 }
 
 /// A test double that answers with no channels.

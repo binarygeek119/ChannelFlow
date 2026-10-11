@@ -1071,6 +1071,39 @@ impl CoreData for StoreCoreData {
             .map(|installed| installed.id.clone())
             .collect())
     }
+
+    async fn set_channel_guide(
+        &self,
+        channel_id: &str,
+        programs: Vec<serde_json::Value>,
+    ) -> Result<(), CoreDataError> {
+        let guide = self
+            .store
+            .guide_get()
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        let mut kept: Vec<serde_json::Value> = guide["programs"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|program| program["channel_id"].as_str() != Some(channel_id))
+            .collect();
+        for mut program in programs {
+            if let Some(object) = program.as_object_mut() {
+                object.insert(
+                    "channel_id".to_string(),
+                    serde_json::Value::String(channel_id.to_string()),
+                );
+            }
+            kept.push(program);
+        }
+        let document = serde_json::json!({ "programs": kept });
+        self.store
+            .guide_set(&document)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))
+    }
 }
 
 /// A plugin's own tables, prefixed with its id so no two namespaces can

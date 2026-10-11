@@ -32,7 +32,7 @@
     border-radius: 0.4rem;
     cursor: pointer;
     padding: 0.45rem 0.55rem;
-    min-height: 4.5rem;
+    min-height: 8rem;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -74,6 +74,15 @@
     color: #1a1a1a;
 }
 .slot-card.rerun-slot .time, .slot-card.rerun-slot .count { color: rgba(0, 0, 0, 0.7); }
+
+.slot-card .poster {
+    width: 100%;
+    height: 4.5rem;
+    object-fit: cover;
+    border-radius: 0.25rem;
+    margin: 0.15rem 0;
+    background: #1a1a1a;
+}
 .slot-card.empty {
     background: transparent;
     border-color: var(--border);
@@ -132,6 +141,15 @@
 }
 .candidate-row .cand-title { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .candidate-row .cand-meta { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+
+.candidate-row .cand-thumb {
+    width: 2rem;
+    height: 2.8rem;
+    object-fit: cover;
+    border-radius: 0.2rem;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
 .candidate-row button {
     background: none;
     border: none;
@@ -163,6 +181,37 @@
 }
 .search-result:last-child { border-bottom: none; }
 .search-result:hover { background: var(--page-bg); }
+
+.search-result {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0.45rem 0.55rem;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: var(--page-bg); }
+.search-thumb {
+    width: 2rem;
+    height: 2.8rem;
+    object-fit: cover;
+    border-radius: 0.2rem;
+    flex-shrink: 0;
+}
+.search-meta {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
 
 /* The slot/override modal. */
 .lineup-modal {

@@ -53,6 +53,9 @@ pub struct SlotCandidate {
     /// chooses proportionally; 1.0.0 stored the same field.
     #[serde(default = "default_weight")]
     pub weight: i32,
+    /// Poster image path for visual display in the lineup grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_path: Option<String>,
 }
 
 /// A day the default roster does not run: one weekday, or one calendar date.

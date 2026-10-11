@@ -141,12 +141,17 @@ function renderGrid() {
     const summary = rerun
       ? "Rerun · yesterday primetime"
       : (count ? candidateSummary(slot.candidates[0]) : "Empty slot");
+    const posterCandidate = slot.candidates.find(c => c.kind === "item" && c.poster_path);
+    const posterHtml = posterCandidate
+      ? `<img class="poster" src="/api/media/image?path=${encodeURIComponent(posterCandidate.poster_path)}" alt="${escapeHtml(posterCandidate.title)}" onerror="this.style.display='none'">`
+      : "";
     const classes = ["slot-card", rerun ? "rerun-slot" : (count ? "has-items" : "empty"), slot.span_slots > 1 ? "span-block" : ""]
       .filter(Boolean)
       .join(" ");
     const style = slot.span_slots > 1 ? `style="grid-column: span ${slot.span_slots}"` : "";
     html += `<button type="button" class="${classes}" data-slot="${slot.slot_index}" ${style} role="gridcell">` +
       `<span class="time">${slotTime(slot.slot_index)}${spanLabel(slot.span_slots)}</span>` +
+      posterHtml +
       `<span class="summary">${escapeHtml(summary)}</span>` +
       `<span class="count">${rerun ? "Rerun slot" : `${count} candidate${count === 1 ? "" : "s"}`}</span>` +
       `</button>`;
@@ -197,6 +202,14 @@ function openSlotEditor(index) {
     working.candidates.forEach((candidate, index) => {
       const row = document.createElement("div");
       row.className = "candidate-row";
+      if (candidate.poster_path) {
+        const thumb = document.createElement("img");
+        thumb.className = "cand-thumb";
+        thumb.src = `/api/media/image?path=${encodeURIComponent(candidate.poster_path)}`;
+        thumb.alt = "";
+        thumb.onerror = () => { thumb.style.display = "none"; };
+        row.appendChild(thumb);
+      }
       const title = document.createElement("span");
       title.className = "cand-title";
       title.textContent = candidate.title || "Untitled";
@@ -226,32 +239,52 @@ function openSlotEditor(index) {
 
   const addPanel = $("slot-add-panel");
   function renderAddPanel() {
-    const kind = $("slot-add-kind").value;
-    if (kind === "text") {
-      addPanel.innerHTML =
-        `<label class="field"><span class="field-label">Title</span>` +
-        `<input id="slot-text-title" type="text" placeholder="e.g. Groundhog Day (1993)"><div class="actions">` +
-        `<button type="button" class="ghost" id="slot-add-text">Add text candidate</button></div></label>`;
-      $("slot-add-text").addEventListener("click", () => {
-        const title = $("slot-text-title").value.trim();
-        if (!title) return;
-        working.candidates.push({ kind: "text", title, weight: 1 });
-        renderCandidates();
-      });
-    } else {
-      addPanel.innerHTML =
-        `<label class="field"><span class="field-label">Search the catalog</span>` +
-        `<input id="slot-search" type="search" placeholder="Type at least 2 characters…"></label>` +
-        `<div id="slot-search-results" class="search-results"></div>` +
-        `<p class="hint">Picks a media item from the base catalog; playout will resolve it to a real file.</p>`;
-      let timer;
-      $("slot-search").addEventListener("input", (event) => {
-        clearTimeout(timer);
-        timer = setTimeout(() => searchCatalog(event.target.value), 250);
-      });
-    }
+    addPanel.innerHTML =
+      `<div class="field"><span class="field-label">Media type</span>` +
+      `<select id="slot-media-type">` +
+      `<option value="">All types</option>` +
+      `<option value="movie">Movies</option>` +
+      `<option value="series">TV Shows</option>` +
+      `<option value="album">Music (Albums)</option>` +
+      `<option value="artist">Music (Artists)</option>` +
+      `<option value="musicvideo">Music Videos</option>` +
+      `</select></div>` +
+      `<div class="field"><span class="field-label">Search catalog (autocomplete)</span>` +
+      `<input id="slot-catalog-search" type="search" placeholder="Type to search…"></div>` +
+      `<div id="slot-catalog-results" class="search-results"></div>` +
+      `<div class="field"><span class="field-label">Or add as free text</span>` +
+      `<input id="slot-text-title" type="text" placeholder="Title not in catalog">` +
+      `<div class="actions"><button type="button" class="ghost" id="slot-add-text">Add text candidate</button></div></div>`;
+    
+    const typeSelect = $("slot-media-type");
+    const searchInput = $("slot-catalog-search");
+    let searchTimer;
+    
+    typeSelect.addEventListener("change", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        const query = searchInput.value.trim();
+        if (query.length >= 2) searchCatalog(query);
+      }, 250);
+    });
+    
+    searchInput.addEventListener("input", (event) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        const query = event.target.value.trim();
+        if (query.length >= 2) searchCatalog(query);
+        else $("slot-catalog-results").replaceChildren();
+      }, 250);
+    });
+    
+    $("slot-add-text").addEventListener("click", () => {
+      const title = $("slot-text-title").value.trim();
+      if (!title) return;
+      working.candidates.push({ kind: "text", title, weight: 1 });
+      renderCandidates();
+      $("slot-text-title").value = "";
+    });
   }
-  $("slot-add-kind").addEventListener("change", renderAddPanel);
   renderAddPanel();
 
   async function searchCatalog(query) {
@@ -287,6 +320,7 @@ function openSlotEditor(index) {
           kind: "item",
           match_key: item.match_key,
           title: item.title,
+          poster_path: item.poster_path || null,
           weight: 1,
         });
         renderCandidates();

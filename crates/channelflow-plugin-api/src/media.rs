@@ -59,6 +59,10 @@ pub struct Connection {
     /// `musicvideo`). File-based sources (Local) use it to scan correctly.
     #[serde(default)]
     pub media_kind: Option<String>,
+    /// The file folders this connection provides. File-based sources (Local,
+    /// Past Tense News) sync every folder; empty falls back to `url`.
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -77,6 +81,7 @@ impl Default for Connection {
             server_id: None,
             server_name: None,
             media_kind: None,
+            folders: Vec::new(),
         }
     }
 }
@@ -89,6 +94,11 @@ pub enum FieldSpec {
     Secret { key: String, label: String, required: bool },
     Remaps { key: String, label: String, required: bool },
     Action { key: String, label: String, required: bool },
+    /// A repeatable list of values: a text input with an "add another" button
+    /// (file sources use this for multiple folder paths).
+    Repeated { key: String, label: String, required: bool },
+    /// A dropdown of `(value, label)` options.
+    Select { key: String, label: String, options: Vec<(String, String)>, required: bool },
 }
 
 impl FieldSpec {
@@ -124,6 +134,23 @@ impl FieldSpec {
         }
     }
 
+    pub fn repeated(key: &str, label: &str) -> Self {
+        Self::Repeated {
+            key: key.to_string(),
+            label: label.to_string(),
+            required: false,
+        }
+    }
+
+    pub fn select(key: &str, label: &str, options: Vec<(String, String)>) -> Self {
+        Self::Select {
+            key: key.to_string(),
+            label: label.to_string(),
+            options,
+            required: false,
+        }
+    }
+
     pub fn required(mut self) -> Self {
         self.set_required(true);
         self
@@ -134,7 +161,9 @@ impl FieldSpec {
             Self::Text { required: value, .. }
             | Self::Secret { required: value, .. }
             | Self::Remaps { required: value, .. }
-            | Self::Action { required: value, .. } => *value = required,
+            | Self::Action { required: value, .. }
+            | Self::Repeated { required: value, .. }
+            | Self::Select { required: value, .. } => *value = required,
         }
     }
 }

@@ -1,42 +1,31 @@
-<div class="panel">
-  <div class="panel-head">
-    <h2>Lineups</h2>
-    <span class="count" id="lineup-count"></span>
-  </div>
-  <p class="hint">
-    A lineup is a channel's daily schedule — 48 half-hour slots per day, laid out the way it was
-    in 1.0.0. Click a slot to give it weighted candidates; a long programme spans several blocks;
-    the Week lineups row holds the days that do not run the default.
-  </p>
-  <div class="lineup-controls">
-    <label class="field-label" for="lineup-channel-select">Channel</label>
-    <select id="lineup-channel-select"></select>
-    <label class="field-label" for="lineup-preview-date">Preview date</label>
-    <input id="lineup-preview-date" type="date">
-    <button type="button" class="ghost" id="lineup-preview-run">Show this day</button>
-    <span class="field-note" id="lineup-preview-banner" hidden></span>
-  </div>
+<div class="lineups-head">
+  <h2>Lineups</h2>
+  <p class="hint">Edit 24-hour schedules and playout</p>
 </div>
 
-<div class="panel" id="lineup-editor-panel">
-  <div class="panel-head">
-    <div>
-      <h3 id="lineup-editor-title">Default day</h3>
-      <p class="hint" id="lineup-hint">
-        Click a 30-minute slot to edit candidates. A block can span several slots. Check Rerun to
-        fill the slot from the previous day's primetime.
-      </p>
-    </div>
-    <div class="actions">
-      <button type="button" class="ghost" id="btn-add-override">Add Override</button>
-      <button type="button" class="primary" id="btn-save-lineup">Save Lineup</button>
-    </div>
+<div class="lineup-toolbar">
+  <div class="lineup-field">
+    <label class="field-label" for="lineup-channel-select">Channel</label>
+    <select id="lineup-channel-select"></select>
   </div>
-  <div class="lineup-grid" id="lineup-grid" role="grid" aria-label="48 half-hour slots"></div>
-  <span class="field-note" id="lineup-result"></span>
+  <div class="lineup-field">
+    <label class="field-label" for="lineup-preview-date">Preview date</label>
+    <input id="lineup-preview-date" type="date">
+  </div>
+  <button type="button" class="ghost" id="lineup-preview-run">Preview Day</button>
+  <button type="button" class="primary" id="btn-save-lineup">Save Lineup</button>
+  <button type="button" class="ghost" id="btn-rebuild-playout" disabled title="Playout is not built yet">Rebuild Playout</button>
+  <span class="field-note" id="lineup-preview-banner" hidden></span>
+</div>
 
-  <div class="lineup-week-row">
-    <h4>Week lineups</h4>
-    <div id="override-list" class="override-list"></div>
-  </div>
+<p class="hint" id="lineup-hint">
+  Click a 30-minute slot to edit candidates. Check Rerun slot to fill it from yesterday's primetime (yellow). Click a Week lineups row to load that day's template.
+</p>
+
+<div class="lineup-grid" id="lineup-grid" role="grid" aria-label="48 half-hour slots"></div>
+<span class="field-note" id="lineup-result"></span>
+
+<div class="lineup-week-row">
+  <h4>Week lineups</h4>
+  <div id="override-list" class="override-list"></div>
 </div>

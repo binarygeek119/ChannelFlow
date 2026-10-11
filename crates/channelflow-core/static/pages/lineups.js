@@ -51,7 +51,6 @@ function compactSlots(slots) {
 }
 function spanLabel(span) {
   if (span <= 1) return "";
-  if (span === 2) return " · 1h";
   return ` · ${span * 30}m`;
 }
 function candidateSummary(candidate) {
@@ -117,7 +116,6 @@ async function loadChannelLineup(id) {
 }
 
 function renderDefaultState() {
-  $("lineup-editor-title").textContent = "Default day";
   $("lineup-hint").textContent =
     "Click a 30-minute slot to edit candidates. A block can span several slots. Check Rerun to fill the slot from the previous day's primetime.";
 }
@@ -357,7 +355,6 @@ function renderOverrideList() {
         lineupSlots = compactSlots(override.slots);
         override.slots = lineupSlots;
         selectedLineupOverrideId = id;
-        $("lineup-editor-title").textContent = `Week lineup — ${override.name || "…"}`;
         $("lineup-hint").textContent = `Showing ${override.name || overrideWhen(override)}. Click a 30-minute slot to edit candidates. Save Lineup writes this day's template.`;
       }
       renderGrid();

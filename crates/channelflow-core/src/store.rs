@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError};
+use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError, LlmProvider};
 use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 use channelflow_plugin_api::media::{CatalogItem, MediaCatalog};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
@@ -1103,6 +1103,74 @@ impl CoreData for StoreCoreData {
             .guide_set(&document)
             .await
             .map_err(|error| CoreDataError(error.to_string()))
+    }
+
+    async fn llm_provider(&self) -> Result<Option<LlmProvider>, CoreDataError> {
+        // The AI page keeps its provider list in the AI plugin's own storage.
+        // Read it back and pick the lowest-priority enabled provider that can
+        // write text (not TTS-only, with a chat model named).
+        let value = self
+            .store
+            .plugin_get(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let Some(providers) = value.get("providers").and_then(serde_json::Value::as_array) else {
+            return Ok(None);
+        };
+        let mut best: Option<&serde_json::Value> = None;
+        let mut best_priority = u64::MAX;
+        for provider in providers {
+            if !provider
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            if provider
+                .get("tts_only")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let field = |name: &str| {
+                provider
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+            };
+            if field("chat_model").trim().is_empty() || field("base_url").trim().is_empty() {
+                continue;
+            }
+            let priority = provider
+                .get("priority")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(u64::MAX);
+            if best.is_none() || priority < best_priority {
+                best = Some(provider);
+                best_priority = priority;
+            }
+        }
+        let Some(provider) = best else {
+            return Ok(None);
+        };
+        let field = |name: &str| {
+            provider
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
+        Ok(Some(LlmProvider {
+            base_url: field("base_url").trim_end_matches('/').to_string(),
+            api_key: field("api_key"),
+            chat_model: field("chat_model"),
+        }))
     }
 }
 
@@ -2892,6 +2960,85 @@ mod tests {
             .await
             .expect("cleanup");
         std::fs::remove_file(dir.join("ai.json")).ok();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The LLM provider handed to plugins is the lowest-priority enabled
+    /// provider on the AI page that can write text — never a TTS-only one.
+    #[tokio::test]
+    async fn llm_provider_picks_the_best_chat_provider() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-llm-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let store = Store::open(&dir).expect("open file store");
+
+        // Nothing configured yet.
+        assert!(store.core_data().llm_provider().await.expect("none").is_none());
+
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    // A TTS-only provider must be skipped even at priority 0.
+                    { "id": "t", "name": "tts", "priority": 0, "enabled": true,
+                      "tts_only": true, "base_url": "https://tts.example/v1",
+                      "chat_model": "", "tts_model": "kokoro" },
+                    // A chat provider with a higher number must lose to the
+                    // lower-numbered one.
+                    { "id": "v", "name": "venice", "priority": 3, "enabled": true,
+                      "tts_only": false, "base_url": "https://api.example/v1/",
+                      "api_key": "k3", "chat_model": "big-model" },
+                    { "id": "o", "name": "ollama", "priority": 1, "enabled": true,
+                      "tts_only": false, "base_url": "https://ollama.example/v1",
+                      "api_key": "", "chat_model": "llama3" }
+                ] }),
+            )
+            .await
+            .expect("set");
+
+        let provider = store
+            .core_data()
+            .llm_provider()
+            .await
+            .expect("read")
+            .expect("a chat provider");
+        assert_eq!(provider.base_url, "https://ollama.example/v1");
+        assert_eq!(provider.chat_model, "llama3");
+        assert!(provider.api_key.is_empty());
+
+        // Disabling the winner falls through to the next by priority.
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    { "id": "o", "name": "ollama", "priority": 1, "enabled": false,
+                      "tts_only": false, "base_url": "https://ollama.example/v1",
+                      "chat_model": "llama3" },
+                    { "id": "v", "name": "venice", "priority": 2, "enabled": true,
+                      "tts_only": false, "base_url": "https://api.example/v1/",
+                      "api_key": "k", "chat_model": "big-model" }
+                ] }),
+            )
+            .await
+            .expect("set 2");
+        let provider = store
+            .core_data()
+            .llm_provider()
+            .await
+            .expect("read 2")
+            .expect("the fallback");
+        assert_eq!(provider.base_url, "https://api.example/v1", "trailing slash trimmed");
+        assert_eq!(provider.api_key, "k");
+
+        store
+            .plugin_delete("com.channelflow.ai", "providers")
+            .await
+            .expect("cleanup");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

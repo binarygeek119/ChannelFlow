@@ -75,11 +75,20 @@
 }
 .slot-card.rerun-slot .time, .slot-card.rerun-slot .count { color: rgba(0, 0, 0, 0.7); }
 
+.slot-card .posters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.6rem;
+}
 .slot-card .poster {
-    width: 100%;
-    height: 4.5rem;
-    object-fit: contain;
+    width: 2.4rem;
+    height: 3.2rem;
+    object-fit: cover;
     background: #101010;
+    border-radius: 0.15rem;
     border-radius: 0.25rem;
     margin: 0.15rem 0;
     background: #1a1a1a;

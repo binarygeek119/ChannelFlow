@@ -141,9 +141,11 @@ function renderGrid() {
     const summary = rerun
       ? "Rerun · yesterday primetime"
       : (count ? candidateSummary(slot.candidates[0]) : "Empty slot");
-    const posterCandidate = slot.candidates.find(c => c.kind === "item" && c.poster_path);
-    const posterHtml = posterCandidate
-      ? `<img class="poster" src="/api/media/image?path=${encodeURIComponent(posterCandidate.poster_path)}" alt="${escapeHtml(posterCandidate.title)}" onerror="this.classList.add('poster-error'); this.alt='Poster unavailable';">`
+    // Show every item candidate's poster, scaled down to fit the slot. The
+    // strip reflows to as many thumbnails as the block width allows.
+    const posterItems = (slot.candidates || []).filter(c => c.kind === "item" && c.poster_path);
+    const posterHtml = posterItems.length
+      ? `<span class="posters">${posterItems.map(c => `<img class="poster" src="/api/media/image?path=${encodeURIComponent(c.poster_path)}" alt="${escapeHtml(c.title)}" onerror="this.classList.add('poster-error'); this.alt='Poster unavailable';">`).join("")}</span>`
       : "";
     const classes = ["slot-card", rerun ? "rerun-slot" : (count ? "has-items" : "empty"), slot.span_slots > 1 ? "span-block" : ""]
       .filter(Boolean)

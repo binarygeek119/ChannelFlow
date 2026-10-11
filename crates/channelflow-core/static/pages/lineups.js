@@ -310,7 +310,7 @@ function openSlotEditor(index) {
       .filter((candidate) => candidate.slot_index === working.slot_index || candidate.slot_index >= working.slot_index + working.span_slots);
     Object.assign(slot, working);
     lineupSlots.sort((a, b) => a.slot_index - b.slot_index);
-    $("#lineup-slot-note").textContent = span > working.span_slots
+    $("lineup-slot-note").textContent = span > working.span_slots
       ? `Block ends at ${slotTime(working.slot_index + working.span_slots)} (clamped to the next block).`
       : "";
     closeLineupModal();
@@ -428,7 +428,7 @@ function addOverrideFlow() {
       closeLineupModal();
       setLineupResult("Override added — click its card to edit that day.");
     } catch (error) {
-      $("#lineup-slot-note").textContent = error.message;
+      $("lineup-slot-note").textContent = error.message;
     }
   });
   shell.querySelector("[data-close]").addEventListener("click", closeLineupModal);

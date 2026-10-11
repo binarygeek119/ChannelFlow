@@ -27,6 +27,11 @@ pub struct PresetContribution {
     pub name: String,
     pub category: String,
     pub description: String,
+    /// A served logo URL for this channel's watermark, owned by this plugin
+    /// (e.g. `/plugin/com.channelflow.news/web/logos/…`). Empty falls back to
+    /// the Presets page's own artwork.
+    #[serde(default)]
+    pub logo: String,
 }
 
 static PRESETS: OnceLock<Mutex<Vec<PresetContribution>>> = OnceLock::new();

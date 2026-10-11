@@ -65,6 +65,10 @@ pub struct Connection {
     /// Past Tense News) sync every folder; empty falls back to `url`.
     #[serde(default)]
     pub folders: Vec<String>,
+    /// Per-folder media kinds, aligned with `folders` (Local Files: each folder
+    /// has its own "what kind of media").
+    #[serde(default)]
+    pub folder_kinds: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -84,6 +88,7 @@ impl Default for Connection {
             server_name: None,
             media_kind: None,
             folders: Vec::new(),
+            folder_kinds: Vec::new(),
         }
     }
 }
@@ -99,6 +104,16 @@ pub enum FieldSpec {
     /// A repeatable list of values: a text input with an "add another" button
     /// (file sources use this for multiple folder paths).
     Repeated { key: String, label: String, required: bool },
+    /// A repeatable list of `(text, select)` rows — e.g. a folder path with
+    /// its own "what kind of media" dropdown (Local Files).
+    PairList {
+        key: String,
+        label: String,
+        second_key: String,
+        second_label: String,
+        options: Vec<(String, String)>,
+        required: bool,
+    },
     /// A dropdown of `(value, label)` options.
     Select { key: String, label: String, options: Vec<(String, String)>, required: bool },
 }
@@ -144,6 +159,23 @@ impl FieldSpec {
         }
     }
 
+    pub fn pair_list(
+        key: &str,
+        label: &str,
+        second_key: &str,
+        second_label: &str,
+        options: Vec<(String, String)>,
+    ) -> Self {
+        Self::PairList {
+            key: key.to_string(),
+            label: label.to_string(),
+            second_key: second_key.to_string(),
+            second_label: second_label.to_string(),
+            options,
+            required: false,
+        }
+    }
+
     pub fn select(key: &str, label: &str, options: Vec<(String, String)>) -> Self {
         Self::Select {
             key: key.to_string(),
@@ -165,6 +197,7 @@ impl FieldSpec {
             | Self::Remaps { required: value, .. }
             | Self::Action { required: value, .. }
             | Self::Repeated { required: value, .. }
+            | Self::PairList { required: value, .. }
             | Self::Select { required: value, .. } => *value = required,
         }
     }

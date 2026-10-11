@@ -146,3 +146,22 @@
     box-shadow: 0 0.2em 0.7em rgba(0, 0, 0, 0.4);
 }
 .tv-guide-program-meta { min-width: 0; }
+
+/* Fit the guide to the browser window: the panel takes the height left by the
+   topbar and footer, and the grid scrolls inside it rather than the page.
+   #tab-guide stays a grid ([hidden] still works); only the row is stretched. */
+#tab-guide {
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+    grid-template-rows: minmax(0, 1fr);
+}
+#tab-guide > .panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+#tab-guide .tv-guide {
+    flex: 1;
+    min-height: 0;
+}

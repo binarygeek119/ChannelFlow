@@ -192,7 +192,10 @@ body::-webkit-scrollbar-button,
     border-color: #3d3d3d;
 }
 
-.app-main { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.app-main { flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* #page is the scroll column: pages that fit fill the window, longer ones
+   scroll inside it while the topbar and footer stay put. */
+#page { flex: 1; min-height: 0; overflow: auto; }
 
 .app-topbar {
     display: flex;

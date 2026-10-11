@@ -68,6 +68,25 @@
 
         <div class="panel">
           <div class="panel-head">
+            <h2>FlowWire News video</h2>
+          </div>
+          <p class="hint">
+            Builds the newscast as an mp4 in <code>/config/news</code> at the configured hours
+            (default 6, 10, 14, 18, 20, 22). The day's first build always runs so a video exists;
+            later builds re-encode only when enough stories are new, otherwise the current video stays.
+          </p>
+          <p class="hint" id="news-video-task-status"></p>
+          <div class="actions">
+            <button type="button" class="ghost" id="news-video-task-run">Run now</button>
+          </div>
+          <p class="hint" id="news-video-task-note"></p>
+          <p class="hint">
+            The build hours and the minimum-new-stories threshold live on the News page, alongside the feeds.
+          </p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
             <h2>Local Files scan</h2>
           </div>
           <p class="hint">

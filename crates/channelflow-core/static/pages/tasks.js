@@ -27,6 +27,61 @@ async function loadTasks() {
   } catch (error) {
     setLocalNote("Could not load the Local Files scan task: " + error.message, true);
   }
+  loadNewsVideoTask();
+}
+
+// FlowWire News video bulletin: surfaced from the News plugin so the Tasks
+// page is the one place that shows every scheduled task.
+async function loadNewsVideoTask() {
+  const status = $("news-video-task-status");
+  const note = $("news-video-task-note");
+  try {
+    const data = await request("/api/plugins/com.channelflow.news/bulletin");
+    const b = data.bulletin || {};
+    if (status) {
+      if (!b.enabled) {
+        status.textContent = "Bulletin videos are turned off (enable it on the News page).";
+      } else if (b.last_created) {
+        status.textContent = `Built at hours ${b.times || "6,10,14,18,20,22"} — last run ${b.last_run || ""} with ${b.last_encoded_count} stories.`;
+      } else if (b.last_skip_reason) {
+        status.textContent = `Builds at hours ${b.times || "6,10,14,18,20,22"} — last run skipped: ${b.last_skip_reason}`;
+      } else {
+        status.textContent = `Builds at hours ${b.times || "6,10,14,18,20,22"} (minimum ${b.minimum_new_stories} new story until the next build).`;
+      }
+    }
+    if (note) note.textContent = "";
+  } catch (error) {
+    if (status) status.textContent = "The News plugin is not installed.";
+    if (note) note.textContent = error.message;
+  }
+}
+
+async function runNewsVideoTask() {
+  const button = $("news-video-task-run");
+  const note = $("news-video-task-note");
+  if (button) button.disabled = true;
+  if (note) note.textContent = "Building the news video…";
+  try {
+    const data = await request("/api/plugins/com.channelflow.news/bulletin/run", {
+      method: "POST",
+    });
+    const outcome = data.outcome || {};
+    if (note) {
+      note.textContent = outcome.created
+        ? `Built ${outcome.path || "the video"} with ${outcome.encoded_count} stories.`
+        : outcome.reason || "The build did not create a video.";
+    }
+    await loadNewsVideoTask();
+  } catch (error) {
+    if (note) note.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+{
+  const run = $("news-video-task-run");
+  if (run) run.addEventListener("click", runNewsVideoTask);
 }
 
 function renderJellyfinTask(config, runs) {

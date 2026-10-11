@@ -55,6 +55,17 @@ pub struct TtsProvider {
     pub voice: String,
 }
 
+/// An OpenAI-compatible chat endpoint configuration, shared across plugins.
+/// A plugin that wants text written (a newscast rewritten, a lineup drafted)
+/// asks the core for one of these rather than storing its own endpoint, so the
+/// AI page stays the one place providers are configured.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LlmProvider {
+    pub base_url: String,
+    pub api_key: String,
+    pub chat_model: String,
+}
+
 /// What the core hands a plugin that asked for `api:core:read`.
 #[async_trait]
 pub trait CoreData: Send + Sync {
@@ -85,6 +96,14 @@ pub trait CoreData: Send + Sync {
     /// Returns `None` if the AI plugin is not installed or no suitable
     /// provider is configured.
     async fn tts_provider(&self) -> Result<Option<TtsProvider>, CoreDataError> {
+        Ok(None)
+    }
+    /// The first AI provider suitable for writing text.
+    ///
+    /// Priority: the lowest-numbered enabled provider that is not `tts_only`
+    /// and names a non-empty `chat_model`. Returns `None` if the AI plugin is
+    /// not installed or no chat provider is configured.
+    async fn llm_provider(&self) -> Result<Option<LlmProvider>, CoreDataError> {
         Ok(None)
     }
 }

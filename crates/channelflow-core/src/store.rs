@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError, LlmProvider};
+use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError, LlmProvider, TtsProvider};
 use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 use channelflow_plugin_api::media::{CatalogItem, MediaCatalog};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
@@ -1105,24 +1105,73 @@ impl CoreData for StoreCoreData {
             .map_err(|error| CoreDataError(error.to_string()))
     }
 
+    async fn tts_provider(&self) -> Result<Option<TtsProvider>, CoreDataError> {
+        // A dedicated TTS provider (tts_only) beats one that merely names a
+        // tts_model; within a class the lowest priority number wins.
+        let providers = self.ai_providers().await?;
+        let mut best: Option<&serde_json::Value> = None;
+        let mut best_rank = (u8::MAX, u64::MAX);
+        for provider in &providers {
+            if !provider
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let field = |name: &str| {
+                provider
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+            };
+            if field("tts_model").trim().is_empty() || field("base_url").trim().is_empty() {
+                continue;
+            }
+            let class = if provider
+                .get("tts_only")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                0
+            } else {
+                1
+            };
+            let priority = provider
+                .get("priority")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(u64::MAX);
+            if best.is_none() || (class, priority) < best_rank {
+                best = Some(provider);
+                best_rank = (class, priority);
+            }
+        }
+        let Some(provider) = best else {
+            return Ok(None);
+        };
+        let field = |name: &str| {
+            provider
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
+        Ok(Some(TtsProvider {
+            base_url: field("base_url").trim_end_matches('/').to_string(),
+            api_key: field("api_key"),
+            tts_model: field("tts_model"),
+            voice: field("voice"),
+        }))
+    }
+
     async fn llm_provider(&self) -> Result<Option<LlmProvider>, CoreDataError> {
-        // The AI page keeps its provider list in the AI plugin's own storage.
-        // Read it back and pick the lowest-priority enabled provider that can
-        // write text (not TTS-only, with a chat model named).
-        let value = self
-            .store
-            .plugin_get(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY)
-            .await
-            .map_err(|error| CoreDataError(error.to_string()))?;
-        let Some(value) = value else {
-            return Ok(None);
-        };
-        let Some(providers) = value.get("providers").and_then(serde_json::Value::as_array) else {
-            return Ok(None);
-        };
+        // The lowest-numbered enabled provider that can write text (not
+        // TTS-only, with a chat model named).
+        let providers = self.ai_providers().await?;
         let mut best: Option<&serde_json::Value> = None;
         let mut best_priority = u64::MAX;
-        for provider in providers {
+        for provider in &providers {
             if !provider
                 .get("enabled")
                 .and_then(serde_json::Value::as_bool)
@@ -1171,6 +1220,26 @@ impl CoreData for StoreCoreData {
             api_key: field("api_key"),
             chat_model: field("chat_model"),
         }))
+    }
+}
+
+impl StoreCoreData {
+    /// The AI page's provider list, or empty when the plugin is not installed.
+    /// The AI plugin keeps it in its own namespaced storage.
+    async fn ai_providers(&self) -> Result<Vec<serde_json::Value>, CoreDataError> {
+        let value = self
+            .store
+            .plugin_get(LEGACY_AI_NAMESPACE, LEGACY_AI_KEY)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        Ok(value
+            .and_then(|value| {
+                value
+                    .get("providers")
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+            })
+            .unwrap_or_default())
     }
 }
 
@@ -3034,6 +3103,90 @@ mod tests {
             .expect("the fallback");
         assert_eq!(provider.base_url, "https://api.example/v1", "trailing slash trimmed");
         assert_eq!(provider.api_key, "k");
+
+        store
+            .plugin_delete("com.channelflow.ai", "providers")
+            .await
+            .expect("cleanup");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The TTS provider handed to plugins prefers a `tts_only` provider over
+    /// one that merely has a `tts_model`, and falls back to the latter when no
+    /// dedicated one is enabled.
+    #[tokio::test]
+    async fn tts_provider_prefers_a_dedicated_tts_provider() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-tts-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let store = Store::open(&dir).expect("open file store");
+
+        assert!(store.core_data().tts_provider().await.expect("none").is_none());
+
+        // The provider set the AI page holds live: a chat provider first, a
+        // dedicated TTS provider second, and a chat provider that also names a
+        // tts_model third.
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    { "id": "o", "name": "ollama", "priority": 1, "enabled": true,
+                      "tts_only": false, "base_url": "https://ollama.example/v1",
+                      "chat_model": "llama3", "tts_model": "" },
+                    { "id": "t", "name": "tts", "priority": 2, "enabled": true,
+                      "tts_only": true, "base_url": "https://tts.example/v1/",
+                      "api_key": "k", "tts_model": "kokoro", "voice": "af_sarah" },
+                    { "id": "v", "name": "venice", "priority": 3, "enabled": true,
+                      "tts_only": false, "base_url": "https://api.example/v1",
+                      "tts_model": "tts-kokoro", "voice": "af_sarah" }
+                ] }),
+            )
+            .await
+            .expect("set");
+
+        let provider = store
+            .core_data()
+            .tts_provider()
+            .await
+            .expect("read")
+            .expect("a TTS provider");
+        assert_eq!(provider.base_url, "https://tts.example/v1", "trailing slash trimmed");
+        assert_eq!(provider.tts_model, "kokoro");
+        assert_eq!(provider.voice, "af_sarah");
+        assert_eq!(provider.api_key, "k");
+
+        // With the dedicated provider disabled the chat provider that names a
+        // tts_model takes over.
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    { "id": "o", "name": "ollama", "priority": 1, "enabled": true,
+                      "tts_only": false, "base_url": "https://ollama.example/v1",
+                      "chat_model": "llama3", "tts_model": "" },
+                    { "id": "t", "name": "tts", "priority": 2, "enabled": false,
+                      "tts_only": true, "base_url": "https://tts.example/v1",
+                      "tts_model": "kokoro" },
+                    { "id": "v", "name": "venice", "priority": 3, "enabled": true,
+                      "tts_only": false, "base_url": "https://api.example/v1",
+                      "tts_model": "tts-kokoro", "voice": "af_sarah" }
+                ] }),
+            )
+            .await
+            .expect("set 2");
+        let provider = store
+            .core_data()
+            .tts_provider()
+            .await
+            .expect("read 2")
+            .expect("the chat provider with a tts_model");
+        assert_eq!(provider.base_url, "https://api.example/v1");
+        assert_eq!(provider.tts_model, "tts-kokoro");
 
         store
             .plugin_delete("com.channelflow.ai", "providers")

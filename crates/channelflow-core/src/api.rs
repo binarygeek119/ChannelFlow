@@ -881,7 +881,11 @@ async fn tv_guide(
 
     let mut channels = state.store.list().await?;
     channels.retain(|channel| channel.enabled);
-    channels.sort_by_key(|channel| channel.number);
+    channels.sort_by(|a, b| {
+        a.number
+            .partial_cmp(&b.number)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let channels_json: Vec<serde_json::Value> = channels
         .iter()
         .map(|channel| {

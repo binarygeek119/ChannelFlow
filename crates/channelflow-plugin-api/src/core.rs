@@ -11,9 +11,27 @@ use async_trait::async_trait;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CoreChannel {
     pub id: String,
-    pub number: u32,
+    /// Dial number; a fractional value denotes a subchannel (119.1).
+    #[serde(with = "number_fmt")]
+    pub number: f64,
     pub name: String,
     pub enabled: bool,
+}
+
+/// Serialize whole channel numbers without the trailing `.0`.
+mod number_fmt {
+    use serde::{self, Serializer};
+
+    pub fn serialize<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if value.fract() == 0.0 && value.is_finite() {
+            serializer.serialize_i64(*value as i64)
+        } else {
+            serializer.serialize_f64(*value)
+        }
+    }
 }
 
 /// A core-data call failed.

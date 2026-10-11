@@ -86,7 +86,7 @@ const GENERAL_KEY: &str = "general";
 #[derive(Debug)]
 pub enum StoreError {
     NotFound(Uuid),
-    DuplicateNumber(u32),
+    DuplicateNumber(f64),
     Invalid(&'static str),
     /// A plugin lifecycle call was refused: unknown id, incompatible with this
     /// base, or the plugin's own failure.
@@ -1316,7 +1316,12 @@ mod file {
                 }
             }
         }
-        channels.sort_by(|a, b| a.number.cmp(&b.number).then_with(|| a.name.cmp(&b.name)));
+        channels.sort_by(|a, b| {
+            a.number
+                .partial_cmp(&b.number)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
         Ok(channels)
     }
 
@@ -1376,7 +1381,7 @@ mod file {
         fs::remove_file(channel_path(root, id)).map_err(|_| StoreError::NotFound(id))
     }
 
-    fn reserve(root: &Path, number: u32, ignore: Option<Uuid>) -> Result<(), StoreError> {
+    fn reserve(root: &Path, number: f64, ignore: Option<Uuid>) -> Result<(), StoreError> {
         for existing in list(root)? {
             if Some(existing.id) == ignore {
                 continue;
@@ -1739,7 +1744,7 @@ mod pg {
         for statement in [
             "CREATE TABLE IF NOT EXISTS channels (
                 id UUID PRIMARY KEY,
-                number INTEGER NOT NULL UNIQUE,
+                number DOUBLE PRECISION NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1791,6 +1796,13 @@ mod pg {
         ] {
             sqlx::query(statement).execute(pool).await?;
         }
+        // Older installs declare an INTEGER dial number; widen it so
+        // subchannel numbers (119.1) fit. A no-op once it already is.
+        let _ = sqlx::query(
+            "ALTER TABLE channels ALTER COLUMN number TYPE DOUBLE PRECISION USING number::double precision",
+        )
+        .execute(pool)
+        .await;
         Ok(())
     }
 
@@ -2400,7 +2412,7 @@ mod pg {
     fn row_to_channel(row: &sqlx::postgres::PgRow) -> Result<Channel, StoreError> {
         Ok(Channel {
             id: row.try_get("id")?,
-            number: row.try_get::<i32, _>("number")? as u32,
+            number: row.try_get::<f64, _>("number")?,
             name: row.try_get("name")?,
             description: row.try_get("description")?,
             enabled: row.try_get("enabled")?,
@@ -2417,7 +2429,7 @@ mod pg {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(channel.id)
-        .bind(channel.number as i32)
+        .bind(channel.number)
         .bind(&channel.name)
         .bind(&channel.description)
         .bind(channel.enabled)
@@ -2437,7 +2449,7 @@ mod pg {
              WHERE id = $1",
         )
         .bind(channel.id)
-        .bind(channel.number as i32)
+        .bind(channel.number)
         .bind(&channel.name)
         .bind(&channel.description)
         .bind(channel.enabled)
@@ -2448,7 +2460,7 @@ mod pg {
         Ok(())
     }
 
-    async fn reserve(pool: &PgPool, number: u32, ignore: Option<Uuid>) -> Result<(), StoreError> {
+    async fn reserve(pool: &PgPool, number: f64, ignore: Option<Uuid>) -> Result<(), StoreError> {
         let count: i64 = match ignore {
             Some(id) => sqlx::query("SELECT count(*) FROM channels WHERE number = $1 AND id <> $2")
                 .bind(number as i32)
@@ -2737,7 +2749,10 @@ mod tests {
                 enabled: true,
             })
             .await;
-        assert!(matches!(duplicate, Err(StoreError::DuplicateNumber(2))));
+        assert!(matches!(
+            duplicate,
+            Err(StoreError::DuplicateNumber(number)) if number == 2.0
+        ));
 
         let overridden = store
             .set_channel_transcode(created.id, json!({ "normalization": { "video": { "bitrate_kbps": 2500 } } }))

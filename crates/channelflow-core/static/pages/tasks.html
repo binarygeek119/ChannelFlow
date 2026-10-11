@@ -78,10 +78,13 @@
           <p class="hint" id="news-video-task-status"></p>
           <div class="actions">
             <button type="button" class="ghost" id="news-video-task-run">Run now</button>
+            <button type="button" class="ghost" id="news-video-task-force">Force rebuild</button>
           </div>
           <p class="hint" id="news-video-task-note"></p>
           <p class="hint">
-            The build hours and the minimum-new-stories threshold live on the News page, alongside the feeds.
+            <strong>Run now</strong> behaves like a scheduled mark (respects the minimum-new-stories
+            gate); <strong>Force rebuild</strong> always re-encodes, no matter how many stories are new.
+            The build hours and the minimum live on the News page, alongside the feeds.
           </p>
         </div>
 

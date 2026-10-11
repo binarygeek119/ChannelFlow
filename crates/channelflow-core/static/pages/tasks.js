@@ -56,15 +56,15 @@ async function loadNewsVideoTask() {
   }
 }
 
-async function runNewsVideoTask() {
-  const button = $("news-video-task-run");
+async function runNewsVideoTask(force) {
+  const button = force ? $("news-video-task-force") : $("news-video-task-run");
   const note = $("news-video-task-note");
   if (button) button.disabled = true;
-  if (note) note.textContent = "Building the news video…";
+  if (note) note.textContent = force ? "Rebuilding the news video…" : "Running a scheduled-style build…";
+  const url = force ? "/api/plugins/com.channelflow.news/bulletin/run?force=true"
+                    : "/api/plugins/com.channelflow.news/bulletin/run?force=false";
   try {
-    const data = await request("/api/plugins/com.channelflow.news/bulletin/run", {
-      method: "POST",
-    });
+    const data = await request(url, { method: "POST" });
     const outcome = data.outcome || {};
     if (note) {
       note.textContent = outcome.created
@@ -81,7 +81,9 @@ async function runNewsVideoTask() {
 
 {
   const run = $("news-video-task-run");
-  if (run) run.addEventListener("click", runNewsVideoTask);
+  if (run) run.addEventListener("click", () => runNewsVideoTask(false));
+  const force = $("news-video-task-force");
+  if (force) force.addEventListener("click", () => runNewsVideoTask(true));
 }
 
 function renderJellyfinTask(config, runs) {

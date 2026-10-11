@@ -46,6 +46,15 @@ impl std::fmt::Display for CoreDataError {
 
 impl std::error::Error for CoreDataError {}
 
+/// An OpenAI-compatible TTS endpoint configuration, shared across plugins.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TtsProvider {
+    pub base_url: String,
+    pub api_key: String,
+    pub tts_model: String,
+    pub voice: String,
+}
+
 /// What the core hands a plugin that asked for `api:core:read`.
 #[async_trait]
 pub trait CoreData: Send + Sync {
@@ -66,6 +75,17 @@ pub trait CoreData: Send + Sync {
     ) -> Result<(), CoreDataError> {
         let _ = (channel_id, programs);
         Ok(())
+    }
+    /// The first AI provider suitable for TTS.
+    ///
+    /// Priority:
+    /// 1. Enabled provider with `tts_only == true`.
+    /// 2. Enabled provider with a non-empty `tts_model`.
+    ///
+    /// Returns `None` if the AI plugin is not installed or no suitable
+    /// provider is configured.
+    async fn tts_provider(&self) -> Result<Option<TtsProvider>, CoreDataError> {
+        Ok(None)
     }
 }
 

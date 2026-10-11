@@ -51,6 +51,9 @@ impl std::error::Error for CoreDataError {}
 pub trait CoreData: Send + Sync {
     /// Every channel, ordered by number then name.
     async fn channels(&self) -> Result<Vec<CoreChannel>, CoreDataError>;
+    /// The ids of the plugins installed in the registry (e.g. to decide which
+    /// contributed presets to show).
+    async fn installed_plugins(&self) -> Result<Vec<String>, CoreDataError>;
 }
 
 /// A test double that answers with no channels.
@@ -60,6 +63,10 @@ pub struct NoCoreData;
 #[async_trait]
 impl CoreData for NoCoreData {
     async fn channels(&self) -> Result<Vec<CoreChannel>, CoreDataError> {
+        Ok(Vec::new())
+    }
+
+    async fn installed_plugins(&self) -> Result<Vec<String>, CoreDataError> {
         Ok(Vec::new())
     }
 }
@@ -82,5 +89,9 @@ impl InMemoryCoreData {
 impl CoreData for InMemoryCoreData {
     async fn channels(&self) -> Result<Vec<CoreChannel>, CoreDataError> {
         Ok(self.inner.lock().expect("lock").clone())
+    }
+
+    async fn installed_plugins(&self) -> Result<Vec<String>, CoreDataError> {
+        Ok(Vec::new())
     }
 }

@@ -1049,6 +1049,19 @@ impl CoreData for StoreCoreData {
             })
             .collect())
     }
+
+    async fn installed_plugins(&self) -> Result<Vec<String>, CoreDataError> {
+        let registry = self
+            .store
+            .plugin_registry()
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        Ok(registry
+            .installed
+            .iter()
+            .map(|installed| installed.id.clone())
+            .collect())
+    }
 }
 
 /// A plugin's own tables, prefixed with its id so no two namespaces can

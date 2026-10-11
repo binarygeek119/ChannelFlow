@@ -17,6 +17,9 @@ use serde::Serialize;
 pub struct PresetContribution {
     /// The stable preset/channel id, e.g. `channelflow-holiday`.
     pub id: String,
+    /// The plugin that owns this preset (its manifest id). The Presets page
+    /// shows the contribution only while that plugin is installed.
+    pub plugin_id: String,
     /// The v1.0.0 original dial number ("retro"): 207 for the Holiday Channel.
     pub legacy: f64,
     /// The v1.0.0 subchannel dial number ("modern"): 203.4.

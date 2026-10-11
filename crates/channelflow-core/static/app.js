@@ -194,7 +194,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "85";
+const UI_BUILD = "86";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -882,7 +882,10 @@ document.getElementById("login-form").addEventListener("submit", async (event) =
         remember: document.getElementById("login-remember").checked,
       }),
     });
-    location.assign("/webui/guide");
+    // Reload whatever page the login screen was covering instead of dumping
+    // the session onto the guide: boot() restores the page from the URL, so a
+    // login mid-use comes back to where the user was.
+    location.reload();
   } catch (error) {
     setLoginNote(error.message || "Wrong username or password.", true);
   }

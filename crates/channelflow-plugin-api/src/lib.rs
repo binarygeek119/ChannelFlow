@@ -12,6 +12,7 @@
 //! exists for that moment: [`PLUGIN_ABI_VERSION`] must match between core and
 //! plugin, and is checked before a plugin is allowed to run.
 
+pub mod contrib;
 pub mod core;
 pub mod database;
 pub mod manifest;
@@ -22,6 +23,8 @@ pub mod storage;
 pub mod ui;
 pub mod version;
 pub mod web;
+
+pub use contrib::{contributed_presets, register_preset, unregister_preset, PresetContribution};
 
 pub use core::{CoreChannel, CoreData, CoreDataError, InMemoryCoreData, NoCoreData};
 pub use database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};

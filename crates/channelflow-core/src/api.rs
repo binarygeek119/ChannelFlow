@@ -1125,6 +1125,7 @@ async fn create_channel(
                     name: None,
                     description: None,
                     enabled: None,
+                    ai_prompt: None,
                     watermark: Some(Some(watermark)),
                 },
             )
@@ -1167,6 +1168,7 @@ async fn update_channel(
                     name: None,
                     description: None,
                     enabled: None,
+                    ai_prompt: None,
                     watermark: Some(Some(watermark)),
                 },
             )

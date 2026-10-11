@@ -1,5 +1,22 @@
 /* Channel list styles live in the shared app.css */
 
+#form textarea#ai-prompt {
+    width: 100%;
+    min-height: 3.2rem;
+    resize: vertical;
+    font: inherit;
+    color: inherit;
+    background: var(--input-bg, #161616);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    padding: 0.45rem 0.55rem;
+}
+#form textarea#ai-prompt:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+#form label:has(> textarea) { align-items: stretch; }
+
 /* Watermark editor in the Add/Edit channel form. */
 .watermark-box {
     border: 1px solid var(--border);

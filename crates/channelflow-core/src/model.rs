@@ -23,6 +23,10 @@ pub struct Channel {
     /// places and fades it. Absent until one is uploaded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watermark: Option<Watermark>,
+    /// Instructions for AI channel scheduling - how the lineup should pick
+    /// and order media for this channel. Empty until one is written.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ai_prompt: String,
     /// This channel's transcode overrides: a sparse patch over the instance
     /// defaults in `transcode.json`, deep-merged by
     /// [`TranscodeConfig::merged`](crate::transcode::TranscodeConfig::merged).
@@ -109,6 +113,8 @@ pub struct NewChannel {
     pub enabled: bool,
     #[serde(default)]
     pub watermark: Option<Watermark>,
+    #[serde(default)]
+    pub ai_prompt: String,
 }
 
 fn enabled_by_default() -> bool {
@@ -127,6 +133,8 @@ pub struct UpdateChannel {
     /// a deserializer that can).
     #[serde(default, deserialize_with = "option_watermark::deserialize")]
     pub watermark: Option<Option<Watermark>>,
+    #[serde(default)]
+    pub ai_prompt: Option<String>,
 }
 
 mod option_watermark {

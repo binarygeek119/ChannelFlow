@@ -155,6 +155,7 @@ function editChannel(channel) {
   els.number.value = channel.number;
   els.name.value = channel.name;
   els.description.value = channel.description;
+  els.aiPrompt.value = channel.ai_prompt || "";
   els.enabled.checked = channel.enabled;
   els.formTitle.textContent = `Edit ${channel.name}`;
   els.save.textContent = "Save changes";
@@ -172,6 +173,7 @@ els.form.addEventListener("submit", async (event) => {
     name: els.name.value,
     description: els.description.value,
     enabled: els.enabled.checked,
+    ai_prompt: (els.aiPrompt.value || "").trim(),
     watermark: collectWatermark(),
   };
 

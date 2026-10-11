@@ -249,6 +249,7 @@ impl Store {
                 description: "First channel — edit or replace me".to_string(),
                 enabled: true,
                 watermark: None,
+                ai_prompt: String::new(),
             })
             .await?;
         tracing::info!(number = channel.number, name = %channel.name, "seeded first channel");
@@ -1357,6 +1358,7 @@ mod file {
             description: input.description,
             enabled: input.enabled,
             watermark: input.watermark,
+            ai_prompt: input.ai_prompt,
             transcode: serde_json::Value::Object(serde_json::Map::new()),
             created_at: now,
             updated_at: now,
@@ -1376,6 +1378,9 @@ mod file {
         }
         if input.watermark.is_some() {
             channel.watermark = input.watermark.unwrap_or(None);
+        }
+        if let Some(ai_prompt) = input.ai_prompt {
+            channel.ai_prompt = ai_prompt;
         }
         if let Some(name) = input.name {
             let name = name.trim();
@@ -1765,6 +1770,7 @@ mod pg {
                 number DOUBLE PRECISION NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
+                ai_prompt TEXT NOT NULL DEFAULT '',
                 enabled BOOLEAN NOT NULL DEFAULT TRUE,
                 transcode JSONB NOT NULL DEFAULT '{}'::jsonb,
                 watermark JSONB NOT NULL DEFAULT 'null'::jsonb,
@@ -1825,6 +1831,12 @@ mod pg {
         // The watermark overlay column for installs that predate it.
         let _ = sqlx::query(
             "ALTER TABLE channels ADD COLUMN IF NOT EXISTS watermark JSONB NOT NULL DEFAULT 'null'::jsonb",
+        )
+        .execute(pool)
+        .await;
+        // The per-channel AI scheduling prompt for installs that predate it.
+        let _ = sqlx::query(
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS ai_prompt TEXT NOT NULL DEFAULT ''",
         )
         .execute(pool)
         .await;
@@ -1983,6 +1995,7 @@ mod pg {
             description: input.description,
             enabled: input.enabled,
             watermark: input.watermark,
+            ai_prompt: input.ai_prompt,
             transcode: serde_json::Value::Object(serde_json::Map::new()),
             created_at: now,
             updated_at: now,
@@ -2006,6 +2019,9 @@ mod pg {
         }
         if input.watermark.is_some() {
             channel.watermark = input.watermark.unwrap_or(None);
+        }
+        if let Some(ai_prompt) = input.ai_prompt {
+            channel.ai_prompt = ai_prompt;
         }
         if let Some(name) = input.name {
             let name = name.trim();
@@ -2434,7 +2450,7 @@ mod pg {
     }
 
     fn channel_columns() -> &'static str {
-        "SELECT id, number, name, description, enabled, transcode, watermark, created_at, updated_at \
+        "SELECT id, number, name, description, ai_prompt, enabled, transcode, watermark, created_at, updated_at \
          FROM channels"
     }
 
@@ -2444,6 +2460,7 @@ mod pg {
             number: row.try_get::<f64, _>("number")?,
             name: row.try_get("name")?,
             description: row.try_get("description")?,
+            ai_prompt: row.try_get("ai_prompt")?,
             enabled: row.try_get("enabled")?,
             watermark: row
                 .try_get::<Json<Option<crate::model::Watermark>>, _>("watermark")?
@@ -2457,13 +2474,14 @@ mod pg {
     async fn insert(pool: &PgPool, channel: &Channel) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO channels
-                (id, number, name, description, enabled, transcode, watermark, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                (id, number, name, description, ai_prompt, enabled, transcode, watermark, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(channel.id)
         .bind(channel.number)
         .bind(&channel.name)
         .bind(&channel.description)
+        .bind(&channel.ai_prompt)
         .bind(channel.enabled)
         .bind(Json(channel.transcode.clone()))
         .bind(Json(channel.watermark.clone()))
@@ -2477,14 +2495,15 @@ mod pg {
     async fn update_row(pool: &PgPool, channel: &Channel) -> Result<(), StoreError> {
         sqlx::query(
             "UPDATE channels
-             SET number = $2, name = $3, description = $4, enabled = $5,
-                 transcode = $6, watermark = $7, updated_at = $8
+             SET number = $2, name = $3, description = $4, ai_prompt = $5, enabled = $6,
+                 transcode = $7, watermark = $8, updated_at = $9
              WHERE id = $1",
         )
         .bind(channel.id)
         .bind(channel.number)
         .bind(&channel.name)
         .bind(&channel.description)
+        .bind(&channel.ai_prompt)
         .bind(channel.enabled)
         .bind(Json(channel.transcode.clone()))
         .bind(Json(channel.watermark.clone()))
@@ -2684,6 +2703,7 @@ mod tests {
                 description: String::new(),
                 enabled: true,
                 watermark: None,
+                ai_prompt: String::new(),
             })
             .await
             .expect("create");
@@ -2757,6 +2777,7 @@ mod tests {
                 description: String::new(),
                 enabled: true,
                 watermark: None,
+                ai_prompt: String::new(),
             })
             .await
             .expect("create");
@@ -2770,6 +2791,7 @@ mod tests {
                     name: Some("Two".to_string()),
                     description: None,
                     enabled: None,
+                    ai_prompt: None,
                     watermark: None,
                 },
             )
@@ -2785,6 +2807,7 @@ mod tests {
                 description: String::new(),
                 enabled: true,
                 watermark: None,
+                ai_prompt: String::new(),
             })
             .await;
         assert!(matches!(

@@ -143,7 +143,7 @@ function renderGrid() {
       : (count ? candidateSummary(slot.candidates[0]) : "Empty slot");
     const posterCandidate = slot.candidates.find(c => c.kind === "item" && c.poster_path);
     const posterHtml = posterCandidate
-      ? `<img class="poster" src="/api/media/image?path=${encodeURIComponent(posterCandidate.poster_path)}" alt="${escapeHtml(posterCandidate.title)}" onerror="this.style.display='none'">`
+      ? `<img class="poster" src="/api/media/image?path=${encodeURIComponent(posterCandidate.poster_path)}" alt="${escapeHtml(posterCandidate.title)}" onerror="this.classList.add('poster-error'); this.alt='Poster unavailable';">`
       : "";
     const classes = ["slot-card", rerun ? "rerun-slot" : (count ? "has-items" : "empty"), slot.span_slots > 1 ? "span-block" : ""]
       .filter(Boolean)

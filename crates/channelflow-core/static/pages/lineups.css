@@ -244,3 +244,14 @@
     margin-bottom: 0.6rem;
 }
 .lineup-modal-box .dialog-head h2 { margin: 0; font-size: 1.1rem; }
+.slot-card .poster.poster-error {
+    background: var(--page-bg);
+    border: 1px dashed var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: var(--muted);
+    text-align: center;
+    padding: 0.5rem;
+}

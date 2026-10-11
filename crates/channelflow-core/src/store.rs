@@ -1709,6 +1709,12 @@ mod file {
                     if !item.tags.is_empty() {
                         entry["tags"] = serde_json::json!(item.tags);
                     }
+                    if let Some(detail) = &item.detail {
+                        entry["detail"] = detail.clone();
+                    }
+                    if !item.people.is_empty() {
+                        entry["people"] = serde_json::to_value(&item.people).unwrap_or(serde_json::Value::Null);
+                    }
                     let already = entry["sources"].as_array().is_some_and(|sources| {
                         sources.iter().any(|source| {
                             source["source_kind"].as_str() == Some(source_kind)
@@ -1738,6 +1744,8 @@ mod file {
                     "first_episode_year": item.first_episode_year,
                     "studios": item.studios,
                     "tags": item.tags,
+                    "detail": item.detail,
+                    "people": item.people,
                     "sources": [source],
                 })),
             }
@@ -2386,6 +2394,38 @@ mod pg {
             .bind(&item.poster_path)
             .execute(&mut *tx)
             .await?;
+
+            // Cast and crew: upsert each person by name, then the credit link.
+            for credit in &item.people {
+                let name = credit.name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let person = sqlx::query(
+                    "INSERT INTO media_people (name) VALUES ($1) \
+                     ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
+                     RETURNING id",
+                )
+                .bind(name)
+                .fetch_one(&mut *tx)
+                .await?;
+                let person_id: i64 = person.try_get("id")?;
+                sqlx::query(
+                    "INSERT INTO media_item_people \
+                     (item_id, person_id, role_type, role, character, sort_order) \
+                     VALUES ($1, $2, $3, $4, $5, $6) \
+                     ON CONFLICT (item_id, person_id, role_type, role) DO UPDATE SET \
+                         character = EXCLUDED.character, sort_order = EXCLUDED.sort_order",
+                )
+                .bind(item_id)
+                .bind(person_id)
+                .bind(&credit.role_type)
+                .bind(&credit.role)
+                .bind(&credit.character)
+                .bind(item.people.iter().position(|c| c.name == credit.name).unwrap_or(0) as i32)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
         // A media entry with no sources is no longer provided by anything.
         sqlx::query(
@@ -2419,7 +2459,19 @@ mod pg {
         let rows = sqlx::query(
             "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
                     m.runtime_seconds, m.genres, m.official_rating, m.premiere_date, \
-                    m.first_episode_year, m.studios, m.tags, \
+                    m.first_episode_year, m.studios, m.tags, m.detail, \
+                    (SELECT COALESCE(json_agg(json_build_object(
+                        'name', p.name, 'role_type', ip.role_type, 'role', ip.role,
+                        'character', ip.character, 'image_path', p.image_path)
+                        ORDER BY ip.sort_order), '[]'::json)
+                     FROM media_item_people ip JOIN media_people p ON p.id = ip.person_id
+                     WHERE ip.item_id = m.id) AS people,
+                    (SELECT COALESCE(json_agg(json_build_object(
+                        'name', p.name, 'role_type', ip.role_type, 'role', ip.role,
+                        'character', ip.character, 'image_path', p.image_path)
+                        ORDER BY ip.sort_order), '[]'::json)
+                     FROM media_item_people ip JOIN media_people p ON p.id = ip.person_id
+                     WHERE ip.item_id = m.id) AS people,
                     COALESCE(json_agg(json_build_object( \
                         'source_kind', s.source_kind, 'connection_id', s.connection_id, \
                         'library', s.library, 'remote_id', s.remote_id, \
@@ -2451,6 +2503,8 @@ mod pg {
                 "first_episode_year": row.try_get::<Option<i32>, _>("first_episode_year")?,
                 "studios": json_array(row.try_get::<Json<serde_json::Value>, _>("studios")?.0),
                 "tags": json_array(row.try_get::<Json<serde_json::Value>, _>("tags")?.0),
+                "detail": row.try_get::<Option<Json<serde_json::Value>>, _>("detail")?.map(|value| value.0),
+                "people": row.try_get::<Json<serde_json::Value>, _>("people")?.0,
                 "sources": sources,
             }));
         }
@@ -2509,7 +2563,13 @@ mod pg {
 
         let mut select = "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
                  m.runtime_seconds, m.genres, m.official_rating, m.premiere_date, \
-                 m.first_episode_year, m.studios, m.tags, \
+                 m.first_episode_year, m.studios, m.tags, m.detail, \
+                    (SELECT COALESCE(json_agg(json_build_object(
+                        'name', p.name, 'role_type', ip.role_type, 'role', ip.role,
+                        'character', ip.character, 'image_path', p.image_path)
+                        ORDER BY ip.sort_order), '[]'::json)
+                     FROM media_item_people ip JOIN media_people p ON p.id = ip.person_id
+                     WHERE ip.item_id = m.id) AS people,
                  COALESCE(json_agg(json_build_object( \
                      'source_kind', s.source_kind, 'connection_id', s.connection_id, \
                      'library', s.library, 'remote_id', s.remote_id, \
@@ -2549,6 +2609,8 @@ mod pg {
                 "first_episode_year": row.try_get::<Option<i32>, _>("first_episode_year")?,
                 "studios": json_array(row.try_get::<Json<serde_json::Value>, _>("studios")?.0),
                 "tags": json_array(row.try_get::<Json<serde_json::Value>, _>("tags")?.0),
+                "detail": row.try_get::<Option<Json<serde_json::Value>>, _>("detail")?.map(|value| value.0),
+                "people": row.try_get::<Json<serde_json::Value>, _>("people")?.0,
                 "sources": sources.0,
             }));
         }

@@ -107,6 +107,13 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 | `POST` | `/api/connections/{id}/test` | have the connection's media source test it (reachable, key accepted, or what failed) |
 | `GET` | `/api/media` | the base's own media catalog: per-tab counts and the rows for an optional `?kind=` (movie, series, album, artist, musicvideo) |
 | `GET` | `/api/media/image?path=…` | a poster from `<config>/Images`; paths outside the image store are refused |
+| `GET` | `/api/lineups` | every channel with whether it has a saved lineup and how much of the day its slots cover |
+| `GET` | `/api/lineups/{id}` | one channel's 48-slot daily lineup (the default roster) plus its overrides |
+| `PUT` | `/api/lineups/{id}` | replace the channel's default roster slots, `400` if they overlap or leave the day |
+| `POST` | `/api/lineups/{id}/overrides` | create a day-of-week or specific-date override from the given slots, `201` |
+| `PUT` | `/api/lineups/overrides/{override_id}` | update one override's name, day/date, and slots |
+| `DELETE` | `/api/lineups/overrides/{override_id}` | drop an override, `204` |
+| `POST` | `/api/lineups/{id}/preview` | resolve the roster for a date (specific-date beats day-of-week, then the default) |
 | `GET` | `/pages/{name}.{ext}` | a page's own HTML/CSS/JS/assets under `<config>/webui/pages` (paths are confined to that folder) |
 | `GET` | `/api/plugins/com.channelflow.ai/` | every AI provider, ordered by priority, plus the next free number; keys are never returned |
 | `POST` | `/api/plugins/com.channelflow.ai/providers` | add a provider; `201`; `400` on a duplicate name or priority |
@@ -121,7 +128,7 @@ Storage failures keep their own error type rather than collapsing into `anyhow`,
 
 The web UI is plain files under `<config>/webui` (the loader binary never embeds them; `scripts/install-webui.sh` copies the canonical set from `crates/channelflow-core/static/`, and the Dockerfile seeds `/usr/share/channelflow/webui` the same way). The shell is small — `index.html`, shared `app.css` and `app.js` — and each nav tab is its own page under `pages/` with its own file set: `pages/<name>.html`, `pages/<name>.css` and `pages/<name>.js`. Every tab has its own URL (`/webui/channels`, `/webui/media`, …); the shell's router injects the page's markup, links its stylesheet and loads its script on first visit, so a page's files are only fetched when that tab is opened. Everything static is served `no-cache`: these bytes change with the binary but carry no ETag or Last-Modified, so without it a browser could keep an old `app.js` beside a new `index.html` after an upgrade. A fresh install seeds channel 1 so there is something to look at.
 
-The shell keeps the 1.0.0 drawer (260px, near-black/rose), the topbar, the login and the first-boot walkthrough, plus the shared runtime every page uses (`$`, `escapeHtml`, `request`, `taskPopup`, `libraryCard`, …). The topbar has **M3U** and **XMLTV** menus that copy the playlist and guide URLs — local or public, from General Settings — to the clipboard. Real pages so far: **Channels** (the CRUD API), **General Settings** (public/local URLs), **About** (reads `/api/about`), **Credits** (static), **Transcode** (the ErsatzTV plugin), **AI** (the AI plugin), **Plugins** (Installed + Store tabs), **Tasks** (the Jellyfin library-scan scheduler), **Live TV**, **Library** (media-source connections and syncs), and **Media** (the base's own catalog). Other menus land on a per-page placeholder until their wiring lands.
+The shell keeps the 1.0.0 drawer (260px, near-black/rose), the topbar, the login and the first-boot walkthrough, plus the shared runtime every page uses (`$`, `escapeHtml`, `request`, `taskPopup`, `libraryCard`, …). The topbar has **M3U** and **XMLTV** menus that copy the playlist and guide URLs — local or public, from General Settings — to the clipboard. Real pages so far: **Channels** (the CRUD API), **General Settings** (public/local URLs), **About** (reads `/api/about`), **Credits** (static), **Transcode** (the ErsatzTV plugin), **AI** (the AI plugin), **Plugins** (Installed + Store tabs), **Tasks** (the Jellyfin library-scan scheduler), **Live TV**, **Library** (media-source connections and syncs), **Media** (the base's own catalog), and **Lineups** (the per-channel 48-slot schedule editor). Other menus land on a per-page placeholder until their wiring lands.
 
 ### Plugins and the store
 

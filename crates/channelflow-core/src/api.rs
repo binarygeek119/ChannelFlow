@@ -151,6 +151,17 @@ pub fn router(
         .route("/api/media/tv/episode-image", get(tv_episode_image))
         .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
+        .route("/api/lineups", get(list_lineups))
+        .route("/api/lineups/{id}", get(get_lineup).put(put_lineup))
+        .route(
+            "/api/lineups/{id}/overrides",
+            post(create_lineup_override),
+        )
+        .route(
+            "/api/lineups/overrides/{override_id}",
+            put(update_lineup_override).delete(delete_lineup_override),
+        )
+        .route("/api/lineups/{id}/preview", post(preview_lineup))
         .route("/live/{asset}", get(live_pending))
         .fallback(spa_fallback)
         .with_state(state.clone());
@@ -1212,8 +1223,236 @@ async fn delete_channel(
             let _ = std::fs::remove_file(state.store.images_dir().join(path));
         }
     }
+    let _ = state.store.lineup_delete(id).await;
     state.store.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Lineups ────────────────────────────────────────────────────────────────
+// The 1.0.0 schedule model ported into the base: a per-channel 48-slot daily
+// roster with weighted candidates and day/week overrides. Playout is a later
+// milestone; these routes own the roster document the editor edits and the
+// playout pass will later read.
+
+/// The Lineups page's channel picker: every channel plus whether it has a
+/// saved roster and how much of the day its slots cover.
+async fn list_lineups(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let channels = state.store.list().await?;
+    let mut rows = Vec::with_capacity(channels.len());
+    for channel in channels {
+        match state.store.lineup_get(channel.id).await? {
+            Some(value) => {
+                let (covered, has_lineup) = match serde_json::from_value::<crate::lineup::ChannelLineup>(value) {
+                    Ok(lineup) => (
+                        crate::lineup::validate_slots(&lineup.slots)
+                            .ok()
+                            .map(|slots| slots.iter().map(|s| s.span_slots).sum::<i32>())
+                            .unwrap_or_default(),
+                        true,
+                    ),
+                    Err(_) => (0, false),
+                };
+                rows.push(json!({
+                    "id": channel.id,
+                    "number": channel.number,
+                    "name": channel.name,
+                    "enabled": channel.enabled,
+                    "has_lineup": has_lineup,
+                    "slots_covered": covered,
+                }));
+            }
+            None => rows.push(json!({
+                "id": channel.id,
+                "number": channel.number,
+                "name": channel.name,
+                "enabled": channel.enabled,
+                "has_lineup": false,
+                "slots_covered": 0,
+            })),
+        }
+    }
+    Ok(Json(json!({ "channels": rows })))
+}
+
+/// One channel's roster: the stored document, or a fresh empty default day.
+async fn get_lineup(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state.store.get(id).await.map_err(|_| api_not_found(id))?;
+    let lineup = match state.store.lineup_get(id).await? {
+        Some(value) => value,
+        None => {
+            let default = crate::lineup::ChannelLineup::default();
+            serde_json::to_value(default).map_err(|error| api_bad_request(error.to_string()))?
+        }
+    };
+    Ok(Json(json!({
+        "lineup": lineup,
+        "slots_per_day": crate::lineup::SLOTS_PER_DAY,
+    })))
+}
+
+/// Replace the default roster. Body: `{ "slots": [...] }`. Overrides survive.
+async fn put_lineup(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(value): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state.store.get(id).await.map_err(|_| api_not_found(id))?;
+    let mut lineup = stored_lineup(&state, id).await?;
+    let raw_slots = value.get("slots").cloned().unwrap_or_else(|| json!([]));
+    let slots: Vec<crate::lineup::LineupSlot> = serde_json::from_value(raw_slots)
+        .map_err(|error| api_bad_request(format!("slots are not valid: {error}")))?;
+    lineup.slots = crate::lineup::validate_slots(&slots)
+        .map_err(|error| api_bad_request(error.to_string()))?;
+    let document = json!({ "slots": lineup.slots, "overrides": lineup.overrides });
+    state.store.lineup_set(id, &document).await?;
+    Ok(Json(json!({ "ok": true, "lineup": document })))
+}
+
+/// Body: `{ "name", "kind": "day_of_week"|"specific_date", "day_of_week"?
+/// , "specific_date"?, "slots" }`. Creates an override; the default roster
+/// stays untouched.
+async fn create_lineup_override(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    state.store.get(id).await.map_err(|_| api_not_found(id))?;
+    let mut lineup = stored_lineup(&state, id).await?;
+    let mut override_ = parse_override(&body)?;
+    override_.slots = crate::lineup::validate_slots(&override_.slots)
+        .map_err(|error| api_bad_request(error.to_string()))?;
+    lineup.overrides.push(override_.clone());
+    let document = json!({ "slots": lineup.slots, "overrides": lineup.overrides });
+    state.store.lineup_set(id, &document).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "ok": true, "override": override_, "lineup": document })),
+    ))
+}
+
+/// Update one override by id; the roster is stored with the change.
+async fn update_lineup_override(
+    State(state): State<AppState>,
+    Path(override_id): Path<Uuid>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (channel_id, slots, overrides) = find_override(&state, override_id).await?;
+    let mut updated = parse_override(&body)?;
+    updated.id = override_id;
+    updated.slots = crate::lineup::validate_slots(&updated.slots)
+        .map_err(|error| api_bad_request(error.to_string()))?;
+    let overrides = overrides
+        .into_iter()
+        .map(|o| if o.id == override_id { updated.clone() } else { o })
+        .collect::<Vec<_>>();
+    let document = json!({ "slots": slots, "overrides": overrides });
+    state.store.lineup_set(channel_id, &document).await?;
+    Ok(Json(json!({ "ok": true, "override": updated, "lineup": document })))
+}
+
+/// Delete one override and store the roster without it.
+async fn delete_lineup_override(
+    State(state): State<AppState>,
+    Path(override_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let (channel_id, slots, overrides) = find_override(&state, override_id).await?;
+    let overrides = overrides
+        .into_iter()
+        .filter(|o| o.id != override_id)
+        .collect::<Vec<_>>();
+    let document = json!({ "slots": slots, "overrides": overrides });
+    state.store.lineup_set(channel_id, &document).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Preview the roster effective on a date. Body: `{ "date": "YYYY-MM-DD" }`.
+async fn preview_lineup(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state.store.get(id).await.map_err(|_| api_not_found(id))?;
+    let lineup = stored_lineup(&state, id).await?;
+    let date = parse_date(body.get("date").and_then(serde_json::Value::as_str))
+        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let (slots, matched) = crate::lineup::resolve_for_date(&lineup, date);
+    Ok(Json(json!({
+        "date": date.format("%Y-%m-%d").to_string(),
+        "slots": slots,
+        "override": matched.map(|o| json!({
+            "id": o.id,
+            "name": o.name,
+            "kind": o.kind,
+        })),
+    })))
+}
+
+/// The stored roster, or a default when none was saved yet.
+async fn stored_lineup(
+    state: &AppState,
+    channel_id: Uuid,
+) -> Result<crate::lineup::ChannelLineup, StoreError> {
+    match state.store.lineup_get(channel_id).await? {
+        Some(value) => Ok(serde_json::from_value(value).unwrap_or_default()),
+        None => Ok(crate::lineup::ChannelLineup::default()),
+    }
+}
+
+/// Find the channel + roster holding an override by id.
+async fn find_override(
+    state: &AppState,
+    override_id: Uuid,
+) -> Result<
+    (Uuid, Vec<crate::lineup::LineupSlot>, Vec<crate::lineup::LineupOverride>),
+    ApiError,
+> {
+    for channel in state.store.list().await? {
+        if let Some(value) = state.store.lineup_get(channel.id).await? {
+            if let Ok(lineup) = serde_json::from_value::<crate::lineup::ChannelLineup>(value) {
+                if lineup.overrides.iter().any(|o| o.id == override_id) {
+                    return Ok((channel.id, lineup.slots, lineup.overrides));
+                }
+            }
+        }
+    }
+    Err(api_not_found(override_id))
+}
+
+fn parse_override(body: &serde_json::Value) -> Result<crate::lineup::LineupOverride, ApiError> {
+    let override_ = serde_json::from_value::<crate::lineup::LineupOverride>(body.clone())
+        .map_err(|error| api_bad_request(format!("override is not valid: {error}")))?;
+    match override_.kind.as_str() {
+        "day_of_week" if matches!(override_.day_of_week, Some(d) if (0..=6).contains(&d)) => {}
+        "specific_date" if validate_date(override_.specific_date.as_deref()) => {}
+        _ => {
+            return Err(api_bad_request(
+                "an override needs kind day_of_week with day_of_week 0-6, or kind specific_date with a YYYY-MM-DD date"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(override_)
+}
+
+fn validate_date(value: Option<&str>) -> bool {
+    value.map(|v| parse_date(Some(v)).is_some()).unwrap_or(false)
+}
+
+fn parse_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
+    value.and_then(|v| chrono::NaiveDate::parse_from_str(v.trim(), "%Y-%m-%d").ok())
+}
+
+/// A 400 the editor can show verbatim.
+fn api_bad_request(message: String) -> ApiError {
+    ApiError(StoreError::Plugin(message))
+}
+
+/// A 404 for a missing channel (or override).
+fn api_not_found(id: Uuid) -> ApiError {
+    ApiError(StoreError::NotFound(id))
 }
 
 /// The Installed tab: the plugins in the registry, each joined with what the

@@ -338,6 +338,29 @@ impl Store {
         self.plugin_set(CORE_NAMESPACE, GUIDE_KEY, value).await
     }
 
+    /// A channel's lineup document, if one was saved. Shape:
+    /// `{ "slots": [...], "overrides": [...] }` from the Lineups editor.
+    pub async fn lineup_get(&self, channel_id: Uuid) -> Result<Option<serde_json::Value>, StoreError> {
+        self.plugin_get(CORE_NAMESPACE, &format!("lineup_{channel_id}"))
+            .await
+    }
+
+    /// Replace a channel's lineup document.
+    pub async fn lineup_set(
+        &self,
+        channel_id: Uuid,
+        value: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        self.plugin_set(CORE_NAMESPACE, &format!("lineup_{channel_id}"), value)
+            .await
+    }
+
+    /// Drop a channel's lineup document (used when the channel is deleted).
+    pub async fn lineup_delete(&self, channel_id: Uuid) -> Result<(), StoreError> {
+        self.plugin_delete(CORE_NAMESPACE, &format!("lineup_{channel_id}"))
+            .await
+    }
+
     /// The storage handle passed to a plugin, scoped to its id.
     pub fn plugin_storage(&self, namespace: &str) -> Arc<dyn PluginStorage> {
         Arc::new(NamespacedStorage {

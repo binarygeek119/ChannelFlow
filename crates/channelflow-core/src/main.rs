@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod client_logs;
+mod lineup;
 mod media;
 mod model;
 mod plugin;

@@ -27,10 +27,6 @@ const MEDIA_SOURCE_LOGOS = {
   emby: "/logos/Emby.png",
   local: "/logos/LOCAL.png",
 };
-// The plugin that hosts rich metadata for a source kind (item detail pages).
-const MEDIA_DETAIL_PLUGINS = {
-  jellyfin: "com.channelflow.jellyfin",
-};
 
 let mediaItems = [];
 let mediaCounts = { movies: 0, tvshows: 0, music: 0, musicvideos: 0, news: 0 };
@@ -569,7 +565,7 @@ function mediaCastCard(person) {
 
 // ── Music: artist → albums, album → tracks ───────────────────────────────
 
-const MUSIC_GRAPH = "/api/plugins/com.channelflow.jellyfin/music";
+const MUSIC_GRAPH = "/api/media/music";
 let musicArtists = null;
 let musicAlbums = null;
 let musicVideos = null;

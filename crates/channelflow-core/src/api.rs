@@ -149,6 +149,10 @@ pub fn router(
         .route("/api/media/tv/seasons", get(tv_seasons))
         .route("/api/media/tv/episodes", get(tv_episodes))
         .route("/api/media/tv/episode-image", get(tv_episode_image))
+        .route("/api/media/music/artists", get(music_artists))
+        .route("/api/media/music/albums", get(music_albums))
+        .route("/api/media/music/videos", get(music_videos))
+        .route("/api/media/music/albums/{id}/tracks", get(music_album_tracks))
         .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
         .route("/api/lineups", get(list_lineups))
@@ -2376,6 +2380,162 @@ async fn media_catalog_list(
 
 /// One item in the base catalog, by match key — the Media detail page's source
 /// of truth. Sources carry `web_url` deep links into the media servers.
+// ── Music graph ──────────────────────────────────────────────────────────
+// Derived from the base catalog itself — artists, albums and music videos are
+// catalog rows; an album's tracks are `track` rows whose detail.album_id
+// matches the album's source remote id. No plugin tables involved.
+
+/// The normalized form media.js uses to match music names: lowercase, drop
+/// everything but letters/digits, and a leading a/an/the.
+fn normalize_music_name(name: &str) -> String {
+    let lowered: String = name.to_lowercase();
+    let compact: String = lowered
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    for article in ["the", "an", "a"] {
+        if let Some(rest) = compact.strip_prefix(article) {
+            return rest.to_string();
+        }
+    }
+    compact
+}
+
+/// A name → artist match_key map from the catalog's artist rows.
+fn artist_index(rows: &[serde_json::Value]) -> std::collections::HashMap<String, String> {
+    let mut index = std::collections::HashMap::new();
+    for row in rows {
+        if row["kind"].as_str() != Some("artist") {
+            continue;
+        }
+        if let (Some(name), Some(key)) = (row["title"].as_str(), row["match_key"].as_str()) {
+            index.insert(normalize_music_name(name), key.to_string());
+        }
+    }
+    index
+}
+
+fn artist_name_of(row: &serde_json::Value) -> Option<String> {
+    if let Some(name) = row["detail"]["album_artist"].as_str() {
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    row["detail"]["artists"]
+        .as_array()
+        .and_then(|artists| artists.first())
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+async fn music_artists(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let artists: Vec<serde_json::Value> = rows
+        .iter()
+        .filter(|row| row["kind"].as_str() == Some("artist"))
+        .map(|row| json!({ "id": row["match_key"], "name": row["title"] }))
+        .collect();
+    Ok(Json(json!({ "artists": artists })))
+}
+
+async fn music_albums(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let index = artist_index(&rows);
+    let albums: Vec<serde_json::Value> = rows
+        .iter()
+        .filter(|row| row["kind"].as_str() == Some("album"))
+        .map(|row| {
+            let artist_name = artist_name_of(row);
+            let artist_id = artist_name
+                .as_deref()
+                .map(normalize_music_name)
+                .and_then(|name| index.get(&name).cloned());
+            json!({
+                "id": row["match_key"],
+                "title": row["title"],
+                "year": row["year"],
+                "artist_id": artist_id,
+                "artist_name": artist_name,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "albums": albums })))
+}
+
+async fn music_videos(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let index = artist_index(&rows);
+    let videos: Vec<serde_json::Value> = rows
+        .iter()
+        .filter(|row| row["kind"].as_str() == Some("musicvideo"))
+        .map(|row| {
+            let artist_name = artist_name_of(row);
+            let artist_id = artist_name
+                .as_deref()
+                .map(normalize_music_name)
+                .and_then(|name| index.get(&name).cloned());
+            json!({
+                "id": row["match_key"],
+                "title": row["title"],
+                "year": row["year"],
+                "poster_path": row["poster_path"],
+                "artist_id": artist_id,
+                "artist_name": artist_name,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "videos": videos })))
+}
+
+async fn music_album_tracks(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rows = state.store.media_list().await?;
+    let album = rows
+        .iter()
+        .find(|row| row["match_key"].as_str() == Some(id.as_str()));
+    let Some(album) = album else {
+        return Ok(Json(json!({ "tracks": [], "track_count": 0 })));
+    };
+    let remote_ids: std::collections::HashSet<String> = album["sources"]
+        .as_array()
+        .map(|sources| {
+            sources
+                .iter()
+                .filter_map(|source| source["remote_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut tracks: Vec<serde_json::Value> = rows
+        .iter()
+        .filter(|row| row["kind"].as_str() == Some("track"))
+        .filter(|row| {
+            row["detail"]["album_id"]
+                .as_str()
+                .map(|album_id| remote_ids.contains(album_id))
+                .unwrap_or(false)
+        })
+        .map(|row| {
+            json!({
+                "title": row["title"],
+                "runtime_ticks": row["runtime_seconds"].as_i64().map(|s| s * 10_000_000),
+                "track_number": row["detail"]["index_number"],
+                "disc_number": row["detail"]["parent_index_number"],
+            })
+        })
+        .collect();
+    tracks.sort_by(|a, b| {
+        let disc = a["disc_number"].as_i64().unwrap_or(i64::MAX)
+            .cmp(&b["disc_number"].as_i64().unwrap_or(i64::MAX));
+        disc.then_with(|| {
+            a["track_number"].as_i64().unwrap_or(i64::MAX)
+                .cmp(&b["track_number"].as_i64().unwrap_or(i64::MAX))
+        })
+    });
+    Ok(Json(json!({ "tracks": tracks, "track_count": tracks.len() })))
+}
+
 async fn media_catalog_item(
     State(state): State<AppState>,
     Path(match_key): Path<String>,

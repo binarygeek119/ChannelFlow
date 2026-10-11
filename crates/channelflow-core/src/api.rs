@@ -1813,14 +1813,27 @@ async fn news_scan_put(
     })))
 }
 
-/// Scan the Past Tense News folders into the media database now.
-async fn news_scan_run(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+/// Scan the Past Tense News folders into the media database now. With a
+/// `connection_id` only that connection's folders are scanned (a Sync pressed
+/// on the Library page), tagged `library`; without one every news connection
+/// is scanned, tagged `manual`.
+async fn news_scan_run(
+    State(state): State<AppState>,
+    Json(body): Json<TaskRunBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let trigger = if body.connection_id.is_some() {
+        "library"
+    } else {
+        "manual"
+    }
+    .to_string();
     let config_dir = std::path::PathBuf::from(&state.about.config_folder);
     let store = state.store.clone();
     let media = state.media.clone();
+    let only_connection = body.connection_id;
     // In its own task so it keeps going if the browser navigates away.
     let handle = tokio::spawn(async move {
-        tasks::run_news_scan(&store, &media, &config_dir, "manual").await
+        tasks::run_news_scan(&store, &media, &config_dir, &trigger, only_connection).await
     });
     let run = handle
         .await
@@ -1853,14 +1866,27 @@ async fn local_scan_put(
     })))
 }
 
-/// Scan the Local Files folders into the media database now.
-async fn local_scan_run(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+/// Scan the Local Files folders into the media database now. With a
+/// `connection_id` only that connection's folders are scanned (a Sync pressed
+/// on the Library page), tagged `library`; without one every local connection
+/// is scanned, tagged `manual`.
+async fn local_scan_run(
+    State(state): State<AppState>,
+    Json(body): Json<TaskRunBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let trigger = if body.connection_id.is_some() {
+        "library"
+    } else {
+        "manual"
+    }
+    .to_string();
     let config_dir = std::path::PathBuf::from(&state.about.config_folder);
     let store = state.store.clone();
     let media = state.media.clone();
+    let only_connection = body.connection_id;
     // In its own task so it keeps going if the browser navigates away.
     let handle = tokio::spawn(async move {
-        tasks::run_local_scan(&store, &media, &config_dir, "manual").await
+        tasks::run_local_scan(&store, &media, &config_dir, &trigger, only_connection).await
     });
     let run = handle
         .await

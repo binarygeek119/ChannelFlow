@@ -261,19 +261,21 @@ pub fn news_cron_expression(daily_time: &str) -> Option<String> {
     daily_cron_expression(daily_time)
 }
 
-/// Scan every Past Tense News connection's event folders into the media DB.
+/// Scan every Past Tense News connection's event folders into the media DB,
+/// or just one when `only_connection` is given (the Library page's Sync).
 pub async fn run_news_scan(
     store: &Store,
     media: &MediaSources,
     config_dir: &Path,
     trigger: &str,
+    only_connection: Option<i64>,
 ) -> Result<SyncRun, StoreError> {
     run_scanner(
         store,
         media,
         config_dir,
         trigger,
-        None,
+        only_connection,
         Some("news"),
         NEWS_RUNS_KEY,
         "news-scan",
@@ -306,19 +308,21 @@ pub fn local_cron_expression(daily_time: &str) -> Option<String> {
     daily_cron_expression(daily_time)
 }
 
-/// Scan every Local Files connection's folders into the media DB.
+/// Scan every Local Files connection's folders into the media DB, or just one
+/// when `only_connection` is given (the Library page's Sync).
 pub async fn run_local_scan(
     store: &Store,
     media: &MediaSources,
     config_dir: &Path,
     trigger: &str,
+    only_connection: Option<i64>,
 ) -> Result<SyncRun, StoreError> {
     run_scanner(
         store,
         media,
         config_dir,
         trigger,
-        None,
+        only_connection,
         Some("local"),
         LOCAL_RUNS_KEY,
         "local-scan",

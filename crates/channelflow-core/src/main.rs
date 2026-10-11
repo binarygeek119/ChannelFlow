@@ -493,7 +493,7 @@ async fn main() -> Result<()> {
                 let config = tasks::news_load(&store).await;
                 if tasks::news_is_due(&store, &config, chrono::Utc::now()).await {
                     if let Err(error) =
-                        tasks::run_news_scan(&store, &media, &config_dir, "schedule").await
+                        tasks::run_news_scan(&store, &media, &config_dir, "schedule", None).await
                     {
                         tracing::warn!(%error, "scheduled Past Tense News scan failed");
                     }
@@ -516,7 +516,7 @@ async fn main() -> Result<()> {
                 let config = tasks::local_load(&store).await;
                 if tasks::local_is_due(&store, &config, chrono::Utc::now()).await {
                     if let Err(error) =
-                        tasks::run_local_scan(&store, &media, &config_dir, "schedule").await
+                        tasks::run_local_scan(&store, &media, &config_dir, "schedule", None).await
                     {
                         tracing::warn!(%error, "scheduled Local Files scan failed");
                     }

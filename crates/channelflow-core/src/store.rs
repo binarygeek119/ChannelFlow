@@ -1263,7 +1263,7 @@ impl CoreData for StoreCoreData {
                 continue;
             }
             let kind = entry["kind"].as_str().unwrap_or("");
-            if filter.kind.as_deref().is_some_and(|want| want != kind) {
+            if !filter.kinds.is_empty() && !filter.kinds.iter().any(|want| want == kind) {
                 continue;
             }
             let year = entry["year"].as_i64().map(|value| value as i32);
@@ -1280,11 +1280,11 @@ impl CoreData for StoreCoreData {
                 continue;
             }
             let genres = json_strings(&entry["genres"]);
-            if !filter.genres.is_empty() && !filter.genres.iter().any(|want| genres.contains(want)) {
+            if !filter.genres.is_empty() && !matches_any(&genres, &filter.genres) {
                 continue;
             }
             let tags = json_strings(&entry["tags"]);
-            if !filter.tags.is_empty() && !filter.tags.iter().any(|want| tags.contains(want)) {
+            if !filter.tags.is_empty() && !matches_any(&tags, &filter.tags) {
                 continue;
             }
             let rating = entry["official_rating"].as_str();
@@ -1460,6 +1460,16 @@ fn json_strings(value: &serde_json::Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Whether any wanted value appears (case-insensitively, as a substring) in the
+/// item's own values — so `Reality` matches `Reality-TV` and `Sci-Fi` matches
+/// `Science Fiction` when the catalog spells it that way.
+fn matches_any(owned: &[String], wanted: &[String]) -> bool {
+    wanted.iter().any(|want| {
+        let want = want.trim().to_lowercase();
+        !want.is_empty() && owned.iter().any(|have| have.to_lowercase().contains(&want))
+    })
 }
 
 /// A coarse ordinal for the common MPAA/TV ratings, so a caller can cap what
@@ -3934,7 +3944,7 @@ mod tests {
         // A rating ceiling drops the R-rated film.
         let capped = core
             .catalog(CatalogFilter {
-                kind: Some("movie".to_string()),
+                kinds: vec!["movie".to_string()],
                 rating_max: Some("PG-13".to_string()),
                 ..Default::default()
             })
@@ -3976,6 +3986,15 @@ mod tests {
         assert!(core.file_for(&key).await.expect("file").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn genre_matching_is_case_insensitive_and_partial() {
+        let owned = vec!["Reality-TV".to_string(), "Science Fiction".to_string()];
+        assert!(matches_any(&owned, &["Reality".to_string()]), "Reality matches Reality-TV");
+        assert!(matches_any(&owned, &["sci".to_string()]), "sci matches Science Fiction");
+        assert!(!matches_any(&owned, &["Comedy".to_string()]));
+        assert!(!matches_any(&owned, &[String::new()]), "an empty want never matches");
     }
 
     /// `lineup` hands a channel's saved roster back as JSON.

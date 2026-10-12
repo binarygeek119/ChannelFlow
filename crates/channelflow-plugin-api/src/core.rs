@@ -77,9 +77,10 @@ pub struct LlmProvider {
 /// reaches a model. Every field is optional; the default means "everything".
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct CatalogFilter {
-    /// Coarse kind: `movie`, `series`, `episode`, `musicvideo`, …
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
+    /// Coarse kinds: `movie`, `series`, `episode`, `musicvideo`, … Empty means
+    /// every kind, so a "TV and movies" pool can name both.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

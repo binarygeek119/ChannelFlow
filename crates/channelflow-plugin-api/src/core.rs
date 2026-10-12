@@ -61,9 +61,111 @@ pub struct TtsProvider {
 /// AI page stays the one place providers are configured.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LlmProvider {
+    /// The provider's id on the AI page, so a caller can report which one it used.
+    pub id: String,
+    /// The provider's display name.
+    pub name: String,
     pub base_url: String,
     pub api_key: String,
     pub chat_model: String,
+    /// An optional sampling temperature for scheduling (kept low).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
+/// A filter a scheduling plugin narrows the base catalog with before it ever
+/// reaches a model. Every field is optional; the default means "everything".
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct CatalogFilter {
+    /// Coarse kind: `movie`, `series`, `episode`, `musicvideo`, …
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year_min: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year_max: Option<i32>,
+    /// An official-rating ceiling (the caller knows its own ordinal order).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating_max: Option<String>,
+    /// Explicit catalog keys (pins, list membership).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub match_keys: Vec<String>,
+    /// Cap on how many rows come back (the caller's pool size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+/// One catalog row, as a scheduling plugin sees it. It carries no file path:
+/// resolve that with [`CoreData::file_for`] so the media source that owns the
+/// file stays authoritative.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CatalogRow {
+    pub match_key: String,
+    pub kind: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub official_rating: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// For an episode: the series' catalog key and the season/episode numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<i32>,
+}
+
+/// A playable file for a catalog item, resolved through the source that owns
+/// it. `path` is what next's `LocalSource` gets.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MediaFile {
+    pub source_kind: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_ms: Option<i64>,
+}
+
+/// One message in a chat request.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// A chat completion request, walked across the AI page's providers by the core.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChatRequest {
+    pub messages: Vec<ChatMessage>,
+    /// Overrides the provider's own temperature when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Ask for a JSON object reply where the provider supports it.
+    #[serde(default)]
+    pub json: bool,
+    /// A per-call model override; normally the provider's `chat_model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// The answer to a [`ChatRequest`], plus which provider produced it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChatResponse {
+    pub content: String,
+    pub provider_id: String,
+    /// Providers that were skipped, and why, so a UI can explain a fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<String>,
 }
 
 /// What the core hands a plugin that asked for `api:core:read`.
@@ -104,6 +206,40 @@ pub trait CoreData: Send + Sync {
     /// and names a non-empty `chat_model`. Returns `None` if the AI plugin is
     /// not installed or no chat provider is configured.
     async fn llm_provider(&self) -> Result<Option<LlmProvider>, CoreDataError> {
+        Ok(None)
+    }
+
+    /// The base catalog, filtered. The scheduler's candidate pool comes from
+    /// here. Requires `api:core:read`.
+    async fn catalog(&self, filter: CatalogFilter) -> Result<Vec<CatalogRow>, CoreDataError> {
+        let _ = filter;
+        Ok(Vec::new())
+    }
+
+    /// The channel's saved roster (the base `ChannelLineup`) as JSON — the
+    /// scheduling plugin's layer-2 seed. `None` when the channel has none.
+    async fn lineup(&self, channel_id: &str) -> Result<Option<serde_json::Value>, CoreDataError> {
+        let _ = channel_id;
+        Ok(None)
+    }
+
+    /// Every enabled provider suitable for scheduling, in failover order.
+    /// `tts_only` providers are excluded; `scheduling_only` ones are included.
+    async fn llm_providers(&self) -> Result<Vec<LlmProvider>, CoreDataError> {
+        Ok(Vec::new())
+    }
+
+    /// One chat completion, walking the providers in order. The core owns the
+    /// failover so plugins never re-implement it.
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, CoreDataError> {
+        let _ = request;
+        Err(CoreDataError("chat is not available".to_string()))
+    }
+
+    /// The playable file for a catalog item, resolved from the base's own
+    /// `media_files` table.
+    async fn file_for(&self, match_key: &str) -> Result<Option<MediaFile>, CoreDataError> {
+        let _ = match_key;
         Ok(None)
     }
 }

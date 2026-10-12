@@ -317,6 +317,79 @@ pub struct CatalogItem {
     /// Cast and crew, for the People pages. The base keeps a people table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub people: Vec<PersonCredit>,
+    /// The playable files this source has for the item. The base keeps them in
+    /// its own `media_files` table so scheduling can resolve an item to a path
+    /// without asking the live server.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<CatalogFile>,
+}
+
+/// One playable file a source reports for an item. The base stores these in its
+/// own `media_files` table; scheduling resolves an item to one of them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogFile {
+    /// The source's own id for the file/version, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_id: Option<String>,
+    /// An absolute path the server can hand to next's `LocalSource`.
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<i64>,
+    /// The file's runtime in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_seconds: Option<i64>,
+    /// Streams/chapters, stored verbatim (source-shaped) for probe hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub streams: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<serde_json::Value>,
+}
+
+impl CatalogFile {
+    /// A file with just a path — the common case for a folder source.
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            remote_id: None,
+            path: path.into(),
+            container: None,
+            size_bytes: None,
+            runtime_seconds: None,
+            streams: None,
+            chapters: None,
+        }
+    }
+
+    pub fn remote_id(mut self, remote_id: Option<String>) -> Self {
+        self.remote_id = remote_id;
+        self
+    }
+
+    pub fn container(mut self, container: Option<String>) -> Self {
+        self.container = container;
+        self
+    }
+
+    pub fn size_bytes(mut self, size_bytes: Option<i64>) -> Self {
+        self.size_bytes = size_bytes;
+        self
+    }
+
+    pub fn runtime_seconds(mut self, runtime_seconds: Option<i64>) -> Self {
+        self.runtime_seconds = runtime_seconds;
+        self
+    }
+
+    pub fn streams(mut self, streams: Option<serde_json::Value>) -> Self {
+        self.streams = streams;
+        self
+    }
+
+    pub fn chapters(mut self, chapters: Option<serde_json::Value>) -> Self {
+        self.chapters = chapters;
+        self
+    }
 }
 
 /// One cast/crew credit a source reports for an item.
@@ -352,6 +425,7 @@ impl CatalogItem {
             tags: Vec::new(),
             detail: None,
             people: Vec::new(),
+            files: Vec::new(),
         }
     }
 
@@ -422,6 +496,11 @@ impl CatalogItem {
 
     pub fn people(mut self, people: Vec<PersonCredit>) -> Self {
         self.people = people;
+        self
+    }
+
+    pub fn files(mut self, files: Vec<CatalogFile>) -> Self {
+        self.files = files;
         self
     }
 }

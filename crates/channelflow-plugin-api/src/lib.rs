@@ -26,12 +26,15 @@ pub mod web;
 
 pub use contrib::{contributed_presets, register_preset, unregister_preset, PresetContribution};
 
-pub use core::{CoreChannel, CoreData, CoreDataError, InMemoryCoreData, NoCoreData};
+pub use core::{
+    CatalogFilter, CatalogRow, ChatMessage, ChatRequest, ChatResponse, CoreChannel, CoreData,
+    CoreDataError, InMemoryCoreData, LlmProvider, MediaFile, NoCoreData, TtsProvider,
+};
 pub use database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 pub use manifest::{Assets, Hooks, PluginManifest, Repository};
 pub use media::{
-    Connection, FieldSpec, Library, MediaSource, MediaType, SyncCtx, SyncReport, TestCode,
-    TestResult,
+    CatalogFile, CatalogItem, Connection, FieldSpec, Library, MediaSource, MediaType, PersonCredit,
+    SyncCtx, SyncReport, TestCode, TestResult,
 };
 pub use permission::Permission;
 pub use plugin::{

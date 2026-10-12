@@ -25,7 +25,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use channelflow_plugin_api::core::{CoreChannel, CoreData, CoreDataError, LlmProvider, TtsProvider};
+use channelflow_plugin_api::core::{
+    CatalogFilter, CatalogRow, ChatRequest, ChatResponse, CoreChannel, CoreData, CoreDataError,
+    LlmProvider, MediaFile, TtsProvider,
+};
 use channelflow_plugin_api::database::{NoPluginDatabase, PluginDatabase, PluginDatabaseError};
 use channelflow_plugin_api::media::{CatalogItem, MediaCatalog};
 use channelflow_plugin_api::storage::{PluginStorage, PluginStorageError};
@@ -587,6 +590,17 @@ impl Store {
         }
     }
 
+    /// The playable files reported for a catalog item, across every source.
+    pub async fn media_files_for(
+        &self,
+        match_key: &str,
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::media_files_for(&self.root, match_key),
+            Backend::Postgres(pool) => pg::media_files_for(pool, match_key).await,
+        }
+    }
+
     /// The kind (jellyfin / plex / emby / local / …) of a connection.
     pub async fn connection_kind(&self, id: i64) -> Result<Option<String>, StoreError> {
         Ok(self
@@ -605,9 +619,10 @@ impl Store {
 
     /// The read-only core-data handle handed to plugins that hold
     /// `api:core:read`.
-    pub fn core_data(&self) -> StoreCoreData {
+    pub fn core_data(&self, http: reqwest::Client) -> StoreCoreData {
         StoreCoreData {
             store: self.clone(),
+            http,
         }
     }
 
@@ -1038,6 +1053,7 @@ impl MediaCatalog for Store {
 #[derive(Clone)]
 pub struct StoreCoreData {
     store: Store,
+    http: reqwest::Client,
 }
 
 #[async_trait]
@@ -1216,10 +1232,249 @@ impl CoreData for StoreCoreData {
                 .to_string()
         };
         Ok(Some(LlmProvider {
+            id: field("id").trim().to_string(),
+            name: field("name").trim().to_string(),
             base_url: field("base_url").trim_end_matches('/').to_string(),
             api_key: field("api_key"),
             chat_model: field("chat_model"),
+            temperature: provider
+                .get("temperature")
+                .and_then(serde_json::Value::as_f64)
+                .map(|value| value as f32),
         }))
+    }
+
+    async fn catalog(&self, filter: CatalogFilter) -> Result<Vec<CatalogRow>, CoreDataError> {
+        let entries = self
+            .store
+            .media_list()
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        let keys: std::collections::HashSet<&str> =
+            filter.match_keys.iter().map(String::as_str).collect();
+        let ceiling = filter.rating_max.as_deref().map(rating_rank);
+        let mut rows = Vec::new();
+        for entry in &entries {
+            let match_key = entry["match_key"].as_str().unwrap_or("");
+            if match_key.is_empty() {
+                continue;
+            }
+            if !keys.is_empty() && !keys.contains(match_key) {
+                continue;
+            }
+            let kind = entry["kind"].as_str().unwrap_or("");
+            if filter.kind.as_deref().is_some_and(|want| want != kind) {
+                continue;
+            }
+            let year = entry["year"].as_i64().map(|value| value as i32);
+            if filter
+                .year_min
+                .is_some_and(|min| year.map_or(true, |value| value < min))
+            {
+                continue;
+            }
+            if filter
+                .year_max
+                .is_some_and(|max| year.map_or(true, |value| value > max))
+            {
+                continue;
+            }
+            let genres = json_strings(&entry["genres"]);
+            if !filter.genres.is_empty() && !filter.genres.iter().any(|want| genres.contains(want)) {
+                continue;
+            }
+            let tags = json_strings(&entry["tags"]);
+            if !filter.tags.is_empty() && !filter.tags.iter().any(|want| tags.contains(want)) {
+                continue;
+            }
+            let rating = entry["official_rating"].as_str();
+            if let Some(ceiling) = ceiling {
+                if rating.map(rating_rank).is_some_and(|rank| rank > ceiling) {
+                    continue;
+                }
+            }
+            let detail = &entry["detail"];
+            rows.push(CatalogRow {
+                match_key: match_key.to_string(),
+                kind: kind.to_string(),
+                title: entry["title"].as_str().unwrap_or("").to_string(),
+                year,
+                runtime_ms: entry["runtime_seconds"].as_i64().map(|seconds| seconds * 1000),
+                genres,
+                official_rating: rating.map(str::to_string),
+                tags,
+                series_key: detail
+                    .get("series_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                season: detail
+                    .get("parent_index_number")
+                    .and_then(serde_json::Value::as_i64)
+                    .map(|value| value as i32),
+                episode: detail
+                    .get("index_number")
+                    .and_then(serde_json::Value::as_i64)
+                    .map(|value| value as i32),
+            });
+            if filter
+                .limit
+                .is_some_and(|limit| rows.len() >= limit as usize)
+            {
+                break;
+            }
+        }
+        Ok(rows)
+    }
+
+    async fn lineup(&self, channel_id: &str) -> Result<Option<serde_json::Value>, CoreDataError> {
+        let Ok(id) = Uuid::parse_str(channel_id) else {
+            return Ok(None);
+        };
+        self.store
+            .lineup_get(id)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))
+    }
+
+    async fn llm_providers(&self) -> Result<Vec<LlmProvider>, CoreDataError> {
+        let providers = self.ai_providers().await?;
+        let mut ordered: Vec<(u64, LlmProvider)> = Vec::new();
+        for provider in &providers {
+            if !provider
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            if provider
+                .get("tts_only")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let field = |name: &str| {
+                provider
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+            };
+            if field("chat_model").trim().is_empty() || field("base_url").trim().is_empty() {
+                continue;
+            }
+            let priority = provider
+                .get("priority")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(u64::MAX);
+            ordered.push((
+                priority,
+                LlmProvider {
+                    id: field("id").trim().to_string(),
+                    name: field("name").trim().to_string(),
+                    base_url: field("base_url").trim().trim_end_matches('/').to_string(),
+                    api_key: field("api_key").to_string(),
+                    chat_model: field("chat_model").trim().to_string(),
+                    temperature: provider
+                        .get("temperature")
+                        .and_then(serde_json::Value::as_f64)
+                        .map(|value| value as f32),
+                },
+            ));
+        }
+        ordered.sort_by_key(|(priority, _)| *priority);
+        Ok(ordered.into_iter().map(|(_, provider)| provider).collect())
+    }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, CoreDataError> {
+        let providers = self.llm_providers().await?;
+        if providers.is_empty() {
+            return Err(CoreDataError(
+                "no AI provider is configured for scheduling".to_string(),
+            ));
+        }
+        let mut attempts = Vec::new();
+        for provider in &providers {
+            match self.chat_once(provider, &request).await {
+                Ok(content) => {
+                    return Ok(ChatResponse {
+                        content,
+                        provider_id: provider.id.clone(),
+                        attempts,
+                    });
+                }
+                Err(ChatFailure::Fatal(message)) => return Err(CoreDataError(message)),
+                Err(ChatFailure::Retry(message)) => {
+                    let label = if provider.name.is_empty() {
+                        provider.id.clone()
+                    } else {
+                        provider.name.clone()
+                    };
+                    attempts.push(format!("{label}: {message}"));
+                }
+            }
+        }
+        Err(CoreDataError(format!(
+            "every AI provider failed — {}",
+            attempts.join("; ")
+        )))
+    }
+
+    async fn file_for(&self, match_key: &str) -> Result<Option<MediaFile>, CoreDataError> {
+        let files = self
+            .store
+            .media_files_for(match_key)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))?;
+        for file in files {
+            let path = file["path"].as_str().unwrap_or("").trim();
+            if path.is_empty() {
+                continue;
+            }
+            return Ok(Some(MediaFile {
+                source_kind: file["source_kind"].as_str().unwrap_or("").to_string(),
+                path: path.to_string(),
+                runtime_ms: file["runtime_seconds"].as_i64().map(|seconds| seconds * 1000),
+            }));
+        }
+        Ok(None)
+    }
+}
+
+/// Why a chat attempt did not produce content: `Fatal` means the request shape
+/// is wrong and every provider would reject it, so the walk stops; `Retry`
+/// means the next provider should be tried.
+enum ChatFailure {
+    Retry(String),
+    Fatal(String),
+}
+
+/// The string values in a JSON array (an item's genres or tags).
+fn json_strings(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A coarse ordinal for the common MPAA/TV ratings, so a caller can cap what
+/// the catalog hands back. Unknown ratings rank lowest (never filtered out).
+fn rating_rank(rating: &str) -> u8 {
+    match rating.trim().to_ascii_uppercase().as_str() {
+        "TV-Y" | "G" | "EC" => 1,
+        "TV-Y7" => 2,
+        "TV-G" | "PG" => 3,
+        "TV-PG" => 4,
+        "PG-13" => 5,
+        "TV-14" => 6,
+        "R" => 7,
+        "NC-17" | "TV-MA" | "X" => 8,
+        _ => 0,
     }
 }
 
@@ -1241,6 +1496,132 @@ impl StoreCoreData {
             })
             .unwrap_or_default())
     }
+
+    /// One provider's turn at a chat completion. Tries with `response_format`
+    /// first when JSON was asked for, then once without it (some compatible
+    /// servers reject the field), and classifies the failure for the walk.
+    async fn chat_once(
+        &self,
+        provider: &LlmProvider,
+        request: &ChatRequest,
+    ) -> Result<String, ChatFailure> {
+        let modes: Vec<bool> = if request.json {
+            vec![true, false]
+        } else {
+            vec![false]
+        };
+        let last_index = modes.len() - 1;
+        let mut last = ChatFailure::Retry("no attempt was made".to_string());
+        for (index, with_json) in modes.iter().enumerate() {
+            match self.chat_attempt(provider, request, *with_json).await {
+                Ok(content) => return Ok(content),
+                Err(failure) => {
+                    let retry_without_json =
+                        matches!(failure, ChatFailure::Retry(_)) && index < last_index;
+                    last = failure;
+                    if retry_without_json {
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
+        Err(last)
+    }
+
+    async fn chat_attempt(
+        &self,
+        provider: &LlmProvider,
+        request: &ChatRequest,
+        with_json: bool,
+    ) -> Result<String, ChatFailure> {
+        let model = request
+            .model
+            .clone()
+            .filter(|model| !model.trim().is_empty())
+            .unwrap_or_else(|| provider.chat_model.clone());
+        let messages: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|message| {
+                serde_json::json!({ "role": message.role, "content": message.content })
+            })
+            .collect();
+        let mut body = serde_json::json!({ "model": model, "messages": messages });
+        if let Some(temperature) = request.temperature.or(provider.temperature) {
+            body["temperature"] = serde_json::json!(temperature);
+        }
+        if with_json {
+            body["response_format"] = serde_json::json!({ "type": "json_object" });
+        }
+        let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+        let mut builder = self
+            .http
+            .post(&url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+        if !provider.api_key.is_empty() {
+            builder = builder.bearer_auth(&provider.api_key);
+        }
+        let response = builder
+            .send()
+            .await
+            .map_err(|error| ChatFailure::Retry(cause(&error)))?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            let message = http_message(status, &text);
+            return Err(
+                if status == reqwest::StatusCode::BAD_REQUEST
+                    || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                {
+                    ChatFailure::Fatal(message)
+                } else {
+                    ChatFailure::Retry(message)
+                },
+            );
+        }
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|_| ChatFailure::Retry("the endpoint did not answer with JSON".to_string()))?;
+        value
+            .pointer("/choices/0/message/content")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|content| !content.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| ChatFailure::Retry("the response carried no message content".to_string()))
+    }
+}
+
+/// The deepest cause of a request error, not reqwest's wrapper sentence.
+fn cause(error: &reqwest::Error) -> String {
+    let mut cause: &dyn std::error::Error = error;
+    while let Some(source) = cause.source() {
+        cause = source;
+    }
+    cause.to_string()
+}
+
+/// A one-line HTTP failure: the endpoint's own message when it sends JSON.
+fn http_message(status: reqwest::StatusCode, body: &str) -> String {
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/message")
+                .or_else(|| value.pointer("/message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                "no message".to_string()
+            } else {
+                trimmed.chars().take(200).collect()
+            }
+        });
+    format!("HTTP {} — {message}", status.as_u16())
 }
 
 /// A plugin's own tables, prefixed with its id so no two namespaces can
@@ -1810,6 +2191,23 @@ mod file {
                 "remote_id": item.remote_id,
                 "poster_path": item.poster_path,
             });
+            let files: Vec<serde_json::Value> = item
+                .files
+                .iter()
+                .map(|file| {
+                    serde_json::json!({
+                        "source_kind": source_kind,
+                        "connection_id": connection_id,
+                        "library": library,
+                        "item_remote_id": item.remote_id,
+                        "remote_id": file.remote_id,
+                        "path": file.path,
+                        "container": file.container,
+                        "size_bytes": file.size_bytes,
+                        "runtime_seconds": file.runtime_seconds,
+                    })
+                })
+                .collect();
             match catalog
                 .iter_mut()
                 .find(|entry| entry["match_key"].as_str() == Some(key.as_str()))
@@ -1866,6 +2264,20 @@ mod file {
                             entry["sources"] = serde_json::json!([source]);
                         }
                     }
+                    if !files.is_empty() {
+                        if let Some(list) = entry["files"].as_array_mut() {
+                            list.retain(|file| {
+                                !(file["source_kind"].as_str() == Some(source_kind)
+                                    && file["connection_id"].as_i64() == Some(connection_id)
+                                    && file["library"].as_str() == Some(library)
+                                    && file["item_remote_id"].as_str()
+                                        == Some(item.remote_id.as_str()))
+                            });
+                            list.extend(files);
+                        } else {
+                            entry["files"] = serde_json::json!(files);
+                        }
+                    }
                 }
                 None => catalog.push(serde_json::json!({
                     "match_key": key,
@@ -1883,6 +2295,7 @@ mod file {
                     "tags": item.tags,
                     "detail": item.detail,
                     "people": item.people,
+                    "files": files,
                     "sources": [source],
                 })),
             }
@@ -1898,9 +2311,24 @@ mod file {
             if let Some(sources) = entry.get_mut("sources").and_then(serde_json::Value::as_array_mut) {
                 sources.retain(|source| source["connection_id"].as_i64() != Some(connection_id));
             }
+            if let Some(files) = entry.get_mut("files").and_then(serde_json::Value::as_array_mut) {
+                files.retain(|file| file["connection_id"].as_i64() != Some(connection_id));
+            }
         }
         catalog.retain(has_sources);
         write_media_catalog(root, &catalog)
+    }
+
+    pub fn media_files_for(
+        root: &Path,
+        match_key: &str,
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        let catalog = read_media_catalog(root)?;
+        Ok(catalog
+            .iter()
+            .find(|entry| entry["match_key"].as_str() == Some(match_key))
+            .and_then(|entry| entry["files"].as_array().cloned())
+            .unwrap_or_default())
     }
 
     pub fn media_list(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
@@ -2070,6 +2498,24 @@ mod pg {
             )",
             "CREATE INDEX IF NOT EXISTS media_item_people_item_idx \
                 ON media_item_people (item_id, sort_order)",
+            "CREATE TABLE IF NOT EXISTS media_files (
+                item_id BIGINT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+                source_kind TEXT NOT NULL,
+                connection_id BIGINT NOT NULL,
+                library TEXT NOT NULL,
+                remote_id TEXT,
+                path TEXT NOT NULL,
+                container TEXT,
+                size_bytes BIGINT,
+                runtime_seconds BIGINT,
+                streams JSONB,
+                chapters JSONB,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (item_id, source_kind, connection_id, library, path)
+            )",
+            "CREATE INDEX IF NOT EXISTS media_files_item_idx ON media_files (item_id)",
+            "CREATE INDEX IF NOT EXISTS media_files_conn_idx \
+                ON media_files (connection_id, library)",
         ] {
             sqlx::query(statement).execute(pool).await?;
         }
@@ -2477,6 +2923,15 @@ mod pg {
         .bind(library)
         .execute(&mut *tx)
         .await?;
+        sqlx::query(
+            "DELETE FROM media_files \
+             WHERE source_kind = $1 AND connection_id = $2 AND library = $3",
+        )
+        .bind(source_kind)
+        .bind(connection_id)
+        .bind(library)
+        .execute(&mut *tx)
+        .await?;
         for item in items {
             let key = super::match_key(&item.kind, item.match_id.as_deref(), &item.title, item.year);
             let row = sqlx::query(
@@ -2532,6 +2987,37 @@ mod pg {
             .execute(&mut *tx)
             .await?;
 
+            // The playable files this item's source reported.
+            for file in &item.files {
+                let path = file.path.trim();
+                if path.is_empty() {
+                    continue;
+                }
+                sqlx::query(
+                    "INSERT INTO media_files \
+                     (item_id, source_kind, connection_id, library, remote_id, path, container, \
+                      size_bytes, runtime_seconds, streams, chapters, updated_at) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, now()) \
+                     ON CONFLICT (item_id, source_kind, connection_id, library, path) DO UPDATE SET \
+                         remote_id = EXCLUDED.remote_id, container = EXCLUDED.container, \
+                         size_bytes = EXCLUDED.size_bytes, runtime_seconds = EXCLUDED.runtime_seconds, \
+                         streams = EXCLUDED.streams, chapters = EXCLUDED.chapters, updated_at = now()",
+                )
+                .bind(item_id)
+                .bind(source_kind)
+                .bind(connection_id)
+                .bind(library)
+                .bind(&file.remote_id)
+                .bind(path)
+                .bind(&file.container)
+                .bind(file.size_bytes)
+                .bind(file.runtime_seconds)
+                .bind(file.streams.as_ref().map(|value| value.to_string()))
+                .bind(file.chapters.as_ref().map(|value| value.to_string()))
+                .execute(&mut *tx)
+                .await?;
+            }
+
             // Cast and crew: upsert each person by name, then the credit link.
             for credit in &item.people {
                 let name = credit.name.trim();
@@ -2583,6 +3069,10 @@ mod pg {
             .bind(connection_id)
             .execute(pool)
             .await?;
+        sqlx::query("DELETE FROM media_files WHERE connection_id = $1")
+            .bind(connection_id)
+            .execute(pool)
+            .await?;
         sqlx::query(
             "DELETE FROM media_items \
              WHERE NOT EXISTS (SELECT 1 FROM media_item_sources s WHERE s.item_id = media_items.id)",
@@ -2590,6 +3080,30 @@ mod pg {
         .execute(pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn media_files_for(
+        pool: &PgPool,
+        match_key: &str,
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT f.source_kind, f.path, f.runtime_seconds \
+             FROM media_files f JOIN media_items m ON m.id = f.item_id \
+             WHERE m.match_key = $1 ORDER BY f.source_kind, f.path",
+        )
+        .bind(match_key)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                serde_json::json!({
+                    "source_kind": row.try_get::<String, _>("source_kind").unwrap_or_default(),
+                    "path": row.try_get::<String, _>("path").unwrap_or_default(),
+                    "runtime_seconds": row.try_get::<Option<i64>, _>("runtime_seconds").ok().flatten(),
+                })
+            })
+            .collect())
     }
 
     pub async fn media_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
@@ -3045,7 +3559,7 @@ mod tests {
         let store = Store::open(&dir).expect("open file store");
 
         // Nothing configured yet.
-        assert!(store.core_data().llm_provider().await.expect("none").is_none());
+        assert!(store.core_data(reqwest::Client::new()).llm_provider().await.expect("none").is_none());
 
         store
             .plugin_set(
@@ -3070,7 +3584,7 @@ mod tests {
             .expect("set");
 
         let provider = store
-            .core_data()
+            .core_data(reqwest::Client::new())
             .llm_provider()
             .await
             .expect("read")
@@ -3096,7 +3610,7 @@ mod tests {
             .await
             .expect("set 2");
         let provider = store
-            .core_data()
+            .core_data(reqwest::Client::new())
             .llm_provider()
             .await
             .expect("read 2")
@@ -3124,7 +3638,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         let store = Store::open(&dir).expect("open file store");
 
-        assert!(store.core_data().tts_provider().await.expect("none").is_none());
+        assert!(store.core_data(reqwest::Client::new()).tts_provider().await.expect("none").is_none());
 
         // The provider set the AI page holds live: a chat provider first, a
         // dedicated TTS provider second, and a chat provider that also names a
@@ -3149,7 +3663,7 @@ mod tests {
             .expect("set");
 
         let provider = store
-            .core_data()
+            .core_data(reqwest::Client::new())
             .tts_provider()
             .await
             .expect("read")
@@ -3180,7 +3694,7 @@ mod tests {
             .await
             .expect("set 2");
         let provider = store
-            .core_data()
+            .core_data(reqwest::Client::new())
             .tts_provider()
             .await
             .expect("read 2")
@@ -3365,6 +3879,215 @@ mod tests {
             .plugin_delete("com.channelflow.ai", "providers")
             .await
             .expect("delete");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A fresh temp directory per test.
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("channelflow-{tag}-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("dir");
+        dir
+    }
+
+    /// A media source's reported files land in the core catalog, `file_for`
+    /// resolves them from there, and a filter narrows the pool.
+    #[tokio::test]
+    async fn catalog_carries_reported_files_and_filters_the_pool() {
+        use channelflow_plugin_api::media::CatalogFile;
+
+        let dir = scratch("catalog");
+        let store = Store::open(&dir).expect("open file store");
+        let items = vec![
+            CatalogItem::new("movie", "r1", "The Quiet Film")
+                .year(Some(1999))
+                .runtime_seconds(Some(5400))
+                .genres(vec!["Drama".to_string()])
+                .official_rating(Some("PG-13".to_string()))
+                .files(vec![
+                    CatalogFile::new("/media/quiet.mkv").runtime_seconds(Some(5400))
+                ]),
+            CatalogItem::new("movie", "r2", "Loud Action")
+                .year(Some(2020))
+                .official_rating(Some("R".to_string()))
+                .files(vec![CatalogFile::new("/media/loud.mkv")]),
+        ];
+        store
+            .media_replace_library(1, "local", &items)
+            .await
+            .expect("report");
+
+        let core = store.core_data(reqwest::Client::new());
+        let all = core
+            .catalog(CatalogFilter::default())
+            .await
+            .expect("catalog");
+        assert_eq!(all.len(), 2);
+
+        // A rating ceiling drops the R-rated film.
+        let capped = core
+            .catalog(CatalogFilter {
+                kind: Some("movie".to_string()),
+                rating_max: Some("PG-13".to_string()),
+                ..Default::default()
+            })
+            .await
+            .expect("catalog");
+        assert_eq!(capped.len(), 1);
+        assert_eq!(capped[0].title, "The Quiet Film");
+        assert_eq!(capped[0].runtime_ms, Some(5_400_000));
+
+        // A limit caps the pool.
+        let limited = core
+            .catalog(CatalogFilter {
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .expect("catalog");
+        assert_eq!(limited.len(), 1);
+
+        // The reported file resolves through the core, not the plugin.
+        let key = capped[0].match_key.clone();
+        let picked = core
+            .catalog(CatalogFilter {
+                match_keys: vec![key.clone()],
+                ..Default::default()
+            })
+            .await
+            .expect("catalog");
+        assert_eq!(picked.len(), 1);
+        let file = core.file_for(&key).await.expect("file").expect("a file");
+        assert_eq!(file.path, "/media/quiet.mkv");
+        // The source kind comes from the connection; this test reports without
+        // one, so it is the generic fallback.
+        assert_eq!(file.source_kind, "source");
+        assert_eq!(file.runtime_ms, Some(5_400_000));
+
+        // Clearing the connection drops its files with it.
+        store.media_clear_connection(1).await.expect("clear");
+        assert!(core.file_for(&key).await.expect("file").is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `lineup` hands a channel's saved roster back as JSON.
+    #[tokio::test]
+    async fn lineup_reads_the_saved_roster() {
+        let dir = scratch("lineup");
+        let store = Store::open(&dir).expect("open file store");
+        let id = Uuid::new_v4();
+        store
+            .lineup_set(id, &json!({ "slots": [], "overrides": [] }))
+            .await
+            .expect("set");
+        let core = store.core_data(reqwest::Client::new());
+        let value = core
+            .lineup(&id.to_string())
+            .await
+            .expect("lineup")
+            .expect("a lineup");
+        assert_eq!(value["slots"], json!([]));
+        assert!(core
+            .lineup("not-a-uuid")
+            .await
+            .expect("none")
+            .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stub OpenAI-compatible endpoint that always answers the same way.
+    async fn stub_chat(status: u16, body: serde_json::Value) -> String {
+        use axum::routing::post;
+        use axum::Router;
+        let code = reqwest::StatusCode::from_u16(status).expect("status");
+        let app = Router::new().route(
+            "/chat/completions",
+            post(move || {
+                let body = body.clone();
+                async move { (code, axum::Json(body)) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    /// `chat` walks the providers in order, reports the one it used, and stops
+    /// the walk on a request the provider rejected outright.
+    #[tokio::test]
+    async fn chat_walks_the_providers_and_stops_on_a_bad_request() {
+        let dir = scratch("chat");
+        let store = Store::open(&dir).expect("open file store");
+        let ok_url = stub_chat(
+            200,
+            json!({ "choices": [ { "message": { "content": "  {\"blocks\":[]}  " } } ] }),
+        )
+        .await;
+        let down_url = stub_chat(500, json!({ "error": { "message": "boom" } })).await;
+        let bad_url = stub_chat(400, json!({ "error": { "message": "bad shape" } })).await;
+
+        let request = channelflow_plugin_api::core::ChatRequest {
+            messages: vec![channelflow_plugin_api::core::ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            temperature: Some(0.2),
+            json: true,
+            model: None,
+        };
+        let core = store.core_data(reqwest::Client::new());
+
+        // A 5xx is retryable: the walk moves on and the second provider answers.
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    { "id": "down", "name": "Down", "priority": 1, "enabled": true,
+                      "tts_only": false, "base_url": down_url, "chat_model": "m" },
+                    { "id": "good", "name": "Good", "priority": 2, "enabled": true,
+                      "tts_only": false, "base_url": ok_url, "chat_model": "m" }
+                ] }),
+            )
+            .await
+            .expect("set");
+        let response = core.chat(request.clone()).await.expect("chat");
+        assert_eq!(response.content.trim(), "{\"blocks\":[]}");
+        assert_eq!(response.provider_id, "good");
+        assert!(
+            response.attempts.iter().any(|line| line.starts_with("Down:")),
+            "the failed provider is reported: {:?}",
+            response.attempts
+        );
+
+        // A 400 is fatal: the walk stops instead of trying the good provider.
+        store
+            .plugin_set(
+                "com.channelflow.ai",
+                "providers",
+                &json!({ "providers": [
+                    { "id": "bad", "name": "Bad", "priority": 1, "enabled": true,
+                      "tts_only": false, "base_url": bad_url, "chat_model": "m" },
+                    { "id": "good", "name": "Good", "priority": 2, "enabled": true,
+                      "tts_only": false, "base_url": ok_url, "chat_model": "m" }
+                ] }),
+            )
+            .await
+            .expect("set 2");
+        assert!(
+            core.chat(request).await.is_err(),
+            "a rejected request stops the walk"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

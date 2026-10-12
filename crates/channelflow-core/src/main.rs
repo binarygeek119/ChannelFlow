@@ -160,7 +160,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&ai_manifest.id),
         logger: PluginLogger::new(&ai_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&ai_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -180,7 +180,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&ersatztv_manifest.id),
         logger: PluginLogger::new(&ersatztv_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&ersatztv_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -200,7 +200,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&jellyfin_manifest.id),
         logger: PluginLogger::new(&jellyfin_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&jellyfin_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -220,7 +220,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&offair_manifest.id),
         logger: PluginLogger::new(&offair_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&offair_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&commercialbrainz_manifest.id),
         logger: PluginLogger::new(&commercialbrainz_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&commercialbrainz_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -260,7 +260,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&emergency_manifest.id),
         logger: PluginLogger::new(&emergency_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&emergency_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -280,7 +280,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&weather_manifest.id),
         logger: PluginLogger::new(&weather_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&weather_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -300,7 +300,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&news_manifest.id),
         logger: PluginLogger::new(&news_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&news_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -320,7 +320,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&presets_manifest.id),
         logger: PluginLogger::new(&presets_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&presets_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -340,7 +340,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&lists_manifest.id),
         logger: PluginLogger::new(&lists_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&lists_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -360,7 +360,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&holiday_manifest.id),
         logger: PluginLogger::new(&holiday_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&holiday_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&local_manifest.id),
         logger: PluginLogger::new(&local_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&local_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };
@@ -401,7 +401,7 @@ async fn main() -> Result<()> {
         base_version: env!("CARGO_PKG_VERSION").to_string(),
         dir: store.plugin_dir(&pasttense_manifest.id),
         logger: PluginLogger::new(&pasttense_manifest.id),
-        core: Arc::new(store.core_data()),
+        core: Arc::new(store.core_data(http.clone())),
         database: store.plugin_database(&pasttense_manifest.id).await,
         web: channelflow_plugin_api::PluginWeb::new(),
     };

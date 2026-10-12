@@ -1,10 +1,12 @@
 mod api;
 mod auth;
 mod client_logs;
+mod encoder;
 mod lineup;
 mod media;
 mod model;
 mod plugin;
+mod playout;
 mod quickpin;
 mod settings;
 mod store;
@@ -566,9 +568,15 @@ async fn main() -> Result<()> {
         });
     }
 
+    // The encoder supervisor: next runs beside ChannelFlow and its HLS is
+    // proxied through our own origin. When the binary is absent the live paths
+    // keep answering "not encoding yet".
+    let lineup_path = store.config_dir().join("next").join("lineup.json");
+    let encoder = Arc::new(encoder::Encoder::new(lineup_path, 8409));
+
     axum::serve(
         listener,
-        api::router(store, about, plugins, media_sources, http, plugin_routers),
+        api::router(store, about, plugins, media_sources, http, encoder, plugin_routers),
     )
     .await?;
     Ok(())

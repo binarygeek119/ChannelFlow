@@ -46,6 +46,7 @@ pub struct AppState {
     pub plugins: Arc<Mutex<PluginManager>>,
     pub media: Arc<MediaSources>,
     pub http: reqwest::Client,
+    pub encoder: Arc<crate::encoder::Encoder>,
 }
 
 pub fn router(
@@ -54,6 +55,7 @@ pub fn router(
     plugins: Arc<Mutex<PluginManager>>,
     media: Arc<MediaSources>,
     http: reqwest::Client,
+    encoder: Arc<crate::encoder::Encoder>,
     plugin_routers: Vec<(String, Router)>,
 ) -> Router {
     let state = AppState {
@@ -62,6 +64,7 @@ pub fn router(
         plugins,
         media,
         http,
+        encoder,
     };
 
     let mut app = Router::new()
@@ -144,6 +147,7 @@ pub fn router(
         )
         .route("/api/tasks/local-scan/run", post(local_scan_run))
         .route("/api/tasks/running", get(tasks_running))
+        .route("/api/playout/regenerate", post(regenerate_playout))
         .route("/api/media", get(media_catalog_list))
         .route("/api/media/source-index", get(media_source_index))
         .route("/api/media/tv/seasons", get(tv_seasons))
@@ -166,7 +170,8 @@ pub fn router(
             put(update_lineup_override).delete(delete_lineup_override),
         )
         .route("/api/lineups/{id}/preview", post(preview_lineup))
-        .route("/live/{asset}", get(live_pending))
+        .route("/live/session/{channel}/{file}", get(live_segment))
+        .route("/live/{asset}", get(live_asset))
         .fallback(spa_fallback)
         .with_state(state.clone());
     for (id, plugin_router) in plugin_routers {
@@ -2951,28 +2956,128 @@ async fn media_catalog_image(
     ([(header::CONTENT_TYPE, content_type)], bytes).into_response()
 }
 
+/// Write next's `lineup.json` and every enabled channel's config, pointing at
+/// the scheduler's playout output.
+async fn regenerate_playout(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_root = state.store.config_dir();
+    let channels = state.store.list().await?;
+    let playout_base = scheduler_playout_base(&state, &config_root).await;
+    match crate::playout::write(&config_root, &channels, &playout_base) {
+        Ok(paths) => Ok(Json(
+            json!({ "lineup": paths.lineup, "channels": paths.channels }),
+        )),
+        Err(error) => Err(StoreError::Plugin(error).into()),
+    }
+}
+
+/// The folder the scheduler writes playout JSON under: its `playout_dir`
+/// setting, else `<config>/playout`.
+async fn scheduler_playout_base(
+    state: &AppState,
+    config_root: &std::path::Path,
+) -> std::path::PathBuf {
+    let configured = state
+        .store
+        .plugin_get("com.channelflow.scheduler", "settings")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|value| {
+            value
+                .get("playout_dir")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    if configured.trim().is_empty() {
+        config_root.join("playout")
+    } else {
+        std::path::PathBuf::from(configured.trim())
+    }
+}
+
 /// The streaming paths the Live TV page advertises.
 ///
 /// Only port `8097` is published and the encoder listens inside the container
 /// on another port, so every URL the page shows is written against ChannelFlow's
 /// own origin. These paths require an API key (the server key or a paired
-/// client's), presented as `?apiKey=` or `X-Api-Key`. Until the playout
-/// milestone produces the streams they answer `503` with a sentence rather than
-/// `404`: a player pointed at one gets an honest "not yet" instead of "no such
-/// thing".
-async fn live_pending(
+/// client's), presented as `?apiKey=` or `X-Api-Key`. With the encoder running
+/// they proxy next's HLS through this origin (the playlist's segment URLs are
+/// rewritten); without it they answer `503` with a sentence rather than `404`,
+/// so a player gets an honest "not yet" instead of "no such thing".
+async fn live_asset(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<ApiKeyQuery>,
+    Path(asset): Path<String>,
 ) -> Response {
+    if let Err(response) = live_guard(&state, &headers, &query).await {
+        return response;
+    }
+    if !state.encoder.running() {
+        return live_pending_message();
+    }
+    let client = state.encoder.client();
+    let base = format!("http://127.0.0.1:{}", state.encoder.port());
+    if asset == "channels.m3u" {
+        return proxy_bytes(client, &format!("{base}/channels.m3u"), false).await;
+    }
+    if asset == "xmltv.xml" {
+        return proxy_bytes(client, &format!("{base}/xmltv.xml"), false).await;
+    }
+    if let Some(number) = asset.strip_suffix(".m3u8") {
+        return proxy_bytes(client, &format!("{base}/channel/{number}.m3u8"), true).await;
+    }
+    (
+        StatusCode::NOT_FOUND,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; charset=utf-8",
+        )],
+        "no such live path\n",
+    )
+        .into_response()
+}
+
+/// One HLS segment, streamed through from the encoder.
+async fn live_segment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ApiKeyQuery>,
+    Path((channel, file)): Path<(String, String)>,
+) -> Response {
+    if let Err(response) = live_guard(&state, &headers, &query).await {
+        return response;
+    }
+    if !state.encoder.running() {
+        return live_pending_message();
+    }
+    let client = state.encoder.client();
+    let url = format!(
+        "http://127.0.0.1:{}/session/{channel}/{file}",
+        state.encoder.port()
+    );
+    proxy_bytes(client, &url, false).await
+}
+
+/// Check the API key, returning the `401` response to send when it fails.
+async fn live_guard(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: &ApiKeyQuery,
+) -> Result<(), Response> {
     let provided = headers
         .get("x-api-key")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string)
         .or(query.apikey.clone())
         .unwrap_or_default();
-    if !state.store.api_key_valid(&provided).await.unwrap_or(false) {
-        return (
+    if state.store.api_key_valid(&provided).await.unwrap_or(false) {
+        Ok(())
+    } else {
+        Err((
             StatusCode::UNAUTHORIZED,
             [(
                 axum::http::header::CONTENT_TYPE,
@@ -2980,8 +3085,12 @@ async fn live_pending(
             )],
             "A valid API key is required (add ?apiKey=… to the URL).\n",
         )
-            .into_response();
+            .into_response())
     }
+}
+
+/// The `503` a live path answers while nothing is encoding.
+fn live_pending_message() -> Response {
     (
         StatusCode::SERVICE_UNAVAILABLE,
         [(
@@ -2991,6 +3100,51 @@ async fn live_pending(
         "Live video arrives with the playout milestone — ChannelFlow is not encoding yet.\n",
     )
         .into_response()
+}
+
+/// Fetch `url` from the encoder and return it; `rewrite` fixes an HLS
+/// playlist's segment URLs to ChannelFlow's own origin.
+async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite: bool) -> Response {
+    match client.get(url).send().await {
+        Ok(upstream) if upstream.status().is_success() => {
+            let content_type = upstream
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .cloned();
+            let bytes = match upstream.bytes().await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        format!("encoder read failed: {error}\n"),
+                    )
+                        .into_response()
+                }
+            };
+            let body = if rewrite {
+                crate::encoder::rewrite_playlist(&String::from_utf8_lossy(&bytes)).into_bytes()
+            } else {
+                bytes.to_vec()
+            };
+            let mut response = Response::builder().status(StatusCode::OK);
+            if let Some(content_type) = content_type {
+                response = response.header(axum::http::header::CONTENT_TYPE, content_type);
+            }
+            response
+                .body(axum::body::Body::from(body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Ok(upstream) => (
+            StatusCode::BAD_GATEWAY,
+            format!("encoder answered {}\n", upstream.status()),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            format!("encoder unreachable: {error}\n"),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Deserialize)]
@@ -3233,7 +3387,7 @@ mod tests {
             listen_port: 0,
             started: std::time::Instant::now(),
         };
-        let _ = router(store, about, plugins, Arc::new(crate::media::MediaSources::new()), http, routers);
+        let _ = router(store, about, plugins, Arc::new(crate::media::MediaSources::new()), http, Arc::new(crate::encoder::Encoder::new(std::path::PathBuf::from("/nonexistent/lineup.json"), 8409)), routers);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

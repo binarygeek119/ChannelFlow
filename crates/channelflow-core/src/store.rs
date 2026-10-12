@@ -1559,6 +1559,9 @@ impl StoreCoreData {
             .http
             .post(&url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
+            // A local model can take a while to load on the first call; give a
+            // real completion far longer than the shared client's 30s.
+            .timeout(std::time::Duration::from_secs(180))
             .body(body.to_string());
         if !provider.api_key.is_empty() {
             builder = builder.bearer_auth(&provider.api_key);

@@ -3021,14 +3021,15 @@ async fn live_asset(
     }
     let client = state.encoder.client();
     let base = format!("http://127.0.0.1:{}", state.encoder.port());
+    let api_key = query.apikey.clone().unwrap_or_default();
     if asset == "channels.m3u" {
-        return proxy_bytes(client, &format!("{base}/channels.m3u"), false).await;
+        return proxy_m3u(&state, &headers, &api_key).await;
     }
     if asset == "xmltv.xml" {
-        return proxy_bytes(client, &format!("{base}/xmltv.xml"), false).await;
+        return proxy_bytes(client, &format!("{base}/xmltv.xml"), None).await;
     }
     if let Some(number) = asset.strip_suffix(".m3u8") {
-        return proxy_bytes(client, &format!("{base}/channel/{number}.m3u8"), true).await;
+        return proxy_bytes(client, &format!("{base}/channel/{number}.m3u8"), Some(&api_key)).await;
     }
     (
         StatusCode::NOT_FOUND,
@@ -3059,7 +3060,7 @@ async fn live_segment(
         "http://127.0.0.1:{}/session/{channel}/{file}",
         state.encoder.port()
     );
-    proxy_bytes(client, &url, false).await
+    proxy_bytes(client, &url, None).await
 }
 
 /// Check the API key, returning the `401` response to send when it fails.
@@ -3102,9 +3103,64 @@ fn live_pending_message() -> Response {
         .into_response()
 }
 
-/// Fetch `url` from the encoder and return it; `rewrite` fixes an HLS
-/// playlist's segment URLs to ChannelFlow's own origin.
-async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite: bool) -> Response {
+/// Fetch the encoder's channel list and rewrite it so its stream URLs point at
+/// ChannelFlow's own origin (the client reached us on `Host`), with the key.
+async fn proxy_m3u(state: &AppState, headers: &HeaderMap, api_key: &str) -> Response {
+    let client = state.encoder.client();
+    let url = format!("http://127.0.0.1:{}/channels.m3u", state.encoder.port());
+    match client.get(&url).send().await {
+        Ok(upstream) if upstream.status().is_success() => {
+            let bytes = match upstream.bytes().await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        format!("encoder read failed: {error}\n"),
+                    )
+                        .into_response()
+                }
+            };
+            let origin = request_origin(headers);
+            let body = crate::encoder::rewrite_m3u(&String::from_utf8_lossy(&bytes), &origin, api_key);
+            (
+                StatusCode::OK,
+                [(
+                    axum::http::header::CONTENT_TYPE,
+                    "audio/x-mpegurl; charset=utf-8",
+                )],
+                body,
+            )
+                .into_response()
+        }
+        Ok(upstream) => (
+            StatusCode::BAD_GATEWAY,
+            format!("encoder answered {}\n", upstream.status()),
+        )
+            .into_response(),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            format!("encoder unreachable: {error}\n"),
+        )
+            .into_response(),
+    }
+}
+
+/// The origin the client reached us on, so rewritten URLs are reachable.
+fn request_origin(headers: &HeaderMap) -> String {
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("127.0.0.1:8097");
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("http");
+    format!("{scheme}://{host}")
+}
+
+/// Fetch `url` from the encoder and return it; `rewrite_key` rewrites an HLS
+/// playlist's segment URLs to ChannelFlow's own origin with that API key.
+async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite_key: Option<&str>) -> Response {
     match client.get(url).send().await {
         Ok(upstream) if upstream.status().is_success() => {
             let content_type = upstream
@@ -3121,10 +3177,13 @@ async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite: bool) -> Resp
                         .into_response()
                 }
             };
-            let body = if rewrite {
-                crate::encoder::rewrite_playlist(&String::from_utf8_lossy(&bytes)).into_bytes()
-            } else {
-                bytes.to_vec()
+            let body = match rewrite_key {
+                Some(key) => crate::encoder::rewrite_playlist(
+                    &String::from_utf8_lossy(&bytes),
+                    key,
+                )
+                .into_bytes(),
+                None => bytes.to_vec(),
             };
             let mut response = Response::builder().status(StatusCode::OK);
             if let Some(content_type) = content_type {

@@ -107,17 +107,23 @@ fn on_path(name: &str) -> Option<PathBuf> {
 }
 
 /// Rewrite an HLS playlist so its `/session/…` segment URLs go through
-/// ChannelFlow's own origin. Lines that are not segment URIs are left alone.
-pub fn rewrite_playlist(body: &str) -> String {
+/// ChannelFlow's own origin, carrying the caller's API key (the player does not
+/// propagate the playlist's query string to segments). Lines that are not
+/// segment URIs are left alone.
+pub fn rewrite_playlist(body: &str, api_key: &str) -> String {
+    let suffix = if api_key.is_empty() {
+        String::new()
+    } else {
+        format!("?apiKey={api_key}")
+    };
     let mut out = String::with_capacity(body.len() + 64);
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("/session/") {
-            out.push_str("/live");
-            out.push_str(trimmed);
-        } else if trimmed.starts_with("session/") {
-            out.push_str("/live/");
-            out.push_str(trimmed);
+        if let Some(rest) = trimmed
+            .strip_prefix("/session/")
+            .or_else(|| trimmed.strip_prefix("session/"))
+        {
+            out.push_str(&format!("/live/session/{rest}{suffix}"));
         } else {
             out.push_str(line);
         }
@@ -126,16 +132,44 @@ pub fn rewrite_playlist(body: &str) -> String {
     out
 }
 
+/// Rewrite an M3U so its stream URLs point at ChannelFlow's own origin with the
+/// caller's API key, rather than the encoder's internal address.
+pub fn rewrite_m3u(body: &str, origin: &str, api_key: &str) -> String {
+    let mut out = String::with_capacity(body.len() + 256);
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            out.push_str(line);
+        } else if let Some(number) = channel_number_from_url(trimmed) {
+            out.push_str(&format!("{origin}/live/{number}.m3u8?apiKey={api_key}"));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// The channel number in an encoder stream URL (`…/channel/119.1.m3u8`).
+fn channel_number_from_url(url: &str) -> Option<String> {
+    let marker = "/channel/";
+    let start = url.find(marker)? + marker.len();
+    let rest = &url[start..];
+    let end = rest.find(".m3u8")?;
+    let number = &rest[..end];
+    (!number.is_empty()).then(|| number.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn segment_urls_are_rewritten_to_channelflows_origin() {
+    fn segment_urls_are_rewritten_to_channelflows_origin_with_the_key() {
         let playlist = "#EXTM3U\n#EXTINF:4.0,\n/session/1/seg0.ts\n/session/1/seg1.ts\n";
-        let rewritten = rewrite_playlist(playlist);
-        assert!(rewritten.contains("/live/session/1/seg0.ts"));
-        assert!(rewritten.contains("/live/session/1/seg1.ts"));
+        let rewritten = rewrite_playlist(playlist, "KEY");
+        assert!(rewritten.contains("/live/session/1/seg0.ts?apiKey=KEY"));
+        assert!(rewritten.contains("/live/session/1/seg1.ts?apiKey=KEY"));
         assert!(rewritten.contains("#EXTM3U"));
         assert!(!rewritten.contains("\n/session/"));
     }
@@ -143,7 +177,22 @@ mod tests {
     #[test]
     fn non_segment_lines_are_left_alone() {
         let playlist = "#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts\n";
-        assert_eq!(rewrite_playlist(playlist), "#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts\n");
+        assert_eq!(
+            rewrite_playlist(playlist, ""),
+            "#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts\n"
+        );
+    }
+
+    #[test]
+    fn an_m3u_is_rewritten_to_channelflows_origin_with_the_key() {
+        let body = "#EXTM3U\n#EXTINF:-1 tvg-id=\"channelflow.119.1\",FlashBack TV\nhttp://0.0.0.0:8409/channel/119.1.m3u8\n";
+        let out = rewrite_m3u(body, "http://192.168.1.7:8097", "KEY");
+        assert!(
+            out.contains("http://192.168.1.7:8097/live/119.1.m3u8?apiKey=KEY"),
+            "{out}"
+        );
+        assert!(!out.contains("8409"), "the encoder address is gone: {out}");
+        assert!(out.contains("#EXTINF"), "the entry line is kept: {out}");
     }
 
     #[test]

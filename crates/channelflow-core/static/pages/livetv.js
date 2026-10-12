@@ -4,12 +4,33 @@
 // against ChannelFlow's own origin and served — until playout lands — by the
 // /live/* routes, which answer 503 with a sentence rather than 404.
 
-function livePlaylistUrl(path) {
-  return `${location.origin}${path}`;
+// The /live/* routes require an API key, so the page mints one — a revocable
+// "Playlist URL" client — the first time it is shown and puts it in every URL
+// it displays and copies. The URL you see is the URL that works.
+let liveKey = "";
+let liveKeyRequest = null;
+
+function ensureLiveKey() {
+  if (!liveKeyRequest) {
+    liveKeyRequest = request("/api/iptv/urls")
+      .then((data) => {
+        liveKey = data.api_key || "";
+      })
+      .catch(() => {
+        liveKey = "";
+      });
+  }
+  return liveKeyRequest;
+}
+
+function liveUrl(path) {
+  const base = `${location.origin}${path}`;
+  return liveKey ? `${base}?apiKey=${encodeURIComponent(liveKey)}` : base;
 }
 
 async function loadLiveTv() {
   try {
+    await ensureLiveKey();
     renderLive(await request("/api/channels"));
   } catch (error) {
     els.liveGrid.innerHTML = "";
@@ -33,7 +54,7 @@ function renderLive(list) {
       const state = channel.enabled
         ? '<span class="pill on">ON AIR</span>'
         : '<span class="pill off">OFF</span>';
-      const url = `${location.origin}/live/${channel.number}.m3u8`;
+      const url = liveUrl(`/live/${channel.number}.m3u8`);
       return `
         <article class="live-card">
           <div class="live-card-head">
@@ -56,10 +77,10 @@ function renderLiveLinks() {
   const links = [
     [
       "M3U playlist",
-      livePlaylistUrl("/live/channels.m3u"),
-      "Every channel, for VLC, TiviMate, Jellyfin and the like.",
+      liveUrl("/live/channels.m3u"),
+      "Every channel, for VLC, TiviMate, Jellyfin and the like. Carries a fresh API key.",
     ],
-    ["XMLTV guide", livePlaylistUrl("/live/xmltv.xml"), "Programme data for the playlist above."],
+    ["XMLTV guide", liveUrl("/live/xmltv.xml"), "Programme data for the playlist above."],
   ];
   els.liveLinks.innerHTML = links
     .map(

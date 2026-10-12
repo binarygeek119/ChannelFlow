@@ -133,12 +133,19 @@ pub fn rewrite_playlist(body: &str, api_key: &str) -> String {
 }
 
 /// Rewrite an M3U so its stream URLs point at ChannelFlow's own origin with the
-/// caller's API key, rather than the encoder's internal address.
+/// caller's API key, rather than the encoder's internal address. The header's
+/// guide URL (`url-tvg`/`x-tvg-url`) is aimed at us as well.
 pub fn rewrite_m3u(body: &str, origin: &str, api_key: &str) -> String {
+    let xmltv = format!("{origin}/live/xmltv.xml?apiKey={api_key}");
     let mut out = String::with_capacity(body.len() + 256);
     for line in body.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        if trimmed.is_empty() {
+            out.push_str(line);
+        } else if trimmed.starts_with("#EXTM3U") {
+            let line = replace_attr(line, "url-tvg", &xmltv);
+            out.push_str(&replace_attr(&line, "x-tvg-url", &xmltv));
+        } else if trimmed.starts_with('#') {
             out.push_str(line);
         } else if let Some(number) = channel_number_from_url(trimmed) {
             out.push_str(&format!("{origin}/live/{number}.m3u8?apiKey={api_key}"));
@@ -147,6 +154,24 @@ pub fn rewrite_m3u(body: &str, origin: &str, api_key: &str) -> String {
         }
         out.push('\n');
     }
+    out
+}
+
+/// Replace every `attr="…"` value on `line` with `value`.
+fn replace_attr(line: &str, attr: &str, value: &str) -> String {
+    let needle = format!("{attr}=\"");
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find(&needle) {
+        let after = &rest[start + needle.len()..];
+        let Some(end) = after.find('"') else { break };
+        out.push_str(&rest[..start]);
+        out.push_str(&needle);
+        out.push_str(value);
+        out.push('"');
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
     out
 }
 
@@ -185,11 +210,19 @@ mod tests {
 
     #[test]
     fn an_m3u_is_rewritten_to_channelflows_origin_with_the_key() {
-        let body = "#EXTM3U\n#EXTINF:-1 tvg-id=\"channelflow.119.1\",FlashBack TV\nhttp://0.0.0.0:8409/channel/119.1.m3u8\n";
+        let body = "#EXTM3U url-tvg=\"http://0.0.0.0:8409/xmltv.xml\" x-tvg-url=\"http://0.0.0.0:8409/xmltv.xml\"\n#EXTINF:-1 tvg-id=\"channelflow.119.1\",FlashBack TV\nhttp://0.0.0.0:8409/channel/119.1.m3u8\n";
         let out = rewrite_m3u(body, "http://192.168.1.7:8097", "KEY");
         assert!(
             out.contains("http://192.168.1.7:8097/live/119.1.m3u8?apiKey=KEY"),
             "{out}"
+        );
+        assert!(
+            out.contains("url-tvg=\"http://192.168.1.7:8097/live/xmltv.xml?apiKey=KEY\""),
+            "the guide URL is aimed at us: {out}"
+        );
+        assert!(
+            out.contains("x-tvg-url=\"http://192.168.1.7:8097/live/xmltv.xml?apiKey=KEY\""),
+            "the second guide URL too: {out}"
         );
         assert!(!out.contains("8409"), "the encoder address is gone: {out}");
         assert!(out.contains("#EXTINF"), "the entry line is kept: {out}");

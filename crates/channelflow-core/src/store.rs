@@ -2432,7 +2432,28 @@ mod file {
 mod pg {
     use super::*;
 
+    /// Serialise schema creation across processes. `CREATE TABLE IF NOT EXISTS`
+    /// is not atomic against a concurrent create: two servers (or two tests)
+    /// opening a fresh database at once can both pass the existence check, and
+    /// one then loses on the table's implicit composite type. An advisory lock
+    /// makes the whole step single-file. The key is arbitrary but fixed.
+    const SCHEMA_LOCK_KEY: i64 = 0x6368_616e_6e65_6c66;
+
     pub async fn ensure_schema(pool: &PgPool) -> Result<(), StoreError> {
+        let mut lock = pool.acquire().await?;
+        sqlx::query("SELECT pg_advisory_lock($1)")
+            .bind(SCHEMA_LOCK_KEY)
+            .execute(&mut *lock)
+            .await?;
+        let result = ensure_schema_statements(pool).await;
+        let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(SCHEMA_LOCK_KEY)
+            .execute(&mut *lock)
+            .await;
+        result
+    }
+
+    async fn ensure_schema_statements(pool: &PgPool) -> Result<(), StoreError> {
         for statement in [
             "CREATE TABLE IF NOT EXISTS channels (
                 id UUID PRIMARY KEY,
@@ -2974,12 +2995,12 @@ mod pg {
             .bind(&item.overview)
             .bind(&item.poster_path)
             .bind(item.runtime_seconds)
-            .bind(serde_json::to_string(&item.genres).unwrap_or_else(|_| "[]".to_string()))
+            .bind(Json(&item.genres))
             .bind(&item.official_rating)
             .bind(&item.premiere_date)
             .bind(item.first_episode_year)
-            .bind(serde_json::to_string(&item.studios).unwrap_or_else(|_| "[]".to_string()))
-            .bind(serde_json::to_string(&item.tags).unwrap_or_else(|_| "[]".to_string()))
+            .bind(Json(&item.studios))
+            .bind(Json(&item.tags))
             .bind(&item.detail)
             .fetch_one(&mut *tx)
             .await?;
@@ -3893,6 +3914,53 @@ mod tests {
             .await
             .expect("delete");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A catalog report writes its JSONB columns (genres/studios/tags) as jsonb.
+    /// Binding them as text fails outright — "column \"genres\" is of type jsonb
+    /// but expression is of type text" — which is how this was caught in the
+    /// field: a Jellyfin sync reported a library and the whole report was lost.
+    #[tokio::test]
+    async fn postgres_catalog_report_stores_jsonb_columns() {
+        let url = match std::env::var("TEST_DATABASE_URL") {
+            Ok(url) if !url.trim().is_empty() => url,
+            _ => {
+                eprintln!("skipped: TEST_DATABASE_URL is not set");
+                return;
+            }
+        };
+        let dir = scratch("catalog-pg");
+        let store = Store::open_postgres(&url, &dir)
+            .await
+            .expect("open postgres store");
+
+        let items = vec![
+            CatalogItem::new("movie", "jsonb-1", "Jsonb Round Trip")
+                .genres(vec!["Reality-TV".to_string(), "Drama".to_string()])
+                .studios(vec!["Studio".to_string()])
+                .tags(vec!["tag".to_string()]),
+        ];
+        // A connection id no real sync uses, so the test can clean up after it.
+        let connection_id = 9_000_001;
+        store
+            .media_replace_library(connection_id, "test", &items)
+            .await
+            .expect("report the library");
+
+        let listed = store.media_list().await.expect("list");
+        let stored = listed
+            .iter()
+            .find(|row| row["title"] == "Jsonb Round Trip")
+            .expect("the reported item is in the catalog");
+        assert_eq!(stored["genres"], json!(["Reality-TV", "Drama"]));
+        assert_eq!(stored["studios"], json!(["Studio"]));
+        assert_eq!(stored["tags"], json!(["tag"]));
+
+        store
+            .media_clear_connection(connection_id)
+            .await
+            .expect("clean up");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

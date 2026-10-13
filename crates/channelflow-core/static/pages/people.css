@@ -1,0 +1,153 @@
+/* People page: a grid of synced cast members, alphabetical by name. */
+.people-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 0 1.1rem;
+}
+.people-toolbar input {
+    flex: 1 1 18rem;
+    min-width: 0;
+}
+.people-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: 1rem 0.8rem;
+}
+.people-card {
+    text-align: center;
+    min-width: 0;
+}
+.people-avatar {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    border-radius: 0.35rem;
+    background: #242424;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+.people-avatar img.people-photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #242424;
+    border-radius: 0.35rem;
+}
+.people-initial {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #4a4a4a;
+}
+.people-card.no-photo .people-initial {
+    display: flex;
+}
+.people-name {
+    margin-top: 0.4rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Clickable people in the list. */
+.people-card { cursor: pointer; }
+.people-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 0.35rem; }
+
+/* One person: a page like a media item's. */
+.people-person .media-back {
+    background: none;
+    border: 0;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0 0 1rem;
+    cursor: pointer;
+}
+.people-person-head {
+    display: flex;
+    gap: 1.1rem;
+    align-items: flex-start;
+    margin-bottom: 1.3rem;
+}
+.people-person-photo-frame {
+    position: relative;
+    width: 9rem;
+    flex: 0 0 auto;
+    aspect-ratio: 3 / 4;
+    border-radius: 0.35rem;
+    background: #242424;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0.2em 0.8em rgba(0, 0, 0, 0.4);
+}
+.people-person-photo-frame img.people-person-photo {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #242424;
+}
+.people-person-meta h1 {
+    margin: 0.1rem 0 0.3rem;
+    font-size: 1.6rem;
+    line-height: 1.15;
+}
+.people-person-sub { color: var(--muted); font-size: 0.85rem; }
+
+/* The person's titles. */
+.people-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1.1rem 0.7rem;
+}
+.people-item { min-width: 0; cursor: pointer; }
+.people-item.unlinked { cursor: default; opacity: 0.85; }
+.people-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.people-item-poster {
+    aspect-ratio: 2 / 3;
+    border-radius: 0.2em;
+    background-color: #242424;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center;
+    box-shadow: 0 0.0725em 0.29em 0 rgba(0, 0, 0, 0.37);
+}
+.people-item-poster-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4a4a4a;
+}
+.people-item-poster-fallback svg { width: 2.6rem; height: 2.6rem; }
+.people-item-title {
+    margin-top: 0.35rem;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.people-item-sub {
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Lazy-load sentinel: bumped into view as you scroll, pulls the next page. */
+.people-sentinel {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.82rem;
+    padding: 1.2rem 0;
+    min-height: 0.5rem;
+}

@@ -65,6 +65,7 @@ const MENU = {
   lineups: ["Lineups", "Group channels into playlists you can hand to a player."],
   special: ["Special Presentation", "One-off scheduled events that override the normal lineup."],
   media: ["Media", "The movies, shows, albums and videos synced into ChannelFlow's own catalog."],
+  people: ["People", "The cast and crew in your catalog, and everything each of them appears in."],
   commercials: ["Commercials", "Breaks, avails, and where they're allowed to land."],
   youtube: ["YouTube", "Videos pulled in from YouTube for use in breaks or blocks."],
   tasks: ["Tasks", "Scheduled jobs like library scans and cache cleanup."],
@@ -259,7 +260,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "103";
+const UI_BUILD = "104";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {

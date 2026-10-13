@@ -550,12 +550,18 @@ impl Store {
     }
 
     /// Drop every catalog source for a connection (it was deleted) and prune
-    /// any media left with no sources.
+    /// any media left with no sources, deleting the posters that were only
+    /// referenced by the pruned items.
     pub async fn media_clear_connection(&self, connection_id: i64) -> Result<(), StoreError> {
-        match &self.snapshot().await {
-            Backend::Files => file::media_clear_connection(&self.root, connection_id),
-            Backend::Postgres(pool) => pg::media_clear_connection(pool, connection_id).await,
+        let orphans = match &self.snapshot().await {
+            Backend::Files => file::media_clear_connection(&self.root, connection_id)?,
+            Backend::Postgres(pool) => pg::media_clear_connection(pool, connection_id).await?,
+        };
+        let images = self.images_dir();
+        for poster in orphans {
+            let _ = std::fs::remove_file(images.join(poster));
         }
+        Ok(())
     }
 
     /// Every catalog item with its sources, for the Media page.
@@ -598,6 +604,32 @@ impl Store {
         match &self.snapshot().await {
             Backend::Files => file::media_files_for(&self.root, match_key),
             Backend::Postgres(pool) => pg::media_files_for(pool, match_key).await,
+        }
+    }
+
+    /// A page of catalog people (alphabetical), with an optional name filter,
+    /// and how many there are in total. The People page lazy-loads this.
+    pub async fn people_page(
+        &self,
+        offset: usize,
+        limit: usize,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::people_page(&self.root, offset, limit, query),
+            Backend::Postgres(pool) => pg::people_page(pool, offset, limit, query).await,
+        }
+    }
+
+    /// One person and the catalog items they appear in, newest first. `None`
+    /// when the name is not in the catalog at all.
+    pub async fn person_filmography(
+        &self,
+        name: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => file::person_filmography(&self.root, name),
+            Backend::Postgres(pool) => pg::person_filmography(pool, name).await,
         }
     }
 
@@ -2318,7 +2350,10 @@ mod file {
         Ok(items.len())
     }
 
-    pub fn media_clear_connection(root: &Path, connection_id: i64) -> Result<(), StoreError> {
+    pub fn media_clear_connection(
+        root: &Path,
+        connection_id: i64,
+    ) -> Result<Vec<String>, StoreError> {
         let mut catalog = read_media_catalog(root)?;
         for entry in catalog.iter_mut() {
             if let Some(sources) = entry.get_mut("sources").and_then(serde_json::Value::as_array_mut) {
@@ -2328,8 +2363,15 @@ mod file {
                 files.retain(|file| file["connection_id"].as_i64() != Some(connection_id));
             }
         }
+        let orphans: Vec<String> = catalog
+            .iter()
+            .filter(|entry| !has_sources(entry))
+            .filter_map(|entry| entry["poster_path"].as_str().map(str::to_string))
+            .filter(|path| !path.trim().is_empty())
+            .collect();
         catalog.retain(has_sources);
-        write_media_catalog(root, &catalog)
+        write_media_catalog(root, &catalog)?;
+        Ok(orphans)
     }
 
     pub fn media_files_for(
@@ -2346,6 +2388,95 @@ mod file {
 
     pub fn media_list(root: &Path) -> Result<Vec<serde_json::Value>, StoreError> {
         read_media_catalog(root)
+    }
+
+    pub fn people_page(
+        root: &Path,
+        offset: usize,
+        limit: usize,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        let needle = query.trim().to_ascii_lowercase();
+        let mut seen = std::collections::HashSet::new();
+        let mut people: Vec<(String, Option<String>)> = Vec::new();
+        for item in read_media_catalog(root)? {
+            let Some(credits) = item["people"].as_array() else {
+                continue;
+            };
+            for credit in credits {
+                let Some(name) = credit["name"].as_str() else {
+                    continue;
+                };
+                if !seen.insert(name.to_string()) {
+                    continue;
+                }
+                people.push((
+                    name.to_string(),
+                    credit["image_path"].as_str().map(str::to_string),
+                ));
+            }
+        }
+        people.retain(|(name, _)| needle.is_empty() || name.to_ascii_lowercase().contains(&needle));
+        people.sort_by(|a, b| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));
+        let total = people.len() as i64;
+        let page = people
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(name, image_path)| serde_json::json!({ "name": name, "image_path": image_path }))
+            .collect();
+        Ok((page, total))
+    }
+
+    pub fn person_filmography(
+        root: &Path,
+        name: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let mut found = false;
+        let mut image_path: Option<String> = None;
+        let mut items: Vec<serde_json::Value> = Vec::new();
+        for item in read_media_catalog(root)? {
+            let Some(credits) = item["people"].as_array() else {
+                continue;
+            };
+            let Some(credit) = credits.iter().find(|credit| credit["name"].as_str() == Some(name))
+            else {
+                continue;
+            };
+            found = true;
+            if image_path.is_none() {
+                image_path = credit["image_path"].as_str().map(str::to_string);
+            }
+            let kind = item["kind"].as_str().unwrap_or("");
+            if !matches!(kind, "movie" | "series" | "musicvideo" | "album" | "artist") {
+                continue;
+            }
+            items.push(serde_json::json!({
+                "match_key": item["match_key"],
+                "kind": kind,
+                "title": item["title"],
+                "year": item["year"],
+                "poster_path": item["poster_path"],
+                "character": credit["character"].as_str().unwrap_or(""),
+            }));
+        }
+        if !found {
+            return Ok(None);
+        }
+        items.sort_by(|a, b| {
+            let year = |value: &serde_json::Value| value["year"].as_i64().unwrap_or(i64::MIN);
+            year(b).cmp(&year(a)).then_with(|| {
+                a["title"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["title"].as_str().unwrap_or(""))
+            })
+        });
+        Ok(Some(serde_json::json!({
+            "name": name,
+            "image_path": image_path,
+            "items": items,
+        })))
     }
 
     pub fn media_counts(root: &Path) -> Result<Vec<(String, i64)>, StoreError> {
@@ -3059,11 +3190,13 @@ mod pg {
                     continue;
                 }
                 let person = sqlx::query(
-                    "INSERT INTO media_people (name) VALUES ($1) \
-                     ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
+                    "INSERT INTO media_people (name, image_path) VALUES ($1, $2) \
+                     ON CONFLICT (name) DO UPDATE SET \
+                         image_path = COALESCE(EXCLUDED.image_path, media_people.image_path) \
                      RETURNING id",
                 )
                 .bind(name)
+                .bind(&credit.image_path)
                 .fetch_one(&mut *tx)
                 .await?;
                 let person_id: i64 = person.try_get("id")?;
@@ -3098,7 +3231,7 @@ mod pg {
     pub async fn media_clear_connection(
         pool: &PgPool,
         connection_id: i64,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         sqlx::query("DELETE FROM media_item_sources WHERE connection_id = $1")
             .bind(connection_id)
             .execute(pool)
@@ -3107,13 +3240,24 @@ mod pg {
             .bind(connection_id)
             .execute(pool)
             .await?;
-        sqlx::query(
+        // The items that lose their last source; the posters they returned are
+        // now unreferenced.
+        let rows = sqlx::query(
             "DELETE FROM media_items \
-             WHERE NOT EXISTS (SELECT 1 FROM media_item_sources s WHERE s.item_id = media_items.id)",
+             WHERE NOT EXISTS (SELECT 1 FROM media_item_sources s WHERE s.item_id = media_items.id) \
+             RETURNING poster_path",
         )
-        .execute(pool)
+        .fetch_all(pool)
         .await?;
-        Ok(())
+        let mut posters = Vec::new();
+        for row in rows {
+            if let Some(path) = row.try_get::<Option<String>, _>("poster_path")? {
+                if !path.trim().is_empty() {
+                    posters.push(path);
+                }
+            }
+        }
+        Ok(posters)
     }
 
     pub async fn media_files_for(
@@ -3194,6 +3338,78 @@ mod pg {
             }));
         }
         Ok(items)
+    }
+
+    pub async fn people_page(
+        pool: &PgPool,
+        offset: usize,
+        limit: usize,
+        query: &str,
+    ) -> Result<(Vec<serde_json::Value>, i64), StoreError> {
+        let like = format!("%{}%", query.trim().to_lowercase());
+        let total: i64 =
+            sqlx::query("SELECT count(*) FROM media_people WHERE lower(name) LIKE $1")
+                .bind(&like)
+                .fetch_one(pool)
+                .await?
+                .try_get(0)?;
+        let rows = sqlx::query(
+            "SELECT name, image_path FROM media_people WHERE lower(name) LIKE $1 \
+             ORDER BY lower(name), name LIMIT $2 OFFSET $3",
+        )
+        .bind(&like)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(pool)
+        .await?;
+        let mut people = Vec::with_capacity(rows.len());
+        for row in rows {
+            people.push(serde_json::json!({
+                "name": row.try_get::<String, _>("name")?,
+                "image_path": row.try_get::<Option<String>, _>("image_path")?,
+            }));
+        }
+        Ok((people, total))
+    }
+
+    pub async fn person_filmography(
+        pool: &PgPool,
+        name: &str,
+    ) -> Result<Option<serde_json::Value>, StoreError> {
+        let person = sqlx::query("SELECT id, name, image_path FROM media_people WHERE name = $1")
+            .bind(name)
+            .fetch_optional(pool)
+            .await?;
+        let Some(person) = person else {
+            return Ok(None);
+        };
+        let person_id: i64 = person.try_get("id")?;
+        let rows = sqlx::query(
+            "SELECT m.match_key, m.kind, m.title, m.year, m.poster_path, ip.character \
+             FROM media_item_people ip JOIN media_items m ON m.id = ip.item_id \
+             WHERE ip.person_id = $1 \
+               AND m.kind IN ('movie', 'series', 'musicvideo', 'album', 'artist') \
+             ORDER BY m.year DESC NULLS LAST, m.title",
+        )
+        .bind(person_id)
+        .fetch_all(pool)
+        .await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(serde_json::json!({
+                "match_key": row.try_get::<String, _>("match_key")?,
+                "kind": row.try_get::<String, _>("kind")?,
+                "title": row.try_get::<String, _>("title")?,
+                "year": row.try_get::<Option<i32>, _>("year")?,
+                "poster_path": row.try_get::<Option<String>, _>("poster_path")?,
+                "character": row.try_get::<String, _>("character").unwrap_or_default(),
+            }));
+        }
+        Ok(Some(serde_json::json!({
+            "name": person.try_get::<String, _>("name")?,
+            "image_path": person.try_get::<Option<String>, _>("image_path")?,
+            "items": items,
+        })))
     }
 
     pub async fn media_counts(pool: &PgPool) -> Result<Vec<(String, i64)>, StoreError> {

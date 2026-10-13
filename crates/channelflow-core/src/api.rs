@@ -159,6 +159,8 @@ pub fn router(
         .route("/api/media/music/albums/{id}/tracks", get(music_album_tracks))
         .route("/api/media/{match_key}", get(media_catalog_item))
         .route("/api/media/image", get(media_catalog_image))
+        .route("/api/people", get(people_list))
+        .route("/api/people/{name}", get(person_detail))
         .route("/api/lineups", get(list_lineups))
         .route("/api/lineups/{id}", get(get_lineup).put(put_lineup))
         .route(
@@ -2061,16 +2063,10 @@ async fn delete_connection(
         .connection_delete(id)
         .await?
         .ok_or_else(|| StoreError::Plugin(format!("no connection with id {id}")))?;
-    // The connection's own catalog rows (the base Media page) go with it.
+    // The connection's own catalog rows (the base Media page) go with it; the
+    // clear also deletes the poster files of any item that then lost every
+    // source.
     state.store.media_clear_connection(id).await?;
-    // A media source's own rows cascade with the connection row; the sweep
-    // removes the poster files of any item that then lost every source.
-    if removed["kind"].as_str() == Some("jellyfin") {
-        let db = state.store.plugin_database("com.channelflow.jellyfin").await;
-        tokio::spawn(async move {
-            channelflow_plugin_jellyfin::sweep_orphan_posters(db).await;
-        });
-    }
     Ok(Json(json!({ "removed": removed })))
 }
 
@@ -2539,6 +2535,50 @@ async fn music_album_tracks(
         })
     });
     Ok(Json(json!({ "tracks": tracks, "track_count": tracks.len() })))
+}
+
+/// A page of catalog people, for the People page.
+async fn people_list(
+    State(state): State<AppState>,
+    Query(query): Query<PeopleQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(200).clamp(1, 500);
+    let (people, total) = state
+        .store
+        .people_page(offset, limit, query.q.as_deref().unwrap_or(""))
+        .await?;
+    Ok(Json(json!({
+        "people": people,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })))
+}
+
+#[derive(Deserialize)]
+struct PeopleQuery {
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    q: Option<String>,
+}
+
+/// One person and the catalog items they appear in.
+async fn person_detail(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Response, ApiError> {
+    match state.store.person_filmography(&name).await? {
+        Some(person) => Ok(Json(json!({ "person": person })).into_response()),
+        None => Ok((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no such person" })),
+        )
+            .into_response()),
+    }
 }
 
 async fn media_catalog_item(

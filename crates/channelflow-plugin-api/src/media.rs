@@ -403,6 +403,10 @@ pub struct PersonCredit {
     pub role: String,
     #[serde(default)]
     pub character: String,
+    /// Path of the person's photo under the core's image root, if the source
+    /// fetched one (`people/<id>.jpg`). The core keeps it for the People page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_path: Option<String>,
 }
 
 impl CatalogItem {

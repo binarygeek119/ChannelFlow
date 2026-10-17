@@ -924,7 +924,18 @@ async fn tv_guide(
     let stored = guide["programs"].as_array().cloned().unwrap_or_default();
     tracing::info!("guide: retrieved {} total programs from store", stored.len());
     
+    // Log a sample of programs to see their timestamps
+    if let Some(first_program) = stored.first() {
+        tracing::info!(
+            "guide: sample program - start: {}, finish: {}, title: {}",
+            first_program["start"].as_str().unwrap_or("unknown"),
+            first_program["finish"].as_str().unwrap_or("unknown"),
+            first_program["title"].as_str().unwrap_or("unknown")
+        );
+    }
+    
     let mut programs = Vec::new();
+    let mut filtered_out_count = 0;
     for program in stored {
         let start = program["start"]
             .as_str()
@@ -939,14 +950,17 @@ async fn tv_guide(
             continue;
         };
         if finish <= from || start >= to {
-            tracing::debug!(
-                "guide: filtering out program {} ({} to {}) - outside range {} to {}",
-                program["id"].as_str().unwrap_or("unknown"),
-                start,
-                finish,
-                from,
-                to
-            );
+            filtered_out_count += 1;
+            if filtered_out_count <= 3 {
+                tracing::debug!(
+                    "guide: filtering out program {} ({} to {}) - outside range {} to {}",
+                    program["id"].as_str().unwrap_or("unknown"),
+                    start,
+                    finish,
+                    from,
+                    to
+                );
+            }
             continue;
         }
         let is_now = start <= now && finish > now;
@@ -969,8 +983,9 @@ async fn tv_guide(
     }
     
     tracing::info!(
-        "guide: returning {} programs after filtering (range: {} to {})",
+        "guide: returning {} programs after filtering {} (range: {} to {})",
         programs.len(),
+        filtered_out_count,
         from,
         to
     );

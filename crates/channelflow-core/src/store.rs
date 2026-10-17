@@ -1156,6 +1156,19 @@ impl CoreData for StoreCoreData {
         channel_id: &str,
         programs: Vec<serde_json::Value>,
     ) -> Result<(), CoreDataError> {
+        // Determine which local dates the incoming programmes cover, so we only
+        // replace this channel's programmes for those days instead of wiping
+        // every day the channel has (the builder calls this once per day).
+        let incoming_dates: std::collections::HashSet<chrono::NaiveDate> = programs
+            .iter()
+            .filter_map(|program| {
+                program["start"]
+                    .as_str()
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.date_naive())
+            })
+            .collect();
+
         let guide = self
             .store
             .guide_get()
@@ -1166,7 +1179,21 @@ impl CoreData for StoreCoreData {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|program| program["channel_id"].as_str() != Some(channel_id))
+            .filter(|program| {
+                if program["channel_id"].as_str() != Some(channel_id) {
+                    return true;
+                }
+                // Drop only this channel's programmes that fall on a day we are
+                // (re)writing; keep other days intact.
+                let existing_date = program["start"]
+                    .as_str()
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .map(|value| value.date_naive());
+                match existing_date {
+                    Some(date) => !incoming_dates.contains(&date),
+                    None => true,
+                }
+            })
             .collect();
         for mut program in programs {
             if let Some(object) = program.as_object_mut() {

@@ -922,6 +922,8 @@ async fn tv_guide(
 
     let guide = state.store.guide_get().await?;
     let stored = guide["programs"].as_array().cloned().unwrap_or_default();
+    tracing::info!("guide: retrieved {} total programs from store", stored.len());
+    
     let mut programs = Vec::new();
     for program in stored {
         let start = program["start"]
@@ -933,9 +935,18 @@ async fn tv_guide(
             .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
             .map(|value| value.with_timezone(&chrono::Utc));
         let (Some(start), Some(finish)) = (start, finish) else {
+            tracing::debug!("guide: skipping program with invalid start/finish times");
             continue;
         };
         if finish <= from || start >= to {
+            tracing::debug!(
+                "guide: filtering out program {} ({} to {}) - outside range {} to {}",
+                program["id"].as_str().unwrap_or("unknown"),
+                start,
+                finish,
+                from,
+                to
+            );
             continue;
         }
         let is_now = start <= now && finish > now;
@@ -956,6 +967,13 @@ async fn tv_guide(
             "isVirtual": false,
         }));
     }
+    
+    tracing::info!(
+        "guide: returning {} programs after filtering (range: {} to {})",
+        programs.len(),
+        from,
+        to
+    );
 
     Ok(Json(json!({
         "from": from.to_rfc3339(),

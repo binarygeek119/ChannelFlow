@@ -15,7 +15,7 @@ if [ ! -f "$APP_JS" ]; then
 fi
 
 # Extract UI_BUILD value from app.js (format: const UI_BUILD = "123";)
-UI_BUILD=$(grep -oP 'const UI_BUILD = "\K[0-9]+' "$APP_JS")
+UI_BUILD=$(sed -n 's/.*const UI_BUILD = "\([0-9]\+\)".*/\1/p' "$APP_JS")
 
 if [ -z "$UI_BUILD" ]; then
     echo "Error: Could not extract UI_BUILD from $APP_JS" >&2

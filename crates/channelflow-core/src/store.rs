@@ -572,6 +572,37 @@ impl Store {
         }
     }
 
+    /// The catalog as the plugin API's `catalog()` needs it: only the columns a
+    /// `CatalogRow` is built from, and never the assistant sub-queries (people,
+    /// sources) the Media page wants. A Scheduler horizon build reads this once
+    /// per channel, so it must stay cheap. `kinds` (empty = every kind) is
+    /// pushed into the query.
+    pub async fn media_catalog_rows(
+        &self,
+        kinds: &[String],
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        match &self.snapshot().await {
+            Backend::Files => {
+                let mut rows = file::media_list(&self.root)?;
+                for row in &mut rows {
+                    if let Some(object) = row.as_object_mut() {
+                        object.remove("people");
+                        object.remove("sources");
+                    }
+                }
+                if !kinds.is_empty() {
+                    rows.retain(|row| {
+                        row["kind"]
+                            .as_str()
+                            .is_some_and(|kind| kinds.iter().any(|want| want == kind))
+                    });
+                }
+                Ok(rows)
+            }
+            Backend::Postgres(pool) => pg::media_catalog_rows(pool, kinds).await,
+        }
+    }
+
     /// One page of the catalog, filtered to `kinds` (empty = every kind) and an
     /// optional title `query`. Returns the page and the total match count, so
     /// the Media page can lazy-load instead of pulling everything at once.
@@ -1277,9 +1308,12 @@ impl CoreData for StoreCoreData {
     }
 
     async fn catalog(&self, filter: CatalogFilter) -> Result<Vec<CatalogRow>, CoreDataError> {
+        // Read only the columns a CatalogRow needs, and only the kinds asked
+        // for: a Scheduler build calls this once per channel and day, so a full
+        // Media-page read (people + sources) here is the wrong shape entirely.
         let entries = self
             .store
-            .media_list()
+            .media_catalog_rows(&filter.kinds)
             .await
             .map_err(|error| CoreDataError(error.to_string()))?;
         let keys: std::collections::HashSet<&str> =
@@ -3284,17 +3318,44 @@ mod pg {
             .collect())
     }
 
+    /// The lean catalog read the plugin API's `catalog()` uses: only the columns
+    /// a `CatalogRow` needs, so no people/sources sub-queries run. `kinds`
+    /// (empty = every kind) is pushed into the query as a bound array.
+    pub async fn media_catalog_rows(
+        pool: &PgPool,
+        kinds: &[String],
+    ) -> Result<Vec<serde_json::Value>, StoreError> {
+        const SQL: &str = "SELECT m.match_key, m.kind, m.title, m.year, m.runtime_seconds, \
+                m.genres, m.official_rating, m.tags, m.detail \
+             FROM media_items m";
+        let rows = if kinds.is_empty() {
+            sqlx::query(SQL).fetch_all(pool).await?
+        } else {
+            let sql = format!("{SQL} WHERE m.kind = ANY($1::text[]) ORDER BY m.kind, m.title");
+            sqlx::query(&sql).bind(kinds).fetch_all(pool).await?
+        };
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(serde_json::json!({
+                "match_key": row.try_get::<String, _>("match_key")?,
+                "kind": row.try_get::<String, _>("kind")?,
+                "title": row.try_get::<String, _>("title")?,
+                "year": row.try_get::<Option<i32>, _>("year")?,
+                "runtime_seconds": row.try_get::<Option<i64>, _>("runtime_seconds")?,
+                "genres": json_array(row.try_get::<Json<serde_json::Value>, _>("genres")?.0),
+                "official_rating": row.try_get::<Option<String>, _>("official_rating")?,
+                "tags": json_array(row.try_get::<Json<serde_json::Value>, _>("tags")?.0),
+                "detail": row.try_get::<Option<Json<serde_json::Value>>, _>("detail")?.map(|value| value.0),
+            }));
+        }
+        Ok(items)
+    }
+
     pub async fn media_list(pool: &PgPool) -> Result<Vec<serde_json::Value>, StoreError> {
         let rows = sqlx::query(
             "SELECT m.match_key, m.kind, m.title, m.year, m.overview, m.poster_path, \
                     m.runtime_seconds, m.genres, m.official_rating, m.premiere_date, \
                     m.first_episode_year, m.studios, m.tags, m.detail, \
-                    (SELECT COALESCE(json_agg(json_build_object(
-                        'name', p.name, 'role_type', ip.role_type, 'role', ip.role,
-                        'character', ip.character, 'image_path', p.image_path)
-                        ORDER BY ip.sort_order), '[]'::json)
-                     FROM media_item_people ip JOIN media_people p ON p.id = ip.person_id
-                     WHERE ip.item_id = m.id) AS people,
                     (SELECT COALESCE(json_agg(json_build_object(
                         'name', p.name, 'role_type', ip.role_type, 'role', ip.role,
                         'character', ip.character, 'image_path', p.image_path)
@@ -4172,6 +4233,27 @@ mod tests {
         assert_eq!(stored["genres"], json!(["Reality-TV", "Drama"]));
         assert_eq!(stored["studios"], json!(["Studio"]));
         assert_eq!(stored["tags"], json!(["tag"]));
+
+        // The lean read the plugin API's catalog() uses: same item, no
+        // people/sources sub-queries, and the kinds filter narrows in SQL.
+        let lean = store.media_catalog_rows(&[]).await.expect("lean catalog");
+        let row = lean
+            .iter()
+            .find(|row| row["title"] == "Jsonb Round Trip")
+            .expect("the reported item is in the lean catalog");
+        assert_eq!(row["genres"], json!(["Reality-TV", "Drama"]));
+        assert!(row.get("people").is_none());
+        assert!(row.get("sources").is_none());
+        let movies = store
+            .media_catalog_rows(&["movie".to_string()])
+            .await
+            .expect("lean catalog by kind");
+        assert!(movies.iter().any(|row| row["title"] == "Jsonb Round Trip"));
+        let series = store
+            .media_catalog_rows(&["series".to_string()])
+            .await
+            .expect("lean catalog by kind");
+        assert!(!series.iter().any(|row| row["title"] == "Jsonb Round Trip"));
 
         store
             .media_clear_connection(connection_id)

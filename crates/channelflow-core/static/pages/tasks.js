@@ -307,21 +307,73 @@ $("local-task-run").addEventListener("click", () => {
   );
 });
 
-// Maintenance jobs are user-triggered one-offs. They are stubbed for now —
-// the buttons exist and say so until they are wired to real work.
-for (const [id, label] of [
-  ["maintenance-rebuild-playouts", "Rebuild All Playouts"],
-  ["maintenance-clear-guide", "Clear Guide Data"],
-]) {
-  const button = document.getElementById(id);
-  if (!button) continue;
-  button.addEventListener("click", () => {
-    const note = document.getElementById("maintenance-note");
-    if (note) {
-      note.hidden = false;
-      note.textContent = `${label} is not wired up yet.`;
-    }
-  });
+// Maintenance jobs are user-triggered one-offs.
+function setMaintenanceNote(message, bad) {
+  const note = $("maintenance-note");
+  if (!note) return;
+  note.hidden = !message;
+  note.textContent = message || "";
+  note.classList.toggle("bad", !!bad);
+}
+
+// Rebuild every channel's playout: the Scheduler plugin owns the day documents,
+// so it rewrites their playout JSON, then the base repoints the encoder at the
+// result (lineup.json + each channel's channel.json).
+{
+  const rebuild = $("maintenance-rebuild-playouts");
+  if (rebuild) {
+    rebuild.addEventListener("click", () => {
+      setMaintenanceNote("Rebuilding every channel's playout…");
+      taskPopup.run(
+        "Rebuild All Playouts",
+        async () => {
+          const data = await request(
+            "/api/plugins/com.channelflow.scheduler/playout/rebuild",
+            { method: "POST" }
+          );
+          await request("/api/playout/regenerate", { method: "POST" });
+          return data;
+        },
+        (data) => {
+          const report = data.report || {};
+          const errors = (report.errors || []).length;
+          const message =
+            `Rebuilt ${report.days || 0} day(s) over ${report.channels || 0} channel(s)` +
+            (report.missing ? ` · ${report.missing} missing file(s)` : "") +
+            (errors ? ` · ${errors} error(s)` : "") +
+            ".";
+          setMaintenanceNote(message, errors > 0);
+          return message;
+        }
+      );
+    });
+  }
+
+  const clear = $("maintenance-clear-guide");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      if (
+        !window.confirm(
+          "Clear the guide programmes for every channel? The stored days are kept — Rebuild All Playouts writes the guide back from them."
+        )
+      ) {
+        return;
+      }
+      setMaintenanceNote("Clearing guide data…");
+      taskPopup.run(
+        "Clear Guide Data",
+        () =>
+          request("/api/plugins/com.channelflow.scheduler/guide/clear", {
+            method: "POST",
+          }),
+        (data) => {
+          const message = `Cleared the guide for ${data.cleared_channels || 0} channel(s).`;
+          setMaintenanceNote(message, false);
+          return message;
+        }
+      );
+    });
+  }
 }
 
 // Catalog cleanup: the grace period, the daily time, and the two one-off

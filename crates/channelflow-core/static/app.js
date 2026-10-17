@@ -260,7 +260,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "105";
+const UI_BUILD = "106";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {

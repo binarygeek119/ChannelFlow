@@ -20,6 +20,7 @@ pub mod media;
 pub mod permission;
 pub mod plugin;
 pub mod storage;
+pub mod tasks;
 pub mod ui;
 pub mod version;
 pub mod web;
@@ -41,6 +42,7 @@ pub use plugin::{
     NoopPlugin, Plugin, PluginApi, PluginError, PluginHealth, PluginLogger, PLUGIN_ABI_VERSION,
 };
 pub use storage::{PluginStorage, PluginStorageError};
+pub use tasks::{NoopTaskHost, TaskGuard, TaskHost, TaskInfo};
 pub use ui::{UiContribution, UiContributionSection};
 pub use version::compatible;
 pub use web::{PluginWeb, WebAsset};

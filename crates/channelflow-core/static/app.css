@@ -513,16 +513,18 @@ select:focus-visible, textarea:focus-visible {
 .library-box { border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; background: var(--card-bg); }
 .library-box-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.35rem; }
 .library-box-head h3 { margin: 0; font-size: 1rem; }
-/* Bottom-right task progress popup (kept open across tab switches). */
+/* Bottom-right task progress popups (kept open across tab switches). One card
+   per running task, stacked upward; a card fades on its own as it finishes. */
 .task-popup-wrap {
     position: fixed;
     right: 1.5rem;
     bottom: 1.5rem;
     z-index: 120;
     width: min(460px, calc(100vw - 3rem));
-    transition: opacity 0.6s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
 }
-.task-popup-wrap.fading { opacity: 0; }
 .task-popup {
     background: #1b1b1b;
     border: 1px solid var(--border);
@@ -533,7 +535,9 @@ select:focus-visible, textarea:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
+    transition: opacity 0.6s ease;
 }
+.task-popup.fading { opacity: 0; }
 .task-popup-head {
     font-size: 1.15rem;
     font-weight: 700;

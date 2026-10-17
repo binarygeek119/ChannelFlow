@@ -79,30 +79,38 @@ async fn main() -> Result<()> {
         }
     })?;
 
-    // The binary is a loader: the web UI is plain files that must be present
-    // under <config>/webui. If they are missing, seed them from the shipped
-    // copy (the image keeps it at /usr/share/channelflow/webui;
-    // CHANNELFLOW_WEBUI overrides) so a fresh /config works out of the box.
-    if !webui::webui_dir(&config).join("index.html").exists() {
-        let shipped = std::env::var("CHANNELFLOW_WEBUI").unwrap_or_else(|_| {
-            "/usr/share/channelflow/webui".to_string()
-        });
-        let src = PathBuf::from(&shipped);
-        if src.join("index.html").exists() {
+    // The binary is a loader: the web UI is plain files read from
+    // <config>/webui on every request. Seed them from the shipped copy (the
+    // image keeps it at /usr/share/channelflow/webui; CHANNELFLOW_WEBUI
+    // overrides) when they are missing, and refresh them when the shipped copy
+    // has changed — the UI rides along with the binary, so a new image must not
+    // keep serving the old UI out of a persistent /config. A stamp of what was
+    // last copied keeps an unchanged image a no-op.
+    let shipped = std::env::var("CHANNELFLOW_WEBUI")
+        .unwrap_or_else(|_| "/usr/share/channelflow/webui".to_string());
+    let src = PathBuf::from(&shipped);
+    let installed = webui::webui_dir(&config).join("index.html").exists();
+    if src.join("index.html").exists() {
+        let stamp = webui::stamp(&src);
+        if webui::read_stamp(&config).as_deref() != Some(stamp.as_str()) {
             match webui::copy_from(&src, &config) {
-                Ok(count) => tracing::info!(
-                    root = %config.join("webui").display(),
-                    copied = count,
-                    "seeded the web UI from {shipped}"
-                ),
-                Err(error) => tracing::warn!(%error, shipped, "could not seed the web UI"),
+                Ok(count) => {
+                    let _ = webui::write_stamp(&config, &stamp);
+                    tracing::info!(
+                        root = %config.join("webui").display(),
+                        copied = count,
+                        refreshed = installed,
+                        "copied the web UI from {shipped}"
+                    );
+                }
+                Err(error) => tracing::warn!(%error, shipped, "could not copy the web UI"),
             }
-        } else {
-            tracing::warn!(
-                root = %config.join("webui").display(),
-                "web UI files are missing and no CHANNELFLOW_WEBUI source was found — copy crates/channelflow-core/static/* into <config>/webui, or run scripts/install-webui.sh"
-            );
         }
+    } else if !installed {
+        tracing::warn!(
+            root = %config.join("webui").display(),
+            "web UI files are missing and no CHANNELFLOW_WEBUI source was found — copy crates/channelflow-core/static/* into <config>/webui, or run scripts/install-webui.sh"
+        );
     }
 
     let store = if args.database_url.trim().is_empty() {
@@ -157,6 +165,7 @@ async fn main() -> Result<()> {
     let ai_manifest = ai_plugin.metadata().clone();
     let ai_api = PluginApi {
         id: ai_manifest.id.clone(),
+        tasks: tasks::plugin_host(&ai_manifest.id),
         storage: store.plugin_storage(&ai_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -177,6 +186,7 @@ async fn main() -> Result<()> {
     let ersatztv_manifest = ersatztv_plugin.metadata().clone();
     let ersatztv_api = PluginApi {
         id: ersatztv_manifest.id.clone(),
+        tasks: tasks::plugin_host(&ersatztv_manifest.id),
         storage: store.plugin_storage(&ersatztv_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -197,6 +207,7 @@ async fn main() -> Result<()> {
     let jellyfin_manifest = jellyfin_plugin.metadata().clone();
     let jellyfin_api = PluginApi {
         id: jellyfin_manifest.id.clone(),
+        tasks: tasks::plugin_host(&jellyfin_manifest.id),
         storage: store.plugin_storage(&jellyfin_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -217,6 +228,7 @@ async fn main() -> Result<()> {
     let offair_manifest = offair_plugin.metadata().clone();
     let offair_api = PluginApi {
         id: offair_manifest.id.clone(),
+        tasks: tasks::plugin_host(&offair_manifest.id),
         storage: store.plugin_storage(&offair_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -237,6 +249,7 @@ async fn main() -> Result<()> {
     let commercialbrainz_manifest = commercialbrainz_plugin.metadata().clone();
     let commercialbrainz_api = PluginApi {
         id: commercialbrainz_manifest.id.clone(),
+        tasks: tasks::plugin_host(&commercialbrainz_manifest.id),
         storage: store.plugin_storage(&commercialbrainz_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -257,6 +270,7 @@ async fn main() -> Result<()> {
     let emergency_manifest = emergency_plugin.metadata().clone();
     let emergency_api = PluginApi {
         id: emergency_manifest.id.clone(),
+        tasks: tasks::plugin_host(&emergency_manifest.id),
         storage: store.plugin_storage(&emergency_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -277,6 +291,7 @@ async fn main() -> Result<()> {
     let weather_manifest = weather_plugin.metadata().clone();
     let weather_api = PluginApi {
         id: weather_manifest.id.clone(),
+        tasks: tasks::plugin_host(&weather_manifest.id),
         storage: store.plugin_storage(&weather_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -297,6 +312,7 @@ async fn main() -> Result<()> {
     let news_manifest = news_plugin.metadata().clone();
     let news_api = PluginApi {
         id: news_manifest.id.clone(),
+        tasks: tasks::plugin_host(&news_manifest.id),
         storage: store.plugin_storage(&news_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -317,6 +333,7 @@ async fn main() -> Result<()> {
     let presets_manifest = presets_plugin.metadata().clone();
     let presets_api = PluginApi {
         id: presets_manifest.id.clone(),
+        tasks: tasks::plugin_host(&presets_manifest.id),
         storage: store.plugin_storage(&presets_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -337,6 +354,7 @@ async fn main() -> Result<()> {
     let lists_manifest = lists_plugin.metadata().clone();
     let lists_api = PluginApi {
         id: lists_manifest.id.clone(),
+        tasks: tasks::plugin_host(&lists_manifest.id),
         storage: store.plugin_storage(&lists_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -357,6 +375,7 @@ async fn main() -> Result<()> {
     let holiday_manifest = holiday_plugin.metadata().clone();
     let holiday_api = PluginApi {
         id: holiday_manifest.id.clone(),
+        tasks: tasks::plugin_host(&holiday_manifest.id),
         storage: store.plugin_storage(&holiday_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -378,6 +397,7 @@ async fn main() -> Result<()> {
     let local_manifest = local_plugin.metadata().clone();
     let local_api = PluginApi {
         id: local_manifest.id.clone(),
+        tasks: tasks::plugin_host(&local_manifest.id),
         storage: store.plugin_storage(&local_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -398,6 +418,7 @@ async fn main() -> Result<()> {
     let pasttense_manifest = pasttense_plugin.metadata().clone();
     let pasttense_api = PluginApi {
         id: pasttense_manifest.id.clone(),
+        tasks: tasks::plugin_host(&pasttense_manifest.id),
         storage: store.plugin_storage(&pasttense_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -418,6 +439,7 @@ async fn main() -> Result<()> {
     let scheduler_manifest = scheduler_plugin.metadata().clone();
     let scheduler_api = PluginApi {
         id: scheduler_manifest.id.clone(),
+        tasks: tasks::plugin_host(&scheduler_manifest.id),
         storage: store.plugin_storage(&scheduler_manifest.id),
         http: http.clone(),
         base_version: env!("CARGO_PKG_VERSION").to_string(),

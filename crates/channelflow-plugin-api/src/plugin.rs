@@ -14,13 +14,16 @@ use crate::core::CoreData;
 use crate::database::PluginDatabase;
 use crate::manifest::PluginManifest;
 use crate::storage::PluginStorage;
+use crate::tasks::TaskHost;
 use crate::ui::UiContribution;
 use crate::web::PluginWeb;
 
 /// Plugin ABI version. The core refuses to load a plugin built against a
 /// different one, so breaking changes to this contract cannot silently break
 /// running plugins.
-pub const PLUGIN_ABI_VERSION: u32 = 2;
+///
+/// 3: [`PluginApi`] gained `tasks` (background-task reporting).
+pub const PLUGIN_ABI_VERSION: u32 = 3;
 
 /// Something a plugin did that the base should surface (and, at load time,
 /// refuse to run the plugin over).
@@ -96,6 +99,9 @@ pub struct PluginApi {
     /// Where the plugin publishes the web files it ships (served by the core
     /// at `/plugin/{id}/web/{path}`). Register in `on_load`.
     pub web: PluginWeb,
+    /// Where the plugin reports its own background work, so the base's status
+    /// popup can show it from any page (and bring it back after a reload).
+    pub tasks: Arc<dyn TaskHost>,
 }
 
 impl std::fmt::Debug for PluginApi {

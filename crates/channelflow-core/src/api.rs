@@ -2285,9 +2285,11 @@ async fn local_scan_run(
 
 /// Whether a background task is running right now. The web UI asks this on
 /// (re)load so a task that outlived its tab (or the whole page) brings its
-/// progress popup back; nothing running means no popup.
+/// progress popup back; nothing running means no popup. `task` carries the
+/// first one for older clients; `tasks` is every one.
 async fn tasks_running() -> Json<serde_json::Value> {
-    Json(json!({ "task": tasks::running() }))
+    let tasks = tasks::running();
+    Json(json!({ "tasks": tasks, "task": tasks.first() }))
 }
 
 // ── local media catalog ────────────────────────────────────────────────────
@@ -3467,6 +3469,7 @@ mod tests {
         let manifest = plugin.metadata().clone();
         let api = PluginApi {
             id: manifest.id.clone(),
+            tasks: std::sync::Arc::new(channelflow_plugin_api::NoopTaskHost),
             storage: store.plugin_storage(&manifest.id),
             http: http.clone(),
             base_version: env!("CARGO_PKG_VERSION").to_string(),

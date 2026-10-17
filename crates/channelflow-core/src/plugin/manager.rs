@@ -76,6 +76,7 @@ impl PluginManager {
             let mut plugin = self.plugins.remove(index);
             plugin.plugin.on_unload();
         }
+        crate::tasks::clear_plugin(id);
     }
 
     /// Register a plugin: hand it its `PluginApi`, call `on_load`, and hold it
@@ -124,6 +125,9 @@ impl PluginManager {
             .ok_or_else(|| PluginError::new(format!("no plugin with id {id}")))?;
         plugin.plugin.on_disable().await?;
         plugin.enabled = false;
+        // Work a disabled plugin was running will never finish its reporting,
+        // so clear its tasks rather than leave them showing forever.
+        crate::tasks::clear_plugin(id);
         Ok(())
     }
 
@@ -173,6 +177,7 @@ mod tests {
     fn api(id: &str) -> PluginApi {
         PluginApi {
             id: id.to_string(),
+            tasks: std::sync::Arc::new(channelflow_plugin_api::NoopTaskHost),
             storage: std::sync::Arc::new(InMemoryStorage::new()),
             http: reqwest::Client::new(),
             base_version: "2.0.0".to_string(),

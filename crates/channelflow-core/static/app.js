@@ -260,7 +260,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "104";
+const UI_BUILD = "105";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -393,56 +393,103 @@ function showError(message) {
   el.hidden = !message;
 }
 
-// --- task progress popup ----------------------------------------------------
-// A bottom-right popup tracks a running task. It stays until the work is done,
-// holds briefly green (or red on failure), then fades away. It lives outside
-// the tab panels, so switching pages never hides it.
+// --- task progress popups ---------------------------------------------------
+// Bottom-right popups track running tasks. Each card stays until its work is
+// done, holds briefly green (or red on failure), then fades away. They live
+// outside the tab panels, so switching pages never hides them.
+//
+// A card is keyed. A page drives one with `run()`; a card started by the server
+// (a scan, a Scheduler build, a Weather guide refresh — see `runningTasks`
+// below) uses the key the server gave it, so a page that starts the same work
+// and passes that key shares the one card instead of stacking a duplicate.
 
 const taskPopup = (() => {
   const wrap = document.getElementById("task-popup");
-  const head = wrap.querySelector(".task-popup-head");
-  const bar = wrap.querySelector(".task-popup-bar");
-  const status = wrap.querySelector(".task-popup-status");
-  const card = wrap.querySelector(".task-popup");
-  let holdTimer = null;
+  const template = document.getElementById("task-popup-template");
+  const cards = new Map();
+  let seq = 0;
 
-  function show(title) {
-    clearTimeout(holdTimer);
+  function card(key) {
+    let entry = cards.get(key);
+    if (!entry) {
+      const node = template.content.firstElementChild.cloneNode(true);
+      wrap.appendChild(node);
+      entry = {
+        node,
+        head: node.querySelector(".task-popup-head"),
+        bar: node.querySelector(".task-popup-bar"),
+        status: node.querySelector(".task-popup-status"),
+        timer: null,
+      };
+      cards.set(key, entry);
+    }
     wrap.hidden = false;
-    wrap.classList.remove("fading");
-    card.classList.remove("status-done", "status-fail");
-    bar.className = "task-popup-bar indeterminate";
-    head.textContent = title;
-    status.textContent = "Running…";
+    return entry;
   }
 
-  function finish(text, ok) {
-    clearTimeout(holdTimer);
-    bar.className = ok ? "task-popup-bar done" : "task-popup-bar fail";
-    card.classList.toggle("status-done", ok);
-    card.classList.toggle("status-fail", !ok);
-    status.textContent = text;
-    holdTimer = setTimeout(() => {
-      wrap.classList.add("fading");
-      setTimeout(() => { wrap.hidden = true; }, 650);
+  function show(title, key = "page") {
+    const entry = card(key);
+    clearTimeout(entry.timer);
+    entry.node.classList.remove("fading", "status-done", "status-fail");
+    entry.bar.className = "task-popup-bar indeterminate";
+    entry.head.textContent = title;
+    entry.status.textContent = "Running…";
+    return entry;
+  }
+
+  function progress(text, key = "page") {
+    const entry = cards.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.bar.className = "task-popup-bar indeterminate";
+    entry.status.textContent = text;
+  }
+
+  function finish(text, ok, key = "page") {
+    const entry = cards.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.bar.className = ok ? "task-popup-bar done" : "task-popup-bar fail";
+    entry.node.classList.toggle("status-done", ok);
+    entry.node.classList.toggle("status-fail", !ok);
+    entry.status.textContent = text;
+    entry.timer = setTimeout(() => {
+      entry.node.classList.add("fading");
+      entry.timer = setTimeout(() => drop(key), 650);
     }, 2600);
   }
 
-  function progress(text) {
-    clearTimeout(holdTimer);
-    bar.className = "task-popup-bar indeterminate";
-    status.textContent = text;
+  /// Remove a card at once, with no finish-and-fade.
+  function drop(key = "page") {
+    const entry = cards.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.node.remove();
+    cards.delete(key);
+    if (!cards.size) wrap.hidden = true;
   }
 
-  function run(title, work, format) {
-    show(title);
+  /// Show a card for work this page is driving. `key` lets a page adopt the
+  /// server's card for the same work (see `runningTasks`), so a request that
+  /// keeps running server-side does not grow a second popup.
+  function run(title, work, format, key = "page") {
+    show(title, key);
     Promise.resolve()
       .then(work)
-      .then((result) => finish(format ? format(result) : "Done.", true))
-      .catch((error) => finish(error.message || "Failed.", false));
+      .then((result) => finish(format ? format(result) : "Done.", true, key))
+      .catch((error) => finish(error.message || "Failed.", false, key));
   }
 
-  return { show, progress, finish, run };
+  function has(key) {
+    return cards.has(key);
+  }
+
+  /// A page-driven card is up: the shell leaves server tasks to it.
+  function busy() {
+    return cards.has("page");
+  }
+
+  return { show, progress, finish, drop, run, has, busy, next: () => `run-${++seq}` };
 })();
 
 // --- Drawer + history navigation --------------------------------------------
@@ -597,52 +644,97 @@ function showApp() {
   document.getElementById("app-shell").hidden = false;
   loadPluginPages();
   showTab(tabForPath(location.pathname) || "guide");
-  // A task can outlive the page that started it; bring its popup back.
-  watchRunningTask();
+  // A task can outlive the page that started it; bring its popups back.
+  runningTasks.start();
 }
 
-// If a background task is still running (a scan started before this page load),
-// show the popup and keep it current until the task ends. No running task means
-// no popup at all.
-async function watchRunningTask() {
-  let task = null;
-  try {
-    task = (await request("/api/tasks/running")).task;
-  } catch (error) {
-    return;
+// --- running tasks, wherever they run ---------------------------------------
+// The server keeps a registry of everything running right now — the library
+// scans, plus whatever plugins report (a Scheduler build, a Weather guide
+// refresh, a newscast render, an AI failover test). The shell polls it, so a
+// task shows from any page and comes back after a reload: the work keeps
+// running server-side, the popup is only a view of it.
+
+const runningTasks = (() => {
+  const seen = new Set();
+  let timer = null;
+  let pumping = false;
+
+  function count(value) {
+    return Number(value || 0).toLocaleString();
   }
-  if (!task) return;
-  taskPopup.show(task.title || "Task running");
-  const progressUrl = task.progress_url;
-  // Poll until the server says nothing is running any more.
-  for (;;) {
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    let current = null;
-    try {
-      current = (await request("/api/tasks/running")).task;
-    } catch (error) {
-      current = null;
-    }
-    if (!current) {
-      taskPopup.finish("Finished.", true);
-      return;
-    }
-    if (progressUrl) {
+
+  // The card's detail line: the counts a plugin pushed inline, or the live
+  // progress a media source exposes on its own URL.
+  async function detail(task) {
+    if (task.progress_url) {
       try {
-        const snapshot = (await request(progressUrl)).progress || {};
-        taskPopup.progress(
-          `${snapshot.label || current.title} · ` +
-            `${Number(snapshot.current || 0).toLocaleString()} of ` +
-            `${Number(snapshot.total || 0).toLocaleString()}`
-        );
+        const snapshot = (await request(task.progress_url)).progress || {};
+        if (snapshot.label || snapshot.current != null) {
+          return (
+            `${snapshot.label || task.title} · ` +
+            `${count(snapshot.current)} of ${count(snapshot.total)}`
+          );
+        }
       } catch (error) {
         /* a transient poll failure must not hide a running task */
       }
     }
+    if (task.current != null && task.total != null) {
+      return `${task.label || task.title} · ${count(task.current)} of ${count(task.total)}`;
+    }
+    return task.label || null;
   }
-}
+
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      let tasks = [];
+      try {
+        const data = await request("/api/tasks/running");
+        tasks = data.tasks || (data.task ? [data.task] : []);
+      } catch (error) {
+        return; // keep the cards that are up; the next tick tries again
+      }
+      const keys = new Set();
+      for (const task of tasks) {
+        const key = String(task.key || task.kind || task.title);
+        keys.add(key);
+        // A page driving its own work already shows a card for it; the shell
+        // only speaks up for tasks nothing on screen is tracking.
+        if (!taskPopup.has(key) && !taskPopup.busy()) {
+          taskPopup.show(task.title || "Task", key);
+        }
+        const text = await detail(task);
+        if (text) taskPopup.progress(text, key);
+      }
+      for (const key of [...seen]) {
+        if (!keys.has(key)) taskPopup.finish("Finished.", true, key);
+      }
+      seen.clear();
+      for (const key of keys) seen.add(key);
+    } finally {
+      pumping = false;
+    }
+  }
+
+  function start() {
+    if (timer) return;
+    timer = setInterval(() => { void pump(); }, 1500);
+    void pump();
+  }
+
+  function stop() {
+    clearInterval(timer);
+    timer = null;
+  }
+
+  return { start, stop, pump };
+})();
 
 function showLogin(note) {
+  runningTasks.stop();
   hideScreens();
   document.getElementById("login-screen").hidden = false;
   if (note) setLoginNote(note, true);
@@ -1113,6 +1205,7 @@ Object.assign(globalThis, {
   pathForTab,
   tabForPath,
   taskPopup,
+  runningTasks,
   libraryCard,
   setStatus,
   showError,

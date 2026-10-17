@@ -6,12 +6,13 @@
 
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use channelflow_plugin_api::media::{Connection, SyncCtx};
+use channelflow_plugin_api::tasks::{TaskHost, TaskInfo};
 
 use crate::media::MediaSources;
 use crate::store::{Store, StoreError};
@@ -386,48 +387,143 @@ async fn run_scanner(
         }
     };
     // A sync can outlive the tab that started it, so mark it running in a
-    // process-wide slot the web UI can read on (re)load; clear it however the
-    // sync ends. The slot is in-memory, so a server restart leaves nothing
-    // stale behind.
-    set_running(Some(RunningTask {
+    // process-wide registry the web UI can read on (re)load; clear it however
+    // the sync ends. The registry is in-memory, so a server restart leaves
+    // nothing stale behind.
+    set_running(RunningTask {
+        key: running_kind.to_string(),
         kind: running_kind.to_string(),
         title: running_title.to_string(),
         started_at: Utc::now(),
         progress_url,
-    }));
+        label: None,
+        current: None,
+        total: None,
+    });
     let outcome = run_sync_inner(store, media, config_dir, trigger, only_connection, only_kind).await;
-    set_running(None);
+    clear_running(running_kind);
     if let Ok(run) = &outcome {
         let _ = push_run_for(store, runs_key, run.clone()).await;
     }
     outcome
 }
 
-/// One running background task, as the web UI's popup needs it: a title to
-/// show immediately and, when the source exposes one, a JSON-returning URL that
-/// yields `{ progress: { label, current, total } }` for the live detail line.
+/// One running background task, as the web UI's status popup needs it: a title
+/// to show immediately, an optional live detail line (pushed by the plugin
+/// that owns the work), and — for a source that exposes one — a JSON-returning
+/// URL that yields `{ progress: { label, current, total } }`.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunningTask {
+    /// Stable id. The scans use their own kind (`jellyfin-sync`); a plugin task
+    /// is `<plugin id>:<plugin's key>`.
+    pub key: String,
+    /// Who owns the work: a scan kind, or a plugin's manifest id.
     pub kind: String,
     pub title: String,
     pub started_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
 }
 
-fn running_slot() -> &'static Mutex<Option<RunningTask>> {
-    static SLOT: OnceLock<Mutex<Option<RunningTask>>> = OnceLock::new();
-    SLOT.get_or_init(|| Mutex::new(None))
+fn running_slot() -> &'static Mutex<Vec<RunningTask>> {
+    static SLOT: OnceLock<Mutex<Vec<RunningTask>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// The task running right now, if any. Read by `GET /api/tasks/running` so a
-/// reload (or a fresh browser) can bring the popup back.
-pub fn running() -> Option<RunningTask> {
+/// Every task running right now, oldest first. Read by `GET /api/tasks/running`
+/// so a reload (or a fresh browser) can bring the popups back.
+pub fn running() -> Vec<RunningTask> {
     running_slot().lock().unwrap().clone()
 }
 
-fn set_running(task: Option<RunningTask>) {
-    *running_slot().lock().unwrap() = task;
+/// Start a task, or replace the one already running under the same key.
+fn set_running(task: RunningTask) {
+    let mut slot = running_slot().lock().unwrap();
+    match slot.iter_mut().find(|running| running.key == task.key) {
+        Some(existing) => *existing = task,
+        None => slot.push(task),
+    }
+}
+
+/// Update a running task's detail line, and its counts when given. A task that
+/// is not (or no longer) running is ignored, so a late progress report from
+/// work that already ended cannot resurrect it.
+fn update_running(key: &str, label: Option<String>, current: Option<u64>, total: Option<u64>) {
+    let mut slot = running_slot().lock().unwrap();
+    let Some(task) = slot.iter_mut().find(|running| running.key == key) else {
+        return;
+    };
+    if let Some(label) = label {
+        task.label = Some(label);
+    }
+    if current.is_some() {
+        task.current = current;
+    }
+    if total.is_some() {
+        task.total = total;
+    }
+}
+
+/// Drop a task: it ended, one way or another.
+fn clear_running(key: &str) {
+    running_slot().lock().unwrap().retain(|task| task.key != key);
+}
+
+/// Drop every task one plugin owns. Called when a plugin is disabled or
+/// unloaded, so it cannot leave a phantom popup behind.
+pub fn clear_plugin(plugin_id: &str) {
+    running_slot()
+        .lock()
+        .unwrap()
+        .retain(|task| task.kind != plugin_id);
+}
+
+/// The base's end of the plugin task hook: reports land in the same registry
+/// the scans use, keyed `<plugin id>:<plugin key>`.
+struct PluginTasks {
+    plugin: String,
+}
+
+impl PluginTasks {
+    fn key(&self, key: &str) -> String {
+        format!("{}:{}", self.plugin, key)
+    }
+}
+
+impl TaskHost for PluginTasks {
+    fn task_started(&self, task: TaskInfo) {
+        set_running(RunningTask {
+            key: self.key(&task.key),
+            kind: self.plugin.clone(),
+            title: task.title,
+            started_at: Utc::now(),
+            progress_url: None,
+            label: task.label,
+            current: task.current,
+            total: task.total,
+        });
+    }
+
+    fn task_progress(&self, key: &str, label: &str, current: Option<u64>, total: Option<u64>) {
+        update_running(&self.key(key), Some(label.to_string()), current, total);
+    }
+
+    fn task_finished(&self, key: &str) {
+        clear_running(&self.key(key));
+    }
+}
+
+/// A task host for one plugin, handed to it as `PluginApi::tasks`.
+pub fn plugin_host(plugin_id: &str) -> Arc<dyn TaskHost> {
+    Arc::new(PluginTasks {
+        plugin: plugin_id.to_string(),
+    })
 }
 
 /// The one scan that may run at a time. The Jellyfin, news and local scans all

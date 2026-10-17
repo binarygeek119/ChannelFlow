@@ -260,7 +260,7 @@ const PAGE_SECTION = {
   jellyfin: "tab-library",
 };
 
-const UI_BUILD = "106";
+const UI_BUILD = "107";
 
 // The page registry. Page scripts call `CF.define`.
 const CF = {
@@ -800,14 +800,14 @@ const OB = [
       `<p>ChannelFlow keeps everything in <strong>Postgres</strong> when you give it one. Enter the server's connection string, and once it connects — the schema is created and any data in the config directory is carried over — you can continue.</p>
        <label class="field-label" for="ob-db-url">Postgres connection string</label>
        <input id="ob-db-url" type="text" autocomplete="off" spellcheck="false" placeholder="postgres://user:password@host:5432/channelflow">
-       <div class="ob-action"><button type="button" class="primary" id="ob-do">Connect database</button></div>`,
+       <div class="ob-action"><button type="button" class="primary ob-do">Connect database</button></div>`,
     after: () => attachObDatabase(),
   },
   {
     next: () => !!obCompleted["com.channelflow.ersatztv"],
     body: () =>
       `<p>Your channels will be encoded and streamed by the <strong>ErsatzTV Transcoding Engine</strong>, which turns a channel into the HLS stream a player watches. Install it now:</p>
-       <div class="ob-action"><button type="button" class="primary" id="ob-do">Install latest ErsatzTV Transcoding Engine</button></div>`,
+       <div class="ob-action"><button type="button" class="primary ob-do">Install latest ErsatzTV Transcoding Engine</button></div>`,
     after: () =>
       attachObInstall("com.channelflow.ersatztv", "Install latest ErsatzTV Transcoding Engine"),
   },
@@ -815,7 +815,7 @@ const OB = [
     next: () => !!obCompleted["com.channelflow.jellyfin"],
     body: () =>
       `<p>ChannelFlow pulls movies and shows from a <strong>media source</strong>. Install the <strong>Jellyfin media source</strong> now — it connects your Jellyfin library to your channels.</p>
-       <div class="ob-action"><button type="button" class="primary" id="ob-do">Install the Jellyfin media source</button></div>`,
+       <div class="ob-action"><button type="button" class="primary ob-do">Install the Jellyfin media source</button></div>`,
     after: () => attachObInstall("com.channelflow.jellyfin", "Install the Jellyfin media source"),
   },
   {
@@ -840,7 +840,7 @@ const OB = [
         <input id="ob-pass" type="password" autocomplete="new-password">
         <label class="field-label" for="ob-pass2">Confirm password</label>
         <input id="ob-pass2" type="password" autocomplete="new-password">
-        <div class="ob-action"><button type="button" class="primary" id="ob-do">Create account</button></div>
+        <div class="ob-action"><button type="button" class="primary ob-do">Create account</button></div>
       </form>`,
     after: () => attachObAccount(),
   },
@@ -867,7 +867,7 @@ function renderOnboarding() {
 }
 
 function attachObDatabase() {
-  const btn = document.getElementById("ob-do");
+  const btn = document.querySelector(".ob-do");
   if (!btn) return;
   btn.addEventListener("click", async () => {
     const url = document.getElementById("ob-db-url").value.trim();
@@ -895,7 +895,7 @@ function attachObDatabase() {
 }
 
 async function attachObInstall(pluginId, label) {
-  const btn = document.getElementById("ob-do");
+  const btn = document.querySelector(".ob-do");
   if (!btn) return;
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -958,7 +958,7 @@ async function saveObNetwork() {
 }
 
 function attachObAccount() {
-  const btn = document.getElementById("ob-do");
+  const btn = document.querySelector(".ob-do");
   if (!btn) return;
   btn.addEventListener("click", async () => {
     const username = document.getElementById("ob-user").value.trim();

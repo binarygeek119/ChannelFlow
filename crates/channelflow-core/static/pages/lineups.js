@@ -437,7 +437,7 @@ function addOverrideFlow() {
     `<label class="field"><span class="field-label">Applies to</span>` +
     `<select id="override-kind"><option value="day_of_week">Day of week</option><option value="specific_date">Specific date</option></select></label>` +
     `<div id="override-when">` + dayOfWeekSelect() + `</div>` +
-    `<p class="hint" id="lineup-slot-note"></p>`;
+    `<p class="hint" id="lineup-override-note"></p>`;
   const actions =
     `<button type="button" class="ghost" data-close>Cancel</button>` +
     `<button type="button" class="primary" id="override-add">Add Override</button>`;
@@ -467,7 +467,7 @@ function addOverrideFlow() {
       closeLineupModal();
       setLineupResult("Override added — click its card to edit that day.");
     } catch (error) {
-      $("lineup-slot-note").textContent = error.message;
+      $("lineup-override-note").textContent = error.message;
     }
   });
   shell.querySelector("[data-close]").addEventListener("click", closeLineupModal);

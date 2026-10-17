@@ -188,6 +188,22 @@ pub fn catalog_view(
     serde_json::json!({ "plugins": plugins })
 }
 
+/// Order two version strings the way a person reads them, so a catalog that
+/// lists versions as text (where "2.0.4" sorts after "2.0.33") still resolves
+/// the newest release. Anything unparseable sorts below a real version.
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (
+        channelflow_plugin_api::version::parse(a),
+        channelflow_plugin_api::version::parse(b),
+    ) {
+        (Ok(a), Ok(b)) => a.cmp(&b),
+        (Ok(_), Err(_)) => Ordering::Greater,
+        (Err(_), Ok(_)) => Ordering::Less,
+        (Err(_), Err(_)) => a.cmp(b),
+    }
+}
+
 /// Pick the version to install: the one the caller named, or the newest
 /// compatible with `base_version`.
 fn pick_version(
@@ -209,14 +225,18 @@ fn pick_version(
         None => entry
             .versions
             .iter()
-            .rev()
-            .find(|candidate| {
+            .filter(|candidate| {
                 channelflow_plugin_api::version::compatible(
                     base_version,
                     &candidate.min_base_version,
                     &candidate.max_base_version,
                 )
             })
+            // Newest by version, not by position. A catalog whose versions[]
+            // is sorted as text puts "2.0.4" after "2.0.33", and taking the
+            // last entry there installs a plugin years older than the newest
+            // release.
+            .max_by(|a, b| compare_versions(&a.version, &b.version))
             .ok_or_else(|| {
                 StoreError::Plugin(format!(
                     "no version of {} is compatible with base {}",
@@ -513,6 +533,39 @@ mod tests {
             ]
         }
     ]"#;
+
+    #[test]
+    fn picks_the_newest_version_not_the_last_entry() {
+        // The plugin repo sorted versions as text, which puts "2.0.4" after
+        // "2.0.33" — so taking the last entry handed a fresh install the older
+        // plugin. Newest must win by version, and compatibility still filters.
+        let entries = parse_catalog(
+            r#"[{
+                "id": "com.channelflow.jellyfin",
+                "name": "Jellyfin",
+                "versions": [
+                    {"version": "2.0.33", "min_base_version": "2.0.0", "max_base_version": "2.999.999"},
+                    {"version": "2.0.4",  "min_base_version": "2.0.0", "max_base_version": "2.999.999"},
+                    {"version": "3.0.0",  "min_base_version": "3.0.0", "max_base_version": "3.999.999"}
+                ]
+            }]"#,
+        )
+        .expect("parses");
+        let entry = &entries[0];
+
+        assert_eq!(
+            pick_version(entry, "2.0.0", None).expect("picks").version,
+            "2.0.33",
+            "the newest compatible version wins, whatever the catalog's order"
+        );
+        // Naming a version still installs exactly that one.
+        assert_eq!(
+            pick_version(entry, "2.0.0", Some("2.0.4")).expect("picks").version,
+            "2.0.4"
+        );
+        // And a version that needs a newer base is never chosen for this one.
+        assert_eq!(pick_version(entry, "3.0.0", None).expect("picks").version, "3.0.0");
+    }
 
     #[test]
     fn parses_and_rejects_garbage() {

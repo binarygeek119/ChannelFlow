@@ -47,7 +47,6 @@ RUN chmod +x /usr/local/bin/channelflow-entrypoint.sh
 COPY crates/channelflow-core/static /usr/share/channelflow/webui
 
 # Generate .ui-version file from UI_BUILD in app.js
-RUN /usr/local/bin/generate-ui-version.sh || true
 COPY scripts/generate-ui-version.sh /usr/local/bin/generate-ui-version.sh
 RUN chmod +x /usr/local/bin/generate-ui-version.sh && /usr/local/bin/generate-ui-version.sh
 

@@ -31,7 +31,11 @@ services:
 
   channelflow:
     build: .
-    image: ghcr.io/binarygeek119/channelflow:latest
+    # Pin the release tag, never `latest`: `latest` is the 1.x image (the 2.0
+    # workflow deliberately leaves it alone), and `docker compose up -d` pulls
+    # whatever the tag names rather than building. Pointing here at `latest`
+    # silently runs the old server.
+    image: ghcr.io/binarygeek119/channelflow:2.0.0
     container_name: channelflow
     restart: unless-stopped
     depends_on:

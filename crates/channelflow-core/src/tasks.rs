@@ -370,6 +370,21 @@ async fn run_scanner(
     running_title: &str,
     progress_url: Option<String>,
 ) -> Result<SyncRun, StoreError> {
+    // Only one scan at a time: a trigger that lands while a scan is running is
+    // refused, not stacked (see `scan_slot`). The guard is held for the whole
+    // scan and dropped however it ends.
+    let _scan = match scan_slot().try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            tracing::info!(
+                task = running_kind,
+                "a scan is already running; ignoring this trigger"
+            );
+            return Err(StoreError::Plugin(format!(
+                "{running_title} is already running"
+            )));
+        }
+    };
     // A sync can outlive the tab that started it, so mark it running in a
     // process-wide slot the web UI can read on (re)load; clear it however the
     // sync ends. The slot is in-memory, so a server restart leaves nothing
@@ -413,6 +428,25 @@ pub fn running() -> Option<RunningTask> {
 
 fn set_running(task: Option<RunningTask>) {
     *running_slot().lock().unwrap() = task;
+}
+
+/// The one scan that may run at a time. The Jellyfin, news and local scans all
+/// write the same catalog tables behind a single unique `match_key` index, so
+/// running two at once only parks each one on the other's row locks: a delete
+/// that matches nothing yet takes seconds is a lock wait, not work, and on a
+/// slow (e.g. containerised) database that stretches a scan from minutes into
+/// hours. Worse, a run is only recorded once it finishes, so `is_due` still
+/// reads "due" while it is in flight and the next trigger starts *another*
+/// full scan on top of it. This slot makes triggers refuse instead of stack.
+fn scan_slot() -> &'static tokio::sync::Mutex<()> {
+    static SLOT: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    SLOT.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// True while a scan is running, so the daily timers skip their tick rather
+/// than queue another full sync behind this one.
+pub fn scan_running() -> bool {
+    scan_slot().try_lock().is_err()
 }
 
 async fn run_sync_inner(

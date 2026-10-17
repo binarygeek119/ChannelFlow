@@ -511,7 +511,9 @@ async fn main() -> Result<()> {
             loop {
                 ticker.tick().await;
                 let config = tasks::load(&store).await;
-                if tasks::is_due(&store, &config, chrono::Utc::now()).await {
+                if !tasks::scan_running()
+                    && tasks::is_due(&store, &config, chrono::Utc::now()).await
+                {
                     if let Err(error) =
                         tasks::run_sync(&store, &media, &config_dir, "schedule", None).await
                     {
@@ -534,7 +536,9 @@ async fn main() -> Result<()> {
             loop {
                 ticker.tick().await;
                 let config = tasks::news_load(&store).await;
-                if tasks::news_is_due(&store, &config, chrono::Utc::now()).await {
+                if !tasks::scan_running()
+                    && tasks::news_is_due(&store, &config, chrono::Utc::now()).await
+                {
                     if let Err(error) =
                         tasks::run_news_scan(&store, &media, &config_dir, "schedule", None).await
                     {
@@ -557,7 +561,9 @@ async fn main() -> Result<()> {
             loop {
                 ticker.tick().await;
                 let config = tasks::local_load(&store).await;
-                if tasks::local_is_due(&store, &config, chrono::Utc::now()).await {
+                if !tasks::scan_running()
+                    && tasks::local_is_due(&store, &config, chrono::Utc::now()).await
+                {
                     if let Err(error) =
                         tasks::run_local_scan(&store, &media, &config_dir, "schedule", None).await
                     {

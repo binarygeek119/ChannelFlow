@@ -1184,6 +1184,22 @@ impl CoreData for StoreCoreData {
             .map_err(|error| CoreDataError(error.to_string()))
     }
 
+    async fn set_channel_lineup(
+        &self,
+        channel_id: &str,
+        slots: Vec<serde_json::Value>,
+    ) -> Result<(), CoreDataError> {
+        // Convert the slots to a ChannelLineup structure
+        let lineup = serde_json::json!({
+            "slots": slots,
+            "overrides": []
+        });
+        self.store
+            .lineup_set(uuid::Uuid::parse_str(channel_id).map_err(|e| CoreDataError(e.to_string()))?, &lineup)
+            .await
+            .map_err(|error| CoreDataError(error.to_string()))
+    }
+
     async fn tts_provider(&self) -> Result<Option<TtsProvider>, CoreDataError> {
         // A dedicated TTS provider (tts_only) beats one that merely names a
         // tts_model; within a class the lowest priority number wins.

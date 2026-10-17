@@ -30,3 +30,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [profile.release]
 lto = "thin"
 strip = true
+
+# Use the local version of the plugin API for all dependencies, including
+# plugins fetched from git. This ensures there's only one version of the SDK
+# in the dependency graph.
+[patch."https://github.com/binarygeek119/ChannelFlow"]
+channelflow-plugin-api = { path = "crates/channelflow-plugin-api" }

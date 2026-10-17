@@ -35,7 +35,7 @@ services:
     # workflow deliberately leaves it alone), and `docker compose up -d` pulls
     # whatever the tag names rather than building. Pointing here at `latest`
     # silently runs the old server.
-    image: ghcr.io/binarygeek119/channelflow:2.0.0
+    image: ghcr.io/binarygeek119/channelflow:v2.0.0
     container_name: channelflow
     restart: unless-stopped
     depends_on:

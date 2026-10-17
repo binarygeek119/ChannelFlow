@@ -190,6 +190,19 @@ pub trait CoreData: Send + Sync {
         let _ = (channel_id, programs);
         Ok(())
     }
+
+    /// Replace the channel's lineup (the 48-slot schedule the Lineups page shows).
+    /// The Scheduler writes its generated blocks here so the Lineups page can
+    /// display what was scheduled. The default is a no-op so read-only plugins
+    /// need not implement it.
+    async fn set_channel_lineup(
+        &self,
+        channel_id: &str,
+        slots: Vec<serde_json::Value>,
+    ) -> Result<(), CoreDataError> {
+        let _ = (channel_id, slots);
+        Ok(())
+    }
     /// The first AI provider suitable for TTS.
     ///
     /// Priority:

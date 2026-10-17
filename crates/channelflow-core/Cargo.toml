@@ -21,10 +21,9 @@ chrono.workspace = true
 chrono-tz.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
 cron.workspace = true
-# The SDK is fetched the same way the plugin repo fetches it — by git from
-# this repo's own branch — so there is exactly one channelflow-plugin-api in
-# the dependency graph and core's Plugin trait is the plugin's Plugin trait.
-channelflow-plugin-api = { git = "https://github.com/binarygeek119/ChannelFlow", branch = "2.0.0" }
+# The SDK is a local workspace member during development so changes to the
+# plugin API are immediately visible to the core without requiring a push.
+channelflow-plugin-api = { path = "../channelflow-plugin-api" }
 # The bundled plugins live in their own repo; the base builds against them by
 # git so the combined image still ships them compiled in.
 channelflow-plugin-ai = { git = "https://github.com/binarygeek119/ChannelFlow-Plugins", branch = "main" }

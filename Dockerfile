@@ -46,6 +46,11 @@ RUN chmod +x /usr/local/bin/channelflow-entrypoint.sh
 # (see main.rs: CHANNELFLOW_WEBUI default below).
 COPY crates/channelflow-core/static /usr/share/channelflow/webui
 
+# Generate .ui-version file from UI_BUILD in app.js
+RUN /usr/local/bin/generate-ui-version.sh || true
+COPY scripts/generate-ui-version.sh /usr/local/bin/generate-ui-version.sh
+RUN chmod +x /usr/local/bin/generate-ui-version.sh && /usr/local/bin/generate-ui-version.sh
+
 # The WeatherStar renderers the compositor serves. They ship with the image so
 # a fresh install has the graphics without a second download.
 COPY vendor/ws4kp /app/channelflow/ws4kp

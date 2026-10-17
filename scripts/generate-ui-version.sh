@@ -1,13 +1,20 @@
 #!/bin/sh
 # Generate .ui-version file from UI_BUILD constant in app.js
 # This is used by the Docker entrypoint to detect when the web UI needs updating
+# Usage: generate-ui-version.sh [webui_dir]
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-STATIC_DIR="$SCRIPT_DIR/../crates/channelflow-core/static"
-APP_JS="$STATIC_DIR/app.js"
-VERSION_FILE="$STATIC_DIR/.ui-version"
+# If webui_dir is provided, use it; otherwise use the default relative path
+if [ -n "$1" ]; then
+    WEBUI_DIR="$1"
+else
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    WEBUI_DIR="$SCRIPT_DIR/../crates/channelflow-core/static"
+fi
+
+APP_JS="$WEBUI_DIR/app.js"
+VERSION_FILE="$WEBUI_DIR/.ui-version"
 
 if [ ! -f "$APP_JS" ]; then
     echo "Error: app.js not found at $APP_JS" >&2

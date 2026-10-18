@@ -1,0 +1,94 @@
+@page "/presets"
+@inject HttpClient Http
+<h2>Presets</h2>
+<p class="hint">Ready-made channel templates. Create missing channels with one click.</p>
+
+<div style="margin-bottom:1rem;">
+    <label>Numbering mode
+        <select @bind="mode" @bind:after="Load">
+            <option value="retro">Retro (original)</option>
+            <option value="modern">Modern (subchannels)</option>
+        </select>
+    </label>
+</div>
+
+@if (loading) { <p>Loading...</p> }
+else if (presets.Count == 0) { <p class="empty">No presets available.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Number</th><th>Name</th><th>Category</th><th>Description</th><th>Exists</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var p in presets)
+        {
+            <tr>
+                <td>@p.Number</td>
+                <td><strong>@p.Name</strong></td>
+                <td>@p.Category</td>
+                <td style="font-size:.85rem;">@p.Description</td>
+                <td><span class="pill @(p.Exists ? "on" : "off")">@(p.Exists ? "Yes" : "No")</span></td>
+                <td>
+                    @if (!p.Exists)
+                    {
+                        <button class="primary" @onclick="() => CreateChannel(p)" disabled="@creating">@(creating ? "..." : "Create")</button>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+@code {
+    private List<PresetDto> presets = new();
+    private string mode = "retro";
+    private bool loading, creating;
+    private string? msg;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<PresetResponse>($"api/plugins/com.channelflow.presets/presets?mode={mode}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null) presets = res.Presets;
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    private async Task CreateChannel(PresetDto p)
+    {
+        creating = true;
+        try
+        {
+            var num = double.Parse(p.Number);
+            await Http.PostAsJsonAsync("api/channels", new { Number = num, Name = p.Name, Enabled = true });
+            msg = $"Created {p.Name}.";
+            await Load();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        creating = false;
+    }
+
+    public class PresetResponse
+    {
+        public string Mode { get; set; } = "";
+        public List<PresetDto> Presets { get; set; } = new();
+        public string? Note { get; set; }
+    }
+    public class PresetDto
+    {
+        public string Id { get; set; } = "";
+        public string Number { get; set; } = "";
+        public string Retro { get; set; } = "";
+        public string Modern { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string Logo { get; set; } = "";
+        public bool Exists { get; set; }
+    }
+}

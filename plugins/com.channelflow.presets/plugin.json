@@ -1,12 +1,10 @@
 {
   "id": "com.channelflow.presets",
   "name": "Presets",
-  "version": "2.0.13",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": {
-    "dll": "ChannelFlow.Plugin.Presets.dll",
-    "type": "ChannelFlow.Plugin.Presets.PresetsPlugin"
-  },
-  "category": "catalog"
+  "entrypoint": { "dll": "ChannelFlow.Plugin.Presets.dll", "type": "ChannelFlow.Plugin.Presets.PresetsPlugin" },
+  "category": "catalog",
+  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
 }

@@ -44,9 +44,9 @@ public interface ICoreData
 
 public record CoreChannel(string Id, double Number, string Name, bool Enabled);
 
-public record CatalogRow(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags);
+public record CatalogRow(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? PosterUrl = null);
 
-public record MediaItemDto(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? ConnectionId, string? LibraryId);
+public record MediaItemDto(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? ConnectionId, string? LibraryId, string? PosterUrl = null);
 
 public record PersonCreditDto(Guid Id, Guid PersonId, string MediaMatchKey, string Role, string? Character, string? ImagePath);
 

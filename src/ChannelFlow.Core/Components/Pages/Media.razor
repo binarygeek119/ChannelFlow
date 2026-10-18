@@ -2,21 +2,9 @@
 @inject HttpClient Http
 <h2>Media</h2>
 
-<!-- Inner tabs -->
-<div class="inner-tabs">
-    @foreach (var tab in tabs)
-    {
-        <button class="inner-tab @(activeTab == tab ? "active" : "")" @onclick="() => SwitchTab(tab)">@tab</button>
-    }
-</div>
-
-<!-- Sync form -->
 <div class="panel" style="margin-bottom:1rem;">
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
-        <select @bind="source">
-            <option value="jellyfin">Jellyfin</option>
-        </select>
-        <input @bind="url" placeholder="Server URL" style="width:300px;" />
+        <input @bind="url" placeholder="Jellyfin URL" style="width:300px;" />
         <input @bind="apiKey" placeholder="API Key" style="width:200px;" />
         <input @bind="libraryId" placeholder="Library Id" style="width:150px;" />
         <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
@@ -24,45 +12,44 @@
     @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
 </div>
 
-<!-- Tab content -->
+<div class="inner-tabs" style="margin-bottom:1rem;">
+    @foreach (var tab in tabs)
+    {
+        <button class="inner-tab @(activeTab == tab ? "active" : "")" @onclick="() => SwitchTab(tab)">@tab</button>
+    }
+</div>
+
 @if (loading) { <p>Loading...</p> }
+else if (items.Count == 0) { <p class="empty">No items in this category.</p> }
 else
 {
-    <div class="panel">
-        <div class="panel-head">
-            <h2>@activeTab</h2>
-            <span class="count">@items.Count of @totalCount</span>
-        </div>
-        <p class="hint">The items your media sources have synced, straight from ChannelFlow's own catalog.</p>
-        @if (items.Count == 0) { <p class="empty">No items in this category.</p> }
-        else
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
+        @foreach (var it in items)
         {
-            <table>
-                <thead><tr><th>Title</th><th>Kind</th><th>Year</th><th>Genres</th><th>Rating</th></tr></thead>
-                <tbody>
-                @foreach (var it in items)
-                {
-                    <tr>
-                        <td class="channel-name">@it.Title</td>
-                        <td>@it.Kind</td>
-                        <td>@it.Year</td>
-                        <td style="font-size:.85rem;">@string.Join(", ", it.Genres)</td>
-                        <td>@(it.OfficialRating ?? "—")</td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-            @if (totalCount > items.Count)
-            {
-                <div style="margin-top:.5rem;">
-                    <button class="ghost" @onclick="LoadMore">Load more</button>
+            <div class="card jf-card" style="cursor:pointer;" title="@it.Title">
+                <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
+                    @if (!string.IsNullOrEmpty(it.PosterUrl))
+                    {
+                        <img src="@it.PosterUrl" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
+                    }
+                    else
+                    {
+                        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">No poster</div>
+                    }
                 </div>
-            }
+                <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@it.Title</div>
+                <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(it.Year?.ToString() ?? it.Kind)</div>
+            </div>
         }
     </div>
+    @if (totalCount > items.Count)
+    {
+        <div style="margin-top:1rem;text-align:center;">
+            <button class="ghost" @onclick="LoadMore">Load more</button>
+        </div>
+    }
 }
 @code {
-    private string source = "jellyfin";
     private string url = "http://localhost:8096";
     private string apiKey = "";
     private string libraryId = "";
@@ -152,6 +139,7 @@ else
         public int? Year { get; set; }
         public List<string> Genres { get; set; } = new();
         public string? OfficialRating { get; set; }
+        public string? PosterUrl { get; set; }
     }
     public class CatalogResponse
     {

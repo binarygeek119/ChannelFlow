@@ -1,0 +1,154 @@
+@page "/ai"
+@inject HttpClient Http
+<h2>AI Providers</h2>
+<p class="hint">Manage AI providers for scheduling and other features. Providers are tried in priority order.</p>
+
+<div style="margin-bottom:1rem;">
+    <button class="primary" @onclick="() => showForm = !showForm">@(showForm ? "Cancel" : "Add Provider")</button>
+    <button class="ghost" @onclick="TestAll" disabled="@testing">@(testing ? "Testing..." : "Test All")</button>
+</div>
+
+@if (showForm)
+{
+    <div class="panel" style="margin-bottom:1rem;">
+        <h3>New Provider</h3>
+        <div style="display:grid;gap:.5rem;max-width:500px;">
+            <label>Name <input @bind="newProvider.Name" style="width:100%;" /></label>
+            <label>Base URL <input @bind="newProvider.BaseUrl" style="width:100%;" /></label>
+            <label>API Key <input @bind="newProvider.ApiKey" type="password" style="width:100%;" /></label>
+            <label>Model <input @bind="newProvider.Model" style="width:100%;" /></label>
+            <label>Temperature <input type="number" step="0.1" @bind="newProvider.Temperature" style="width:100px;" /></label>
+            <label><input type="checkbox" @bind="newProvider.Enabled" /> Enabled</label>
+            <label>Priority <input type="number" @bind="newProvider.Priority" style="width:80px;" /></label>
+            <div style="display:flex;gap:.5rem;">
+                <button class="primary" @onclick="Create" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+                <button class="ghost" @onclick="TestDraft" disabled="@testing">@(testing ? "Testing..." : "Test")</button>
+            </div>
+            @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note">@testResult</p> }
+        </div>
+    </div>
+}
+
+@if (loading) { <p>Loading...</p> }
+else if (providers.Count == 0) { <p class="empty">No providers configured. Add one above.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Name</th><th>Base URL</th><th>Model</th><th>Enabled</th><th>Priority</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var p in providers)
+        {
+            <tr>
+                <td>@p.Name</td>
+                <td><code>@p.BaseUrl</code></td>
+                <td>@p.Model</td>
+                <td><span class="pill @(p.Enabled ? "on" : "off")">@(p.Enabled ? "ON" : "OFF")</span></td>
+                <td>@p.Priority</td>
+                <td>
+                    <button class="link" @onclick="() => TestProvider(p.Id)">Test</button>
+                    <button class="link danger" @onclick="() => Delete(p.Id)">Delete</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+@code {
+    private List<AiProviderDto> providers = new();
+    private AiProviderDto newProvider = new() { Enabled = true, BaseUrl = "https://api.openai.com/v1", Model = "gpt-4o-mini", Temperature = 0.7 };
+    private bool loading, saving, testing, showForm;
+    private string? testResult, msg;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<AiView>("api/plugins/com.channelflow.ai/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            providers = res?.Providers ?? new();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    private async Task Create()
+    {
+        saving = true;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/plugins/com.channelflow.ai/providers", newProvider);
+            if (res.IsSuccessStatusCode) { showForm = false; newProvider = new() { Enabled = true, BaseUrl = "https://api.openai.com/v1", Model = "gpt-4o-mini", Temperature = 0.7 }; await Load(); }
+            else msg = "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task TestDraft()
+    {
+        testing = true;
+        testResult = null;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/plugins/com.channelflow.ai/test", newProvider);
+            var body = await res.Content.ReadAsStringAsync();
+            testResult = res.IsSuccessStatusCode ? "Test passed!" : "Test failed: " + body;
+        }
+        catch (Exception e) { testResult = "Error: " + e.Message; }
+        testing = false;
+    }
+
+    private async Task TestProvider(string id)
+    {
+        try
+        {
+            var res = await Http.PostAsync($"api/plugins/com.channelflow.ai/providers/{id}/test", null);
+            var body = await res.Content.ReadAsStringAsync();
+            msg = res.IsSuccessStatusCode ? $"Test passed: {body}" : $"Test failed: {body}";
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task TestAll()
+    {
+        testing = true;
+        try
+        {
+            var res = await Http.PostAsync("api/plugins/com.channelflow.ai/test-all", null);
+            var body = await res.Content.ReadAsStringAsync();
+            msg = res.IsSuccessStatusCode ? $"Failover test: {body}" : $"Error: {body}";
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        testing = false;
+    }
+
+    private async Task Delete(string id)
+    {
+        await Http.DeleteAsync($"api/plugins/com.channelflow.ai/providers/{id}");
+        await Load();
+    }
+
+    public class AiProviderDto
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string BaseUrl { get; set; } = "";
+        public string ApiKey { get; set; } = "";
+        public string Model { get; set; } = "";
+        public string? VisionModel { get; set; }
+        public string? TtsModel { get; set; }
+        public string? TtsVoice { get; set; }
+        public double Temperature { get; set; } = 0.7;
+        public bool Enabled { get; set; } = true;
+        public int Priority { get; set; }
+        public bool Ollama { get; set; }
+    }
+    public class AiView
+    {
+        public List<AiProviderDto> Providers { get; set; } = new();
+        public string? Chosen { get; set; }
+    }
+}

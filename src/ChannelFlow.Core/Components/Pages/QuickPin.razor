@@ -1,0 +1,97 @@
+@page "/quickpin"
+@inject HttpClient Http
+<div class="panel">
+    <div class="panel-head">
+        <h2>Pair an app</h2>
+    </div>
+    <p class="hint">
+        On the ChannelFlow app, start pairing to get an 8-character PIN. Type it here and pair.
+        ChannelFlow gives the app its own random API key, encrypts this instance's Live TV URLs
+        (carrying that key) with the PIN, and hands the ciphertext to the relay, which forwards it to
+        the waiting app — the relay never sees the key or the URLs, and this server never stores the PIN.
+    </p>
+    <p class="hint">Relay: <code>https://channelflow.duckdns.org</code></p>
+    <form class="ms-form" @onsubmit="Pair" @onsubmit:preventDefault>
+        <div class="field">
+            <label class="field-label">Pairing PIN</label>
+            <input type="text" @bind="pin" placeholder="XXXX-XXXX" maxlength="12" autocomplete="off">
+            <span class="field-hint">Shown on the app while it waits; case and dashes do not matter.</span>
+        </div>
+        <div class="ms-form-actions">
+            <button type="submit" class="primary">Pair app</button>
+        </div>
+        @if (!string.IsNullOrEmpty(result)) { <p class="field-note">@result</p> }
+    </form>
+</div>
+
+<div class="panel">
+    <div class="panel-head">
+        <h2>What the app receives</h2>
+    </div>
+    <p class="hint">
+        The Live TV URLs for this instance (set them on <strong>General Settings</strong>). Pairing
+        sends the local pair first when you are on the same network and the public pair otherwise, plus
+        both variants so the app can fall back.
+    </p>
+    @if (payload is not null)
+    {
+        <table>
+            <tbody>
+                <tr><td>Local · M3U</td><td><code>@payload.M3uLocal</code></td></tr>
+                <tr><td>Local · XMLTV</td><td><code>@payload.XmltvLocal</code></td></tr>
+                <tr><td>Public · M3U</td><td><code>@payload.M3uPublic</code></td></tr>
+                <tr><td>Public · XMLTV</td><td><code>@payload.XmltvPublic</code></td></tr>
+            </tbody>
+        </table>
+    }
+</div>
+@code {
+    private string pin = "";
+    private string? result;
+    private PayloadDto? payload;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<QuickPinGetResponse>("api/quickpin", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null) payload = res.Payload;
+        }
+        catch { }
+    }
+
+    private async Task Pair()
+    {
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/quickpin/pair", new { Pin = pin });
+            var body = await res.Content.ReadAsStringAsync();
+            if (res.IsSuccessStatusCode)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                var delivered = doc.RootElement.TryGetProperty("delivered", out var d) && d.GetBoolean();
+                result = delivered ? "Paired successfully!" : "No app was waiting for this PIN.";
+            }
+            else
+            {
+                result = "Error: " + body;
+            }
+        }
+        catch (Exception e) { result = "Error: " + e.Message; }
+    }
+
+    public class QuickPinGetResponse
+    {
+        public PayloadDto? Payload { get; set; }
+        public string? Server { get; set; }
+    }
+    public class PayloadDto
+    {
+        public string M3u { get; set; } = "";
+        public string Xmltv { get; set; } = "";
+        public string M3uPublic { get; set; } = "";
+        public string XmltvPublic { get; set; } = "";
+        public string M3uLocal { get; set; } = "";
+        public string XmltvLocal { get; set; } = "";
+    }
+}

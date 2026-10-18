@@ -8,3 +8,4 @@ obj/
 *.user
 node_modules/
 artifacts/
+data/

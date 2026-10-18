@@ -1,0 +1,66 @@
+@page "/general"
+@inject HttpClient Http
+<div class="panel">
+    <div class="panel-head">
+        <h2>Addresses</h2>
+    </div>
+    <p class="hint">
+        The addresses ChannelFlow is reached at. The <strong>local URL</strong> was detected on first
+        boot; correct it here if it is wrong. The <strong>public URL</strong> is only for an instance
+        exposed beyond your network.
+    </p>
+    <form class="ms-form" @onsubmit="Save" @onsubmit:preventDefault>
+        <div class="field">
+            <label class="field-label">Local URL</label>
+            <input type="url" @bind="settings.LocalUrl" placeholder="http://192.168.1.2:8097">
+            <span class="field-hint">How ChannelFlow is reached on your local network.</span>
+        </div>
+        <div class="field">
+            <label class="field-label">Public URL</label>
+            <input type="url" @bind="settings.PublicUrl" placeholder="https://channelflow.example.com">
+            <span class="field-hint">Optional. How it is reached from outside your network.</span>
+        </div>
+        <div class="field">
+            <label class="field-label">Guide time zone</label>
+            <input type="text" @bind="settings.Timezone" placeholder="Server default">
+            <span class="field-hint">The time zone the TV Guide shows times in. "Server default" follows this machine's clock.</span>
+        </div>
+        <div class="field">
+            <label class="field-label">Playout days to build (1–14)</label>
+            <input type="number" min="1" max="14" step="1" @bind="settings.PlayoutDays">
+            <span class="field-hint">How many days of channel playout to plan ahead.</span>
+        </div>
+        <div class="field">
+            <label class="field-label">Keep stream running after last viewer (seconds)</label>
+            <input type="number" min="0" max="3600" step="1" @bind="settings.StreamIdleSeconds">
+            <span class="field-hint">After nobody is watching, keep encoding for this many seconds so a returning viewer does not wait for a fresh stream. 0 stops immediately.</span>
+        </div>
+        <div class="ms-form-actions">
+            <button type="submit" class="primary">Save</button>
+        </div>
+        @if (!string.IsNullOrEmpty(result)) { <p class="field-note">@result</p> }
+    </form>
+</div>
+@code {
+    private GeneralSettings settings = new();
+    private string? result;
+    protected override async Task OnInitializedAsync()
+    {
+        try { settings = await Http.GetFromJsonAsync<GeneralSettings>("api/settings/general", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new(); }
+        catch { }
+    }
+    private async Task Save()
+    {
+        var res = await Http.PutAsJsonAsync("api/settings/general", settings);
+        result = res.IsSuccessStatusCode ? "Saved." : "Error saving.";
+    }
+    public class GeneralSettings
+    {
+        public string Key { get; set; } = "general";
+        public string PublicUrl { get; set; } = "";
+        public string LocalUrl { get; set; } = "";
+        public string Timezone { get; set; } = "";
+        public int PlayoutDays { get; set; } = 14;
+        public int StreamIdleSeconds { get; set; } = 30;
+    }
+}

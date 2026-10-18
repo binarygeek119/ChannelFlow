@@ -1,0 +1,69 @@
+@page "/client-logs"
+@inject HttpClient Http
+<div class="panel">
+    <div class="panel-head">
+        <h2>Client Logs</h2>
+    </div>
+    <p class="hint">
+        ChannelFlow TV apps send their log lines back to the server over
+        <code>POST /api/client-logs</code>, authenticated with their own API key, one dated file per
+        day per device. Pick a device and a log file below to read what it reported.
+    </p>
+    <div class="ms-form-actions">
+        <label class="field-label" for="client-logs-device" style="display:inline-block; margin-right:0.6rem;">Device</label>
+        <select id="client-logs-device" @bind="selectedDevice" @bind:after="LoadFiles">
+            <option value="">-- select --</option>
+            @foreach (var d in devices) { <option value="@d">@d</option> }
+        </select>
+        <label class="field-label" for="client-logs-file" style="display:inline-block; margin:0 0.6rem 0 1rem;">Log file</label>
+        <select id="client-logs-file" @bind="selectedFile" @bind:after="LoadContent">
+            <option value="">-- select --</option>
+            @foreach (var f in files) { <option value="@f">@f</option> }
+        </select>
+        <button type="button" class="ghost" @onclick="Refresh">Refresh</button>
+    </div>
+    <pre class="client-log-viewer" style="background:#111;color:#0f0;padding:1rem;max-height:500px;overflow:auto;font-size:.8rem;margin-top:1rem;">@(string.IsNullOrEmpty(logContent) ? "No ChannelFlow TV clients have sent logs yet." : logContent)</pre>
+</div>
+@code {
+    private List<string> devices = new();
+    private List<string> files = new();
+    private string selectedDevice = "";
+    private string selectedFile = "";
+    private string logContent = "";
+
+    protected override async Task OnInitializedAsync() => await Refresh();
+
+    private async Task Refresh()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<DevicesResponse>("api/client-logs", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            devices = res?.Devices ?? new();
+        }
+        catch { devices = new(); }
+    }
+
+    private async Task LoadFiles()
+    {
+        files.Clear();
+        logContent = "";
+        selectedFile = "";
+        if (string.IsNullOrEmpty(selectedDevice)) return;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<DeviceDetail>($"api/client-logs/{selectedDevice}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            files = res?.Files ?? new();
+        }
+        catch { }
+    }
+
+    private async Task LoadContent()
+    {
+        if (string.IsNullOrEmpty(selectedDevice) || string.IsNullOrEmpty(selectedFile)) return;
+        try { logContent = await Http.GetStringAsync($"api/client-logs/{selectedDevice}?file={selectedFile}"); }
+        catch { logContent = "Error loading file."; }
+    }
+
+    public class DevicesResponse { public List<string> Devices { get; set; } = new(); }
+    public class DeviceDetail { public string Device { get; set; } = ""; public List<string> Files { get; set; } = new(); }
+}

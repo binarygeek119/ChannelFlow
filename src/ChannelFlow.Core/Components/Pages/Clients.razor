@@ -1,0 +1,87 @@
+@page "/clients"
+@inject HttpClient Http
+<div class="panel">
+    <div class="panel-head">
+        <h2>Clients</h2>
+        <span class="count">@clientCount</span>
+    </div>
+    <p class="hint">
+        Every ChannelFlow TV app and every copied playlist URL pairs with its own random API key.
+        Remove a client to destroy that key — the next time it connects it cannot, and it drops this
+        server from its list.
+    </p>
+    <p class="hint">Server API key (for the Jellyfin plugin and generic URLs): <code>@serverKeyHint</code></p>
+    <div class="ms-form-actions">
+        <button type="button" class="ghost" @onclick="Load">Refresh</button>
+    </div>
+    @if (loading) { <p>Loading...</p> }
+    else if (clients.Count == 0) { <p class="empty">No clients paired yet.</p> }
+    else
+    {
+        <table>
+            <thead><tr><th>ID</th><th>Label</th><th>Key Hint</th><th>Created</th><th>Last Seen</th><th class="actions">Actions</th></tr></thead>
+            <tbody>
+            @foreach (var c in clients)
+            {
+                <tr>
+                    <td><code>@c.Id</code></td>
+                    <td>@(c.Label ?? "—")</td>
+                    <td><code>@c.KeyHint</code></td>
+                    <td>@c.CreatedAt</td>
+                    <td>@(c.LastSeenAt ?? "never")</td>
+                    <td class="actions">
+                        <button class="link danger" @onclick="() => Remove(c.Id)">Remove</button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    @if (!string.IsNullOrEmpty(note)) { <p class="field-note">@note</p> }
+</div>
+@code {
+    private List<ClientDto> clients = new();
+    private string serverKeyHint = "••••";
+    private string? note;
+    private bool loading;
+    private int clientCount => clients.Count;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        note = null;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<ClientsResponse>("api/clients", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null)
+            {
+                clients = res.Clients ?? new();
+                serverKeyHint = res.ServerKeyHint ?? "••••";
+            }
+        }
+        catch (Exception e) { note = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    private async Task Remove(string id)
+    {
+        await Http.DeleteAsync($"api/clients/{id}");
+        await Load();
+    }
+
+    public class ClientsResponse
+    {
+        public List<ClientDto> Clients { get; set; } = new();
+        public string ServerKeyHint { get; set; } = "";
+    }
+    public class ClientDto
+    {
+        public string Id { get; set; } = "";
+        public string? Label { get; set; }
+        public string KeyHint { get; set; } = "";
+        public string CreatedAt { get; set; } = "";
+        public string? LastSeenAt { get; set; }
+    }
+}

@@ -48,6 +48,7 @@ builder.Services.AddScoped<MigrationService>();
 builder.Services.AddHostedService<BuildQueue>();
 builder.Services.AddSingleton<PluginManager>(sp => new PluginManager(sp));
 
+builder.Services.AddSingleton<ClientLogsService>(sp => new ClientLogsService(Path.Combine(builder.Environment.ContentRootPath, "data")));
 var app = builder.Build();
 
 // Auto-create schema on startup (dev; use Migrate in prod).

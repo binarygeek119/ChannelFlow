@@ -11,18 +11,10 @@
     <button @onclick="Save">Save</button>
 </div>
 @if (saved) { <p style="color:green;">Saved.</p> }
-<h3>General</h3>
-<div style="display:grid;gap:.5rem;max-width:500px;margin-bottom:1rem;">
-    <label>Timezone <input @bind="tz" style="width:100%;" /></label>
-    <button @onclick="SaveTz">Save Timezone</button>
-    @if (tzSaved) { <p style="color:green;">Saved.</p> }
-</div>
-
 @code {
     private LlmConfig cfg = new();
     private bool saved;
-    private string tz = "UTC";
-    private bool tzSaved;
+
     private async Task Save()
     {
         await Http.PostAsJsonAsync("api/settings/llm", cfg);
@@ -31,12 +23,7 @@
     protected override async Task OnInitializedAsync()
     {
         try { cfg = await Http.GetFromJsonAsync<LlmConfig>("api/settings/llm") ?? new(); } catch { }
-        try { var g = await Http.GetFromJsonAsync<GenSettings>("api/settings/general", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); if (g is not null) tz = g.Timezone; } catch { }
-    }
-    private async Task SaveTz()
-    {
-        await Http.PutAsJsonAsync("api/settings/general", new { Timezone = tz });
-        tzSaved = true;
+
     }
     public class GenSettings { public string Timezone { get; set; } = "UTC"; }
     public class LlmConfig

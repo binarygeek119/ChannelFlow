@@ -24,7 +24,14 @@ public class GeneralSettingsController : ControllerBase
     {
         var s = await _db.GeneralSettings.FindAsync("general");
         if (s is null) { settings.Key = "general"; _db.GeneralSettings.Add(settings); }
-        else { s.Timezone = settings.Timezone; s.Value = settings.Value; }
+        else
+        {
+            s.PublicUrl = settings.PublicUrl.Trim().TrimEnd('/');
+            s.LocalUrl = settings.LocalUrl.Trim().TrimEnd('/');
+            s.Timezone = settings.Timezone.Trim();
+            s.PlayoutDays = Math.Clamp(settings.PlayoutDays, 1, 14);
+            s.StreamIdleSeconds = Math.Clamp(settings.StreamIdleSeconds, 0, 3600);
+        }
         await _db.SaveChangesAsync();
         return Ok(settings);
     }

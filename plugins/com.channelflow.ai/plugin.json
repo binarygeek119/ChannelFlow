@@ -1,12 +1,10 @@
 {
   "id": "com.channelflow.ai",
   "name": "AI Provider Suite",
-  "version": "2.0.11",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": {
-    "dll": "ChannelFlow.Plugin.AIProviderSuite.dll",
-    "type": "ChannelFlow.Plugin.AIProviderSuite.AIProviderSuitePlugin"
-  },
-  "category": "ai"
+  "entrypoint": { "dll": "ChannelFlow.Plugin.AI.dll", "type": "ChannelFlow.Plugin.AI.AiPlugin" },
+  "category": "ai",
+  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
 }

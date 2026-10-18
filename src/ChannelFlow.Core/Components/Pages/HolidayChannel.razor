@@ -1,0 +1,130 @@
+@page "/holidaychannel"
+@inject HttpClient Http
+<h2>The Holiday Channel</h2>
+<p class="hint">Seasonal holiday calendar and content matching.</p>
+
+<div style="margin-bottom:1rem;">
+    <label>Date <input type="date" @bind="selectedDate" /></label>
+    <button @onclick="LoadCalendar">Load Calendar</button>
+</div>
+
+@if (calendar is not null)
+{
+    <div class="panel" style="margin-bottom:1rem;">
+        <h3>Active: @(calendar.Active?.Name ?? "None (off-season)")</h3>
+        <p>Logo: <code>@calendar.Logo</code></p>
+        @if (calendar.Upcoming is not null) { <p>Upcoming: @calendar.Upcoming.Name (@calendar.Upcoming.Observed)</p> }
+    </div>
+
+    <h3>Holidays</h3>
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Name</th><th>This Year</th><th>Window</th></tr></thead>
+        <tbody>
+        @foreach (var h in calendar.Holidays)
+        {
+            <tr>
+                <td><strong>@h.Name</strong></td>
+                <td>@h.ThisYear.Observed</td>
+                <td>@h.ThisYear.WindowStart – @h.ThisYear.WindowEnd</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    <div style="margin-top:1rem;">
+        <h3>Lineup Preview</h3>
+        <p>Enter catalog items as JSON to match against the active holiday.</p>
+        <button class="primary" @onclick="FetchLineup">Fetch Lineup (today)</button>
+        @if (lineupResult is not null)
+        {
+            <p>Matches: @lineupResult.Matches.Count, Off-season: @lineupResult.OffSeason</p>
+            @if (lineupResult.Matches.Count > 0)
+            {
+                <ul>@foreach (var m in lineupResult.Matches) { <li>@m.Title (@m.Year)</li> }</ul>
+            }
+        }
+    </div>
+}
+@code {
+    private DateTime selectedDate = DateTime.Today;
+    private HolidayCalendar? calendar;
+    private LineupResult? lineupResult;
+
+    protected override async Task OnInitializedAsync() => await LoadCalendar();
+
+    private async Task LoadCalendar()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<HolidayCalendar>($"api/plugins/com.channelflow.holidaychannel/calendar?date={selectedDate:yyyy-MM-dd}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            calendar = res;
+        }
+        catch (Exception e) { }
+    }
+
+    private async Task FetchLineup()
+    {
+        // Fetch catalog items first
+        try
+        {
+            var catalog = await Http.GetFromJsonAsync<CatalogResponse>("api/media/catalog?limit=1000", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var items = catalog?.Items ?? new();
+            var req = new { date = selectedDate.ToString("yyyy-MM-dd"), items = items };
+            var res = await Http.PostAsJsonAsync("api/plugins/com.channelflow.holidaychannel/lineup", req);
+            lineupResult = await res.Content.ReadFromJsonAsync<LineupResult>(new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception e) { }
+    }
+
+    public class HolidayCalendar
+    {
+        public string Date { get; set; } = "";
+        public HolidayInfo? Active { get; set; }
+        public HolidayInfo? Upcoming { get; set; }
+        public string Logo { get; set; } = "";
+        public List<HolidayDetail> Holidays { get; set; } = new();
+    }
+    public class HolidayInfo
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Logo { get; set; } = "";
+        public string Observed { get; set; } = "";
+    }
+    public class HolidayDetail
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Logo { get; set; } = "";
+        public ThisYear ThisYear { get; set; } = new();
+    }
+    public class ThisYear
+    {
+        public string Observed { get; set; } = "";
+        public string WindowStart { get; set; } = "";
+        public string WindowEnd { get; set; } = "";
+    }
+    public class LineupResult
+    {
+        public List<MatchItem> Matches { get; set; } = new();
+        public bool OffSeason { get; set; }
+    }
+    public class MatchItem
+    {
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+    }
+    public class CatalogResponse
+    {
+        public List<CatalogItem> Items { get; set; } = new();
+    }
+    public class CatalogItem
+    {
+        public string MatchKey { get; set; } = "";
+        public string Kind { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public List<string> Genres { get; set; } = new();
+        public string? OfficialRating { get; set; }
+    }
+}

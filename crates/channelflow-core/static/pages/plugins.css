@@ -52,3 +52,18 @@
 td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; }
 
 .plugin-remove-name { font-weight: 600; margin: 0.2rem 0 0.6rem; }
+.plugin-perms-popup {
+  position: absolute;
+  z-index: 1000;
+  max-width: 24rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--page-bg);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  white-space: normal;
+  word-break: break-word;
+}

@@ -58,7 +58,7 @@ function renderInstalled(plugins) {
             <div class="channel-desc">${status}${needs}</div></td>
         <td>${escapeHtml(plugin.category || "—")}</td>
         <td>${escapeHtml(plugin.version)}</td>
-        <td class="perms">${perms}</td>
+        <td class="perms"><button type="button" class="ghost perms-bubble" data-perms="${escapeHtml(perms)}" title="${escapeHtml(perms)}">Permissions</button></td>
         <td class="${plugin.health && plugin.health.ok ? "ok" : ""}">${escapeHtml(health)}</td>
         <td class="actions">${update}
           <button type="button" class="ghost danger" data-installed="${escapeHtml(plugin.id)}" data-act="remove">Remove</button>
@@ -197,6 +197,32 @@ els.pluginsRows.addEventListener("click", (event) => {
 els.pluginsStoreGrid.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-store]");
   if (button) installPlugin(button.dataset.store, button.dataset.url, button.dataset.version);
+});
+
+// Popup bubble for plugin permissions.
+els.pluginsRows.addEventListener("click", (event) => {
+  const button = event.target.closest("button.perms-bubble");
+  if (!button) return;
+  const perms = button.dataset.perms || "";
+  let bubble = document.getElementById("plugin-perms-bubble");
+  if (!bubble) {
+    bubble = document.createElement("div");
+    bubble.id = "plugin-perms-bubble";
+    bubble.className = "plugin-perms-popup";
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = perms;
+  const rect = button.getBoundingClientRect();
+  bubble.style.left = `${rect.left + window.scrollX}px`;
+  bubble.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  bubble.hidden = false;
+  const close = (e) => {
+    if (!bubble.contains(e.target) && e.target !== button) {
+      bubble.hidden = true;
+      document.removeEventListener("click", close);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", close), 0);
 });
 
 els.pluginRemoveDrop.addEventListener("click", () => removePlugin(true));

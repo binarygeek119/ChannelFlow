@@ -1,0 +1,100 @@
+@page "/emergency"
+@inject HttpClient Http
+<h2>Emergency Broadcast System</h2>
+<p class="hint">Weather alert overlay settings: how alerts display, cut-in timing, and location.</p>
+
+@if (view is null) { <p>Loading...</p> }
+else
+{
+    var s = view.Settings;
+    <div style="display:grid;gap:.5rem;max-width:500px;">
+        <label>Alert Display
+            <select @bind="s.AlertDisplay">
+                <option value="Off">Off</option>
+                <option value="CutIn">Cut-in</option>
+                <option value="Ticker">Ticker</option>
+            </select>
+        </label>
+        <label>Cut-in Interval (min) <input type="number" @bind="s.CutinIntervalMinutes" style="width:100px;" /></label>
+        <label>Cut-in Duration (sec) <input type="number" @bind="s.CutinDurationSeconds" style="width:100px;" /></label>
+        <label>Location <input @bind="s.Location" style="width:100%;" placeholder="ZIP, city, or lat,lon" /></label>
+        <label>Source
+            <select @bind="s.Source">
+                <option value="Auto">Auto</option>
+                <option value="Us">US (NOAA)</option>
+                <option value="World">World (Open-Meteo)</option>
+            </select>
+        </label>
+        <div style="display:flex;gap:.5rem;">
+            <button class="primary" @onclick="Save" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+            <button class="ghost" @onclick="Test" disabled="@testing">@(testing ? "Testing..." : "Test Alert")</button>
+            <button class="ghost" @onclick="FetchAlerts" disabled="@testing">@(testing ? "Loading..." : "Fetch Alerts")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+        @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note">@testResult</p> }
+        @if (alertsResult is not null) { <pre style="max-height:300px;overflow:auto;background:#111;color:#0f0;padding:1rem;font-size:.8rem;">@alertsResult</pre> }
+    </div>
+}
+@code {
+    private EmergencyView? view;
+    private bool saving, testing;
+    private string? msg, testResult, alertsResult;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try { view = await Http.GetFromJsonAsync<EmergencyView>("api/plugins/com.channelflow.emergency/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task Save()
+    {
+        if (view is null) return;
+        saving = true;
+        try
+        {
+            var res = await Http.PutAsJsonAsync("api/plugins/com.channelflow.emergency/", view.Settings);
+            msg = res.IsSuccessStatusCode ? "Saved." : "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task Test()
+    {
+        testing = true;
+        try
+        {
+            var res = await Http.GetAsync("api/plugins/com.channelflow.emergency/test");
+            testResult = await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { testResult = "Error: " + e.Message; }
+        testing = false;
+    }
+
+    private async Task FetchAlerts()
+    {
+        testing = true;
+        try
+        {
+            var res = await Http.GetAsync("api/plugins/com.channelflow.emergency/alerts");
+            alertsResult = await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { alertsResult = "Error: " + e.Message; }
+        testing = false;
+    }
+
+    public class EmergencyView
+    {
+        public EmergencySettings Settings { get; set; } = new();
+    }
+    public class EmergencySettings
+    {
+        public string AlertDisplay { get; set; } = "Off";
+        public uint CutinIntervalMinutes { get; set; } = 15;
+        public uint CutinDurationSeconds { get; set; } = 20;
+        public string Location { get; set; } = "";
+        public string Source { get; set; } = "Auto";
+    }
+}

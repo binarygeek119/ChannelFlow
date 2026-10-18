@@ -1,0 +1,101 @@
+@page "/weather"
+@inject HttpClient Http
+<h2>Weather</h2>
+<p class="hint">WeatherStar look, weather source, default location, units, and screens.</p>
+
+@if (view is null) { <p>Loading...</p> }
+else
+{
+    var s = view.Settings;
+    <div style="display:grid;gap:.5rem;max-width:500px;">
+        <label>WeatherStar Variant
+            <select @bind="s.WeatherstarVariant">
+                <option value="Ws4kp">WeatherStar 4000+</option>
+                <option value="Ws3kp">WeatherStar 3000+</option>
+            </select>
+        </label>
+        <label>Source
+            <select @bind="s.Source">
+                <option value="Auto">Auto</option>
+                <option value="Us">US (NOAA)</option>
+                <option value="World">World (Open-Meteo)</option>
+            </select>
+        </label>
+        <label>Default Location <input @bind="s.DefaultLocation" style="width:100%;" placeholder="ZIP, city, or lat,lon" /></label>
+        <label>Units
+            <select @bind="s.Units">
+                <option value="Us">US (°F, mph)</option>
+                <option value="Si">SI (°C, km/h)</option>
+            </select>
+        </label>
+        <label><input type="checkbox" @bind="s.AutoWide169" /> Auto wide 16:9</label>
+        <label><input type="checkbox" @bind="s.GuideEnabled" /> Guide enabled</label>
+        <label>Guide Build Time <input @bind="s.GuideBuildTime" style="width:100px;" placeholder="00:05" /></label>
+        <div style="display:flex;gap:.5rem;">
+            <button class="primary" @onclick="Save" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+            <button class="ghost" @onclick="FetchForecast" disabled="@loading">@(loading ? "Loading..." : "Fetch Forecast")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+    </div>
+    @if (forecast is not null)
+    {
+        <h3 style="margin-top:1rem;">Forecast</h3>
+        <pre style="max-height:300px;overflow:auto;background:#111;color:#0f0;padding:1rem;font-size:.8rem;">@forecast</pre>
+    }
+}
+@code {
+    private WeatherView? view;
+    private bool saving, loading;
+    private string? msg, forecast;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try { view = await Http.GetFromJsonAsync<WeatherView>("api/plugins/com.channelflow.weather/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task Save()
+    {
+        if (view is null) return;
+        saving = true;
+        try
+        {
+            var res = await Http.PutAsJsonAsync("api/plugins/com.channelflow.weather/", view.Settings);
+            msg = res.IsSuccessStatusCode ? "Saved." : "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task FetchForecast()
+    {
+        if (view is null) return;
+        loading = true;
+        try
+        {
+            var loc = view.Settings.DefaultLocation;
+            var res = await Http.GetAsync($"api/plugins/com.channelflow.weather/forecast?location={Uri.EscapeDataString(loc)}");
+            forecast = await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { forecast = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    public class WeatherView
+    {
+        public WeatherSettings Settings { get; set; } = new();
+        public List<string> Screens { get; set; } = new();
+    }
+    public class WeatherSettings
+    {
+        public string WeatherstarVariant { get; set; } = "Ws4kp";
+        public string Source { get; set; } = "Auto";
+        public string DefaultLocation { get; set; } = "";
+        public string Units { get; set; } = "Us";
+        public bool AutoWide169 { get; set; } = true;
+        public bool GuideEnabled { get; set; } = true;
+        public string GuideBuildTime { get; set; } = "00:05";
+    }
+}

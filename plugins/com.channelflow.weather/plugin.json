@@ -1,12 +1,10 @@
 {
   "id": "com.channelflow.weather",
   "name": "Weather",
-  "version": "2.0.13",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": {
-    "dll": "ChannelFlow.Plugin.Weather.dll",
-    "type": "ChannelFlow.Plugin.Weather.WeatherPlugin"
-  },
-  "category": "weather"
+  "entrypoint": { "dll": "ChannelFlow.Plugin.Weather.dll", "type": "ChannelFlow.Plugin.Weather.WeatherPlugin" },
+  "category": "weather",
+  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
 }

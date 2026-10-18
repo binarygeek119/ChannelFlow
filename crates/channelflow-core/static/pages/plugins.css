@@ -22,6 +22,15 @@
     display: block;
     background: var(--card-bg);
 }
+.plugin-banner-inline {
+    width: 120px;
+    height: 48px;
+    object-fit: contain;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+    border-radius: 4px;
+}
 .plugin-banner-empty {
     background: linear-gradient(135deg, var(--card-bg), var(--drawer-bg));
 }

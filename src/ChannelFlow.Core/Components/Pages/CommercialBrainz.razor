@@ -1,0 +1,111 @@
+@page "/commercialbrainz"
+@inject HttpClient Http
+<h2>CommercialBrainz</h2>
+<p class="hint">Ad avail sync connection: server, API token, pool settings, and content filters.</p>
+
+@if (settings is null) { <p>Loading...</p> }
+else
+{
+    <div style="display:grid;gap:.5rem;max-width:600px;">
+        <label><input type="checkbox" @bind="settings.Enabled" /> Enabled</label>
+        <label>Base URL <input @bind="settings.BaseUrl" style="width:100%;" /></label>
+        <label>API Token <input @bind="settings.ApiToken" type="password" style="width:100%;" /></label>
+        <label>Max Sync Results <input type="number" @bind="settings.MaxSyncResults" style="width:100px;" /></label>
+        <label>Min Year <input type="number" @bind="settings.MinYear" style="width:100px;" /></label>
+        <label>Max Year <input type="number" @bind="settings.MaxYear" style="width:100px;" /></label>
+        <label>Brands (comma) <input @bind="brandsStr" style="width:100%;" /></label>
+        <label>Tags (comma) <input @bind="tagsStr" style="width:100%;" /></label>
+        <label>Exclude Tags (comma) <input @bind="excludeTagsStr" style="width:100%;" /></label>
+        <label>Genres (comma) <input @bind="genresStr" style="width:100%;" /></label>
+        <label>Networks (comma) <input @bind="networksStr" style="width:100%;" /></label>
+        <div style="display:flex;gap:.5rem;">
+            <button class="primary" @onclick="Save" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+            <button class="ghost" @onclick="Test" disabled="@testing">@(testing ? "Testing..." : "Test Connection")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+        @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note">@testResult</p> }
+    </div>
+}
+@code {
+    private CbSettings? settings;
+    private bool saving, testing;
+    private string? msg, testResult;
+    private string brandsStr = "", tagsStr = "", excludeTagsStr = "", genresStr = "", networksStr = "";
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<CbView>("api/plugins/com.channelflow.commercialbrainz/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            settings = res?.Settings;
+            if (settings is not null)
+            {
+                brandsStr = string.Join(", ", settings.Brands);
+                tagsStr = string.Join(", ", settings.Tags);
+                excludeTagsStr = string.Join(", ", settings.ExcludeTags);
+                genresStr = string.Join(", ", settings.Genres);
+                networksStr = string.Join(", ", settings.Networks);
+            }
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task Save()
+    {
+        if (settings is null) return;
+        saving = true;
+        settings.Brands = Split(brandsStr);
+        settings.Tags = Split(tagsStr);
+        settings.ExcludeTags = Split(excludeTagsStr);
+        settings.Genres = Split(genresStr);
+        settings.Networks = Split(networksStr);
+        try
+        {
+            var res = await Http.PutAsJsonAsync("api/plugins/com.channelflow.commercialbrainz/", settings);
+            msg = res.IsSuccessStatusCode ? "Saved." : "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task Test()
+    {
+        testing = true;
+        try
+        {
+            var res = await Http.GetAsync("api/plugins/com.channelflow.commercialbrainz/test");
+            testResult = await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { testResult = "Error: " + e.Message; }
+        testing = false;
+    }
+
+    private static List<string> Split(string s) => s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    public class CbSettings
+    {
+        public bool Enabled { get; set; } = true;
+        public string BaseUrl { get; set; } = "https://commercialbrainz.org";
+        public string ApiToken { get; set; } = "";
+        public int MaxSyncResults { get; set; } = 500;
+        public int? MinYear { get; set; }
+        public int? MaxYear { get; set; }
+        public List<int> Decades { get; set; } = new();
+        public List<string> Brands { get; set; } = new();
+        public List<string> Tags { get; set; } = new();
+        public List<string> ExcludeTags { get; set; } = new();
+        public List<string> Genres { get; set; } = new();
+        public List<string> Networks { get; set; } = new();
+        public List<string> ChannelNames { get; set; } = new();
+        public bool AllowSpoof { get; set; } = true;
+        public bool AllowFake { get; set; } = true;
+        public bool AllowReal { get; set; } = true;
+        public bool AllowAiEnhanced { get; set; } = true;
+        public bool AllowLateNight { get; set; } = true;
+        public bool AllowAdultRated { get; set; } = false;
+        public bool AllowBanned { get; set; } = false;
+    }
+    public class CbView { public CbSettings? Settings { get; set; } }
+}

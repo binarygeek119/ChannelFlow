@@ -1,12 +1,10 @@
 {
   "id": "com.channelflow.offair",
   "name": "Off Air",
-  "version": "2.0.9",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": {
-    "dll": "ChannelFlow.Plugin.OffAir.dll",
-    "type": "ChannelFlow.Plugin.OffAir.OffAirPlugin"
-  },
-  "category": "presentation"
+  "entrypoint": { "dll": "ChannelFlow.Plugin.OffAir.dll", "type": "ChannelFlow.Plugin.OffAir.OffAirPlugin" },
+  "category": "presentation",
+  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
 }

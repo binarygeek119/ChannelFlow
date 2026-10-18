@@ -1,0 +1,122 @@
+@using Microsoft.AspNetCore.Components.Forms
+@page "/offair"
+@inject HttpClient Http
+<h2>Off Air</h2>
+<p class="hint">What plays when a channel has no scheduled media, when playback fails, or when a weather capture errors.</p>
+
+@if (settings is null) { <p>Loading...</p> }
+else
+{
+    var s = settings;
+    <div style="display:grid;gap:.5rem;max-width:500px;">
+        <label>Display Mode
+            <select @bind="s.DisplayMode">
+                <option value="SlateImage">Slate Image</option>
+                <option value="ColorBars">Color Bars</option>
+                <option value="Static">Static</option>
+            </select>
+        </label>
+        <label>Slate Variant
+            <select @bind="s.SlateVariant">
+                <option value="Usa">USA</option>
+                <option value="International">International</option>
+            </select>
+        </label>
+        <label>Audio Mode
+            <select @bind="s.AudioMode">
+                <option value="BackgroundMusic">Background Music</option>
+                <option value="WhiteNoise">White Noise</option>
+                <option value="Silence">Silence</option>
+                <option value="BeepTone">Beep Tone</option>
+            </select>
+        </label>
+        <label>Music Source
+            <select @bind="s.MusicSource">
+                <option value="AllMusicLibraries">All Music Libraries</option>
+                <option value="NamedLibrary">Named Library</option>
+                <option value="LocalPacks">Local Packs</option>
+            </select>
+        </label>
+        @if (s.MusicSource == "NamedLibrary")
+        {
+            <label>Music Library Name <input @bind="s.MusicLibraryName" style="width:100%;" /></label>
+            <label>Music Library ID <input @bind="s.MusicLibraryId" style="width:100%;" /></label>
+        }
+        <div style="display:flex;gap:.5rem;">
+            <button class="primary" @onclick="Save" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+
+        <h3 style="margin-top:1rem;">Custom Slate Upload</h3>
+        <p class="hint">Upload a custom slate image (PNG/JPEG, max 2MB) for a variant.</p>
+        <div style="display:flex;gap:.5rem;align-items:center;">
+            <select @bind="uploadVariant">
+                <option value="usa">USA</option>
+                <option value="international">International</option>
+            </select>
+            <InputFile OnChange="UploadSlate" />
+        </div>
+        @if (!string.IsNullOrEmpty(uploadMsg)) { <p class="field-note">@uploadMsg</p> }
+    </div>
+}
+@code {
+    private OffAirSettings? settings;
+    private bool saving;
+    private string? msg, uploadMsg;
+    private string uploadVariant = "usa";
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<OffAirView>("api/plugins/com.channelflow.offair/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            settings = res?.Settings;
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task Save()
+    {
+        if (settings is null) return;
+        saving = true;
+        try
+        {
+            var res = await Http.PutAsJsonAsync("api/plugins/com.channelflow.offair/", settings);
+            msg = res.IsSuccessStatusCode ? "Saved." : "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task UploadSlate(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        uploadMsg = null;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            var stream = file.OpenReadStream(maxAllowedSize: 2 * 1024 * 1024);
+            content.Add(new StreamContent(stream), "file", file.Name);
+            var res = await Http.PostAsync($"api/plugins/com.channelflow.offair/slates/{uploadVariant}", content);
+            uploadMsg = await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) { uploadMsg = "Error: " + ex.Message; }
+    }
+
+    public class OffAirView
+    {
+        public OffAirSettings Settings { get; set; } = new();
+    }
+    public class OffAirSettings
+    {
+        public string DisplayMode { get; set; } = "SlateImage";
+        public string SlateVariant { get; set; } = "Usa";
+        public string AudioMode { get; set; } = "BackgroundMusic";
+        public string MusicSource { get; set; } = "AllMusicLibraries";
+        public string MusicLibraryName { get; set; } = "";
+        public string MusicLibraryId { get; set; } = "";
+    }
+}

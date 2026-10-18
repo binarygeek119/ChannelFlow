@@ -150,7 +150,7 @@ public class ErsatzTvPlugin : IPlugin
     {
         _api = api;
         // Load config from env
-        _cfg.BinaryPath = Environment.GetEnvironmentVariable("ERSATZTV_PATH") ?? "ersatztv";
+        _cfg.BinaryPath = Environment.GetEnvironmentVariable("ERSATZTV_PATH") ?? "/app/ersatztv";
         _cfg.PlayoutDir = Environment.GetEnvironmentVariable("ERSATZTV_PLAYOUT_DIR") ?? Path.Combine(api.Dir, "..", "..", "data", "playout");
         _cfg.Url = Environment.GetEnvironmentVariable("ERSATZTV_URL") ?? "http://127.0.0.1:8409";
         _cfg.AutoStart = Environment.GetEnvironmentVariable("ERSATZTV_AUTOSTART") == "true";

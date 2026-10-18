@@ -448,9 +448,27 @@ async fn main() -> Result<()> {
         .await
         .map_err(|error| anyhow::anyhow!("loading the Past Tense News plugin: {error}"))?;
 
-    // The Scheduler plugin is now a standalone, installable plugin (not
-    // compiled in), so it can be updated via the Store without rebuilding
-    // ChannelFlow. Install it from the Store tab if needed.
+    // The Scheduler plugin builds each channel's broadcast day from its six
+    // layers, using the AI page's providers through the core.
+    let scheduler_plugin = channelflow_plugin_scheduler::plugin();
+    let scheduler_manifest = scheduler_plugin.metadata().clone();
+    let scheduler_api = PluginApi {
+        id: scheduler_manifest.id.clone(),
+        tasks: tasks::plugin_host(&scheduler_manifest.id),
+        storage: store.plugin_storage(&scheduler_manifest.id),
+        http: http.clone(),
+        base_version: env!("CARGO_PKG_VERSION").to_string(),
+        dir: store.plugin_dir(&scheduler_manifest.id),
+        logger: PluginLogger::new(&scheduler_manifest.id),
+        core: Arc::new(store.core_data(http.clone())),
+        database: store.plugin_database(&scheduler_manifest.id).await,
+        web: channelflow_plugin_api::PluginWeb::new(),
+    };
+    manager
+        .add(scheduler_plugin, scheduler_api)
+        .await
+        .map_err(|error| anyhow::anyhow!("loading the Scheduler plugin: {error}"))?;
+
     // Plugins are loaded but not pre-installed: the Installed tab starts empty
     // and the Store offers every plugin. The registry is the source of truth
     // after that, so installing or removing a plugin is not undone by a

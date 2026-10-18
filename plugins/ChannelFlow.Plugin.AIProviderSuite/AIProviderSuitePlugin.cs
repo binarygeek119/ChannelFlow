@@ -7,7 +7,7 @@ namespace ChannelFlow.Plugin.AIProviderSuite;
 
 public class AIProviderSuitePlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.ai", "AI Provider Suite", "2.0.11", "3.0.0", Category: "ai");
+    public PluginManifest Metadata => new("com.channelflow.ai", "AI Provider Suite", "3.0.0", "3.0.0", Category: "ai");
     private PluginApi? _api;
     public Task OnLoadAsync(PluginApi api) { _api = api; return Task.CompletedTask; }
     public Task OnEnableAsync() => Task.CompletedTask;

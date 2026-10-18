@@ -128,7 +128,7 @@ public class JellyfinMediaSource : IMediaSource
 
 public class JellyfinPlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.jellyfin", "Jellyfin", "1.0.0", "3.0.0", Category: "media-source");
+    public PluginManifest Metadata => new("com.channelflow.jellyfin", "Jellyfin", "3.0.0", "3.0.0", Category: "media-source");
     private PluginApi? _api;
     private JellyfinMediaSource? _ms;
     public Task OnLoadAsync(PluginApi api) { _api = api; _ms = new JellyfinMediaSource(); return Task.CompletedTask; }

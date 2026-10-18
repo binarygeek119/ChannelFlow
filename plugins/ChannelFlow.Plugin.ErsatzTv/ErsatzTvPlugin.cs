@@ -140,7 +140,7 @@ public class ErsatzTvSupervisor
 
 public class ErsatzTvPlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.ersatztv", "ErsatzTV", "1.0.0", "3.0.0", Category: "playout");
+    public PluginManifest Metadata => new("com.channelflow.ersatztv", "ErsatzTV", "3.0.0", "3.0.0", Category: "playout");
 
     private PluginApi? _api;
     private ErsatzTvSupervisor? _sup;

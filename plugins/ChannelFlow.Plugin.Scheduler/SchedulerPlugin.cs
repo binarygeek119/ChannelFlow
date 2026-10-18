@@ -42,7 +42,7 @@ public class SchedulerConfig
 
 public class SchedulerPlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.scheduler", "Scheduler", "1.0.0", "3.0.0", Category: "scheduler");
+    public PluginManifest Metadata => new("com.channelflow.scheduler", "Scheduler", "3.0.0", "3.0.0", Category: "scheduler");
 
     private PluginApi? _api;
     private SchedulerConfig _config = new();

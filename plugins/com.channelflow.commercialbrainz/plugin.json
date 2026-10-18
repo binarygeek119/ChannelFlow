@@ -4,7 +4,16 @@
   "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": { "dll": "ChannelFlow.Plugin.CommercialBrainz.dll", "type": "ChannelFlow.Plugin.CommercialBrainz.CommercialBrainzPlugin" },
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.CommercialBrainz.dll",
+    "type": "ChannelFlow.Plugin.CommercialBrainz.CommercialBrainzPlugin"
+  },
   "category": "commercials",
-  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
+  "permissions": [
+    "storage:read",
+    "storage:write",
+    "network:outbound",
+    "api:routes",
+    "ui:pages"
+  ]
 }

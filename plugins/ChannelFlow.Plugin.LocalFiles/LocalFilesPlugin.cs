@@ -7,7 +7,7 @@ namespace ChannelFlow.Plugin.LocalFiles;
 
 public class LocalFilesPlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.local", "Local Files", "2.0.5", "3.0.0", Category: "catalog");
+    public PluginManifest Metadata => new("com.channelflow.local", "Local Files", "3.0.0", "3.0.0", Category: "catalog");
     private PluginApi? _api;
     public Task OnLoadAsync(PluginApi api) { _api = api; return Task.CompletedTask; }
     public Task OnEnableAsync() => Task.CompletedTask;

@@ -1,9 +1,12 @@
 {
   "id": "com.channelflow.ersatztv",
   "name": "ErsatzTV",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": { "dll": "ChannelFlow.Plugin.ErsatzTv.dll", "type": "ChannelFlow.Plugin.ErsatzTv.ErsatzTvPlugin" },
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.ErsatzTv.dll",
+    "type": "ChannelFlow.Plugin.ErsatzTv.ErsatzTvPlugin"
+  },
   "category": "playout"
 }

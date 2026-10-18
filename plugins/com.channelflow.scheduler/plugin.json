@@ -1,7 +1,7 @@
 {
   "id": "com.channelflow.scheduler",
   "name": "Scheduler",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "entrypoint": {
     "dll": "ChannelFlow.Plugin.Scheduler.dll",

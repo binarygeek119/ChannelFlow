@@ -1,7 +1,7 @@
 {
   "id": "com.channelflow.local",
   "name": "Local Files",
-  "version": "2.0.5",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
   "entrypoint": {

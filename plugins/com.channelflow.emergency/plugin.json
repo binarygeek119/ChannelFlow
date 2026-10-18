@@ -1,7 +1,7 @@
 {
   "id": "com.channelflow.emergency",
   "name": "Emergency Broadcast System",
-  "version": "2.0.8",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
   "entrypoint": {

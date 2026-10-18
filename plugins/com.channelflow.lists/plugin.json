@@ -4,7 +4,15 @@
   "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": { "dll": "ChannelFlow.Plugin.Lists.dll", "type": "ChannelFlow.Plugin.Lists.ListsPlugin" },
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.Lists.dll",
+    "type": "ChannelFlow.Plugin.Lists.ListsPlugin"
+  },
   "category": "catalog",
-  "permissions": ["storage:read", "storage:write", "api:routes", "ui:pages"]
+  "permissions": [
+    "storage:read",
+    "storage:write",
+    "api:routes",
+    "ui:pages"
+  ]
 }

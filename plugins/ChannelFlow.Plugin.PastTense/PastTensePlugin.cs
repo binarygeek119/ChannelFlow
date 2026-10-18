@@ -7,7 +7,7 @@ namespace ChannelFlow.Plugin.PastTense;
 
 public class PastTensePlugin : IPlugin
 {
-    public PluginManifest Metadata => new("com.channelflow.pasttense", "Past Tense News", "2.0.3", "3.0.0", Category: "catalog");
+    public PluginManifest Metadata => new("com.channelflow.pasttense", "Past Tense News", "3.0.0", "3.0.0", Category: "catalog");
     private PluginApi? _api;
     public Task OnLoadAsync(PluginApi api) { _api = api; return Task.CompletedTask; }
     public Task OnEnableAsync() => Task.CompletedTask;

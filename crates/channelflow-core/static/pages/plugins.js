@@ -54,7 +54,7 @@ function renderInstalled(plugins) {
         ? `<img class="plugin-banner plugin-banner-inline" src="${escapeHtml(plugin.image_url)}" alt="" onerror="this.remove()">`
         : `<img class="plugin-banner plugin-banner-inline" src="https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/banners/${escapeHtml(plugin.id)}.png" alt="" onerror="this.remove()">`;
       return `<tr>
-        <td>${banner}<span class="channel-name">${escapeHtml(plugin.name)}</span>
+        <td><div class="plugin-row-banner">${banner}</div><span class="channel-name">${escapeHtml(plugin.name)}</span>
             <div class="channel-desc">${status}${needs}</div></td>
         <td>${escapeHtml(plugin.category || "—")}</td>
         <td>${escapeHtml(plugin.version)}</td>

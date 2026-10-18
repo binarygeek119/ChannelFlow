@@ -34,15 +34,17 @@ public class MediaController : ControllerBase
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog([FromQuery] string? kind, [FromQuery] int? limit, [FromQuery] int? offset)
     {
+        var lim = limit ?? 100;
+        var off = offset ?? 0;
         var filter = new CatalogFilter(
             Kinds: string.IsNullOrEmpty(kind) ? new List<string>() : new List<string> { kind },
             Genres: new List<string>(),
             Tags: new List<string>(),
-            Limit: limit ?? 100);
+            Limit: lim + off); // fetch enough for offset
         var rows = await _core.CatalogAsync(filter);
-        // Apply offset in-memory (CatalogAsync already applies limit)
-        if (offset.HasValue && offset.Value > 0)
-            rows = rows.Skip(offset.Value).ToList();
-        return Ok(new { items = rows, count = rows.Count, offset = offset ?? 0, limit = limit ?? 100 });
+        var total = rows.Count;
+        if (off > 0) rows = rows.Skip(off).ToList();
+        if (rows.Count > lim) rows = rows.Take(lim).ToList();
+        return Ok(new { items = rows, count = total, offset = off, limit = lim });
     }
 }

@@ -1,47 +1,163 @@
 @page "/media"
 @inject HttpClient Http
-<h2>Media Catalog</h2>
-<div style="margin-bottom:1rem;">
-    <input @bind="url" placeholder="Server URL" style="width:300px;" />
-    <input @bind="libraryId" placeholder="Library Id" style="width:150px;" />
-    <button @onclick="Sync">Sync</button>
+<h2>Media</h2>
+
+<!-- Inner tabs -->
+<div class="inner-tabs">
+    @foreach (var tab in tabs)
+    {
+        <button class="inner-tab @(activeTab == tab ? "active" : "")" @onclick="() => SwitchTab(tab)">@tab</button>
+    }
 </div>
-@if (!string.IsNullOrEmpty(syncResult)) { <pre>@syncResult</pre> }
-@if (items is null) { <p>Loading...</p> }
+
+<!-- Sync form -->
+<div class="panel" style="margin-bottom:1rem;">
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+        <select @bind="source">
+            <option value="jellyfin">Jellyfin</option>
+        </select>
+        <input @bind="url" placeholder="Server URL" style="width:300px;" />
+        <input @bind="apiKey" placeholder="API Key" style="width:200px;" />
+        <input @bind="libraryId" placeholder="Library Id" style="width:150px;" />
+        <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
+    </div>
+    @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
+</div>
+
+<!-- Tab content -->
+@if (loading) { <p>Loading...</p> }
 else
 {
-    <p>@items.Count items</p>
-    <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th>Title</th><th>Kind</th><th>Year</th><th>Genres</th></tr></thead>
-        <tbody>
-        @foreach (var it in items)
+    <div class="panel">
+        <div class="panel-head">
+            <h2>@activeTab</h2>
+            <span class="count">@items.Count of @totalCount</span>
+        </div>
+        <p class="hint">The items your media sources have synced, straight from ChannelFlow's own catalog.</p>
+        @if (items.Count == 0) { <p class="empty">No items in this category.</p> }
+        else
         {
-            <tr><td>@it.Title</td><td>@it.Kind</td><td>@it.Year</td><td>@string.Join(", ", it.Genres)</td></tr>
+            <table>
+                <thead><tr><th>Title</th><th>Kind</th><th>Year</th><th>Genres</th><th>Rating</th></tr></thead>
+                <tbody>
+                @foreach (var it in items)
+                {
+                    <tr>
+                        <td class="channel-name">@it.Title</td>
+                        <td>@it.Kind</td>
+                        <td>@it.Year</td>
+                        <td style="font-size:.85rem;">@string.Join(", ", it.Genres)</td>
+                        <td>@(it.OfficialRating ?? "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            @if (totalCount > items.Count)
+            {
+                <div style="margin-top:.5rem;">
+                    <button class="ghost" @onclick="LoadMore">Load more</button>
+                </div>
+            }
         }
-        </tbody>
-    </table>
+    </div>
 }
 @code {
+    private string source = "jellyfin";
     private string url = "http://localhost:8096";
     private string apiKey = "";
     private string libraryId = "";
+    private bool syncing, loading;
     private string? syncResult;
-    private List<CatalogItem>? items;
-    protected override async Task OnInitializedAsync() => await Load();
-    private async Task Load()
+    private string activeTab = "Movies";
+    private readonly List<string> tabs = new() { "Movies", "TV Shows", "Music", "Music Videos", "News" };
+    private List<MediaItem> items = new();
+    private int totalCount;
+    private int offset;
+    private const int PageSize = 50;
+
+    private string TabToKind(string tab) => tab switch
     {
-        try { items = await Http.GetFromJsonAsync<List<CatalogItem>>("api/media/catalog?limit=200"); }
-        catch { items = new(); }
+        "Movies" => "movie",
+        "TV Shows" => "series",
+        "Music" => "album",
+        "Music Videos" => "musicvideo",
+        "News" => "news",
+        _ => "movie"
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadTab();
+
+    private async Task SwitchTab(string tab)
+    {
+        activeTab = tab;
+        offset = 0;
+        await LoadTab();
     }
+
+    private async Task LoadTab()
+    {
+        loading = true;
+        items = new();
+        offset = 0;
+        try
+        {
+            var kind = TabToKind(activeTab);
+            var res = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind={kind}&limit={PageSize}&offset=0", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null)
+            {
+                items = res.Items ?? new();
+                totalCount = res.Count;
+                offset = items.Count;
+            }
+        }
+        catch { items = new(); }
+        loading = false;
+    }
+
+    private async Task LoadMore()
+    {
+        try
+        {
+            var kind = TabToKind(activeTab);
+            var res = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind={kind}&limit={PageSize}&offset={offset}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null && res.Items is not null)
+            {
+                items.AddRange(res.Items);
+                offset = items.Count;
+            }
+        }
+        catch { }
+    }
+
     private async Task Sync()
     {
-        object req;
-        string endpoint;
-        req = new { Url = url, ApiKey = apiKey, LibraryId = libraryId };
-        endpoint = "api/media/sync-jellyfin";
-        var res = await Http.PostAsJsonAsync(endpoint, req);
-        syncResult = await res.Content.ReadAsStringAsync();
-        await Load();
+        syncing = true;
+        syncResult = null;
+        try
+        {
+            var req = new { Url = url, ApiKey = apiKey, LibraryId = libraryId };
+            var res = await Http.PostAsJsonAsync("api/media/sync-jellyfin", req);
+            syncResult = await res.Content.ReadAsStringAsync();
+            await LoadTab();
+        }
+        catch (Exception e) { syncResult = "Error: " + e.Message; }
+        syncing = false;
     }
-    public record CatalogItem(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags);
+
+    public class MediaItem
+    {
+        public string MatchKey { get; set; } = "";
+        public string Kind { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public List<string> Genres { get; set; } = new();
+        public string? OfficialRating { get; set; }
+    }
+    public class CatalogResponse
+    {
+        public List<MediaItem> Items { get; set; } = new();
+        public int Count { get; set; }
+        public int Offset { get; set; }
+        public int Limit { get; set; }
+    }
 }

@@ -1,61 +1,130 @@
 @inherits LayoutComponentBase
+@inject NavigationManager Nav
 <div id="app-shell">
     <aside class="app-drawer">
         <a class="drawer-brand" href="/">
-            <span style="font-size:1.4rem;font-weight:800;color:var(--accent);">ChannelFlow</span>
-            <span style="font-size:.7rem;color:var(--muted);">v3</span>
+            <img src="/logo.png" alt="ChannelFlow" style="max-height:40px;" onerror="this.style.display='none'" />
         </a>
-        <nav class="drawer-nav">
+        <nav class="drawer-nav" aria-label="Main">
             <a href="/" class="@(IsActive("/") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 <span class="nav-label">Home</span>
             </a>
             <a href="/dashboard" class="@(IsActive("/dashboard") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
                 <span class="nav-label">Dashboard</span>
             </a>
+
+            <div class="drawer-nav-gap" aria-hidden="true"></div>
+
+            <a href="/general" class="@(IsActive("/general") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                <span class="nav-label">General</span>
+            </a>
+            <a href="/quickpin" class="@(IsActive("/quickpin") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="16" r="1.2"/></svg>
+                <span class="nav-label">Quick Pin</span>
+            </a>
+            <a href="/clients" class="@(IsActive("/clients") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+                <span class="nav-label">Clients</span>
+            </a>
+            <a href="/client-logs" class="@(IsActive("/client-logs") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M19 16v4.5a1.5 1.5 0 0 1-3 0V16"/><path d="M22 16l-4-4-4 4"/></svg>
+                <span class="nav-label">Client Logs</span>
+            </a>
+
+            <div class="drawer-nav-gap" aria-hidden="true"></div>
+
             <a href="/channels" class="@(IsActive("/channels") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="12" rx="2"/><path d="M7 20h10M12 8V5M9 3.5L12 5l3-1.5"/></svg>
                 <span class="nav-label">Channels</span>
             </a>
+            <a href="/lineup" class="@(IsActive("/lineup") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/></svg>
+                <span class="nav-label">Lineups</span>
+            </a>
             <a href="/media" class="@(IsActive("/media") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="10" cy="10" r="2"/><path d="M4 18l4.5-4.5 3 3L16 12l4 4"/></svg>
                 <span class="nav-label">Media</span>
             </a>
+            <a href="/people" class="@(IsActive("/people") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="nav-label">People</span>
+            </a>
             <a href="/guide" class="@(IsActive("/guide") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M8 14h3M8 17h8"/></svg>
                 <span class="nav-label">Guide</span>
             </a>
             <a href="/guide-grid" class="@(IsActive("/guide-grid") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
                 <span class="nav-label">Guide Grid</span>
             </a>
-            <a href="/lineup" class="@(IsActive("/lineup") ? "active" : "")">
-                <span class="nav-label">Lineup</span>
+            <a href="/live" class="@(IsActive("/live") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5V9.5z"/><path d="M8 21h8"/></svg>
+                <span class="nav-label">Live</span>
+            </a>
+
+            <div class="drawer-nav-gap" aria-hidden="true"></div>
+
+            <a href="/tasks" class="@(IsActive("/tasks") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>
+                <span class="nav-label">Tasks</span>
             </a>
             <a href="/scheduler" class="@(IsActive("/scheduler") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 <span class="nav-label">Scheduler</span>
             </a>
-            <a href="/people" class="@(IsActive("/people") ? "active" : "")">
-                <span class="nav-label">People</span>
-            </a>
-            <a href="/connections" class="@(IsActive("/connections") ? "active" : "")">
-                <span class="nav-label">Connections</span>
-            </a>
             <a href="/plugins" class="@(IsActive("/plugins") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>
                 <span class="nav-label">Plugins</span>
             </a>
             <a href="/plugins-manage" class="@(IsActive("/plugins-manage") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
                 <span class="nav-label">Plugin Mgmt</span>
             </a>
+            <a href="/plugin-repos" class="@(IsActive("/plugin-repos") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                <span class="nav-label">Plugin Repos</span>
+            </a>
             <a href="/sidecar" class="@(IsActive("/sidecar") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                 <span class="nav-label">Sidecar</span>
             </a>
-            <a href="/live" class="@(IsActive("/live") ? "active" : "")">
-                <span class="nav-label">Live</span>
-            </a>
+
+            <div class="drawer-nav-gap" aria-hidden="true"></div>
+
             <a href="/settings" class="@(IsActive("/settings") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
                 <span class="nav-label">Settings</span>
             </a>
+            <a href="/general" class="@(IsActive("/general") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <span class="nav-label">General</span>
+            </a>
+            <a href="/quickpin" class="@(IsActive("/quickpin") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="16" r="1.2"/></svg>
+                <span class="nav-label">Quick Pin</span>
+            </a>
+            <a href="/about" class="@(IsActive("/about") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 8h.01"/></svg>
+                <span class="nav-label">About</span>
+            </a>
+            <a href="/credits" class="@(IsActive("/credits") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span class="nav-label">Credits</span>
+            </a>
             <a href="/setup" class="@(IsActive("/setup") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
                 <span class="nav-label">Setup</span>
             </a>
             <a href="/migration" class="@(IsActive("/migration") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                 <span class="nav-label">Migration</span>
+            </a>
+            <a href="/client-logs" class="@(IsActive("/client-logs") ? "active" : "")">
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M19 16v4.5a1.5 1.5 0 0 1-3 0V16"/><path d="M22 16l-4-4-4 4"/></svg>
+                <span class="nav-label">Client Logs</span>
             </a>
         </nav>
     </aside>
@@ -72,7 +141,6 @@
     </main>
 </div>
 @code {
-    [Inject] private NavigationManager Nav { get; set; } = default!;
     private string PageTitle => Nav.Uri.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? "Home";
     private bool IsActive(string href) => Nav.Uri.EndsWith(href == "/" ? Nav.BaseUri : href, StringComparison.OrdinalIgnoreCase);
 }

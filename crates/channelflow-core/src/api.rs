@@ -3101,10 +3101,10 @@ async fn live_asset(
         return proxy_m3u(&state, &headers, &api_key).await;
     }
     if asset == "xmltv.xml" {
-        return proxy_bytes(client, &format!("{base}/xmltv.xml"), None).await;
+        return proxy_bytes(client, &format!("{base}/xmltv.xml"), None, None).await;
     }
     if let Some(number) = asset.strip_suffix(".m3u8") {
-        return proxy_bytes(client, &format!("{base}/channel/{number}.m3u8"), Some(&api_key)).await;
+        return proxy_bytes(client, &format!("{base}/channel/{number}.m3u8"), Some(&api_key), None).await;
     }
     (
         StatusCode::NOT_FOUND,
@@ -3136,7 +3136,8 @@ async fn live_segment(
         state.encoder.port()
     );
     let api_key = query.apikey.clone().unwrap_or_default();
-    proxy_bytes(client, &url, Some(&api_key)).await
+    let base_path = format!("/live/session/{channel}");
+    proxy_bytes(client, &url, Some(&api_key), Some(&base_path)).await
 }
 
 /// Check the API key, returning the `401` response to send when it fails.
@@ -3236,7 +3237,12 @@ fn request_origin(headers: &HeaderMap) -> String {
 
 /// Fetch `url` from the encoder and return it; `rewrite_key` rewrites an HLS
 /// playlist's segment URLs to ChannelFlow's own origin with that API key.
-async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite_key: Option<&str>) -> Response {
+async fn proxy_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    rewrite_key: Option<&str>,
+    rewrite_base: Option<&str>,
+) -> Response {
     match client.get(url).send().await {
         Ok(upstream) if upstream.status().is_success() => {
             let content_type = upstream
@@ -3257,6 +3263,7 @@ async fn proxy_bytes(client: &reqwest::Client, url: &str, rewrite_key: Option<&s
                 Some(key) => crate::encoder::rewrite_playlist(
                     &String::from_utf8_lossy(&bytes),
                     key,
+                    rewrite_base,
                 )
                 .into_bytes(),
                 None => bytes.to_vec(),

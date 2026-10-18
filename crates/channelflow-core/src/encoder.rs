@@ -127,7 +127,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 /// ChannelFlow's own origin, carrying the caller's API key (the player does not
 /// propagate the playlist's query string to segments). Lines that are not
 /// segment URIs are left alone.
-pub fn rewrite_playlist(body: &str, api_key: &str) -> String {
+pub fn rewrite_playlist(body: &str, api_key: &str, base_path: Option<&str>) -> String {
     let suffix = if api_key.is_empty() {
         String::new()
     } else {
@@ -150,6 +150,16 @@ pub fn rewrite_playlist(body: &str, api_key: &str) -> String {
         };
         if let Some(rest) = session_path {
             out.push_str(&format!("/live/session/{rest}{suffix}"));
+        } else if !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && base_path.is_some()
+            && !trimmed.starts_with("http://")
+            && !trimmed.starts_with("https://")
+            && !trimmed.starts_with('/')
+        {
+            // Relative segment filename (e.g. "live000013.ts"): make it
+            // absolute through our origin so the API key is carried.
+            out.push_str(&format!("{}/{}{}", base_path.unwrap(), trimmed, suffix));
         } else {
             out.push_str(line);
         }
@@ -218,7 +228,7 @@ mod tests {
     #[test]
     fn segment_urls_are_rewritten_to_channelflows_origin_with_the_key() {
         let playlist = "#EXTM3U\n#EXTINF:4.0,\n/session/1/seg0.ts\n/session/1/seg1.ts\n";
-        let rewritten = rewrite_playlist(playlist, "KEY");
+        let rewritten = rewrite_playlist(playlist, "KEY", None);
         assert!(rewritten.contains("/live/session/1/seg0.ts?apiKey=KEY"));
         assert!(rewritten.contains("/live/session/1/seg1.ts?apiKey=KEY"));
         assert!(rewritten.contains("#EXTM3U"));
@@ -229,7 +239,7 @@ mod tests {
     fn non_segment_lines_are_left_alone() {
         let playlist = "#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts\n";
         assert_eq!(
-            rewrite_playlist(playlist, ""),
+            rewrite_playlist(playlist, "", None),
             "#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts\n"
         );
     }

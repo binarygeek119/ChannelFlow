@@ -4,34 +4,103 @@
 @if (channel is null) { <p>Loading...</p> }
 else
 {
-    <div style="display:grid;gap:.5rem;max-width:500px;">
+    <div style="display:grid;gap:.5rem;max-width:600px;">
         <label>Number <input type="number" step="0.1" @bind="channel.Number" style="width:100px;" /></label>
         <label>Name <input @bind="channel.Name" style="width:100%;" /></label>
         <label>Description <textarea @bind="channel.Description" style="width:100%;height:80px;"></textarea></label>
         <label>AI Prompt <textarea @bind="channel.AiPrompt" style="width:100%;height:80px;"></textarea></label>
         <label><input type="checkbox" @bind="channel.Enabled" /> Enabled</label>
-        <div style="display:flex;gap:.5rem;">
-            <button @onclick="Save">Save</button>
-            <a href="/channels">Back</a>
+
+        <h3 style="margin-top:1rem;">Watermark</h3>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:1rem;">
+            <label><input type="checkbox" @bind="wmEnabled" /> Enable watermark</label>
+            @if (wmEnabled)
+            {
+                <label>Placement
+                    <select @bind="wmPosition">
+                        <option value="bottom-right">Bottom right</option>
+                        <option value="bottom-left">Bottom left</option>
+                        <option value="top-left">Top left</option>
+                        <option value="top-right">Top right</option>
+                    </select>
+                </label>
+                <div style="display:flex;gap:.5rem;">
+                    <label>Offset X <input type="number" @bind="wmOffsetX" style="width:80px;" /></label>
+                    <label>Offset Y <input type="number" @bind="wmOffsetY" style="width:80px;" /></label>
+                </div>
+                <label>Scale % <input type="range" min="50" max="200" step="5" @bind="wmScale" /> @wmScale</label>
+                <label>Opacity % <input type="range" min="0" max="100" step="5" @bind="wmOpacity" /> @wmOpacity</label>
+                <label><input type="checkbox" @bind="wmFadeBreak" /> Fade out before break</label>
+                <label><input type="checkbox" @bind="wmFadeBack" /> Fade back after return</label>
+            }
         </div>
-        @if (saved) { <p style="color:green;">Saved.</p> }
+
+        <div style="display:flex;gap:.5rem;margin-top:1rem;">
+            <button class="primary" @onclick="Save">Save</button>
+            <a href="/channels" class="ghost">Back</a>
+        </div>
+        @if (saved) { <p style="color:var(--ok);">Saved.</p> }
     </div>
 }
 @code {
     [Parameter] public Guid id { get; set; }
     private ChannelDto? channel;
     private bool saved;
+
+    // Watermark fields
+    private bool wmEnabled;
+    private string wmPosition = "bottom-right";
+    private int wmOffsetX = 12;
+    private int wmOffsetY = 12;
+    private int wmScale = 100;
+    private int wmOpacity = 100;
+    private bool wmFadeBreak;
+    private bool wmFadeBack;
+
     protected override async Task OnInitializedAsync()
     {
-        try { channel = await Http.GetFromJsonAsync<ChannelDto>($"api/channels/{id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        try
+        {
+            channel = await Http.GetFromJsonAsync<ChannelDto>($"api/channels/{id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            // Parse watermark JSON
+            if (channel is not null && !string.IsNullOrEmpty(channel.WatermarkJson) && channel.WatermarkJson != "null")
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(channel.WatermarkJson);
+                    var wm = doc.RootElement;
+                    wmEnabled = true;
+                    if (wm.TryGetProperty("position", out var pos)) wmPosition = pos.GetString() ?? "bottom-right";
+                    if (wm.TryGetProperty("offsetX", out var ox)) wmOffsetX = ox.GetInt32();
+                    if (wm.TryGetProperty("offsetY", out var oy)) wmOffsetY = oy.GetInt32();
+                    if (wm.TryGetProperty("scale", out var sc)) wmScale = sc.GetInt32();
+                    if (wm.TryGetProperty("opacity", out var op)) wmOpacity = op.GetInt32();
+                    if (wm.TryGetProperty("fadeBreak", out var fb)) wmFadeBreak = fb.GetBoolean();
+                    if (wm.TryGetProperty("fadeBack", out var fba)) wmFadeBack = fba.GetBoolean();
+                }
+                catch { }
+            }
+        }
         catch { }
     }
+
     private async Task Save()
     {
         if (channel is null) return;
+        // Build watermark JSON
+        if (wmEnabled)
+        {
+            var wm = new { enabled = true, position = wmPosition, offsetX = wmOffsetX, offsetY = wmOffsetY, scale = wmScale, opacity = wmOpacity, fadeBreak = wmFadeBreak, fadeBack = wmFadeBack };
+            channel.WatermarkJson = System.Text.Json.JsonSerializer.Serialize(wm);
+        }
+        else
+        {
+            channel.WatermarkJson = "null";
+        }
         await Http.PutAsJsonAsync($"api/channels/{id}", channel);
         saved = true;
     }
+
     public class ChannelDto
     {
         public Guid Id { get; set; }
@@ -40,5 +109,7 @@ else
         public string Description { get; set; } = "";
         public string AiPrompt { get; set; } = "";
         public bool Enabled { get; set; }
+        public string TranscodeJson { get; set; } = "{}";
+        public string WatermarkJson { get; set; } = "null";
     }
 }

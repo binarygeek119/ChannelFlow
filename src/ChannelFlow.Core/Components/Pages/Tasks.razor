@@ -1,0 +1,97 @@
+@page "/tasks"
+@inject HttpClient Http
+<h2>Tasks</h2>
+<p class="hint">Scheduled jobs like library scans and cache cleanup.</p>
+
+<div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head"><h2>Maintenance</h2></div>
+    <p class="hint">One-off jobs you run yourself — these are not on a timer.</p>
+    <div class="actions">
+        <button class="ghost" @onclick="RebuildPlayouts">Rebuild All Playouts</button>
+        <button class="ghost" @onclick="ClearGuide">Clear Guide Data</button>
+    </div>
+    @if (!string.IsNullOrEmpty(maintMsg)) { <p class="hint">@maintMsg</p> }
+</div>
+
+<div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head"><h2>Scheduler</h2></div>
+    <p class="hint">Build the channel guide and lineups.</p>
+    <div class="actions">
+        <button class="primary" @onclick="BuildSchedule">Build Schedule</button>
+        <button class="ghost" @onclick="CancelBuild">Cancel</button>
+    </div>
+    @if (schedStatus is not null) { <p class="hint">Status: @schedStatus.Status (@schedStatus.Current/@schedStatus.Total)</p> }
+</div>
+
+<div class="panel">
+    <div class="panel-head"><h2>Running Tasks</h2></div>
+    @if (tasks.Count == 0) { <p class="empty">No tasks running.</p> }
+    else
+    {
+        @foreach (var t in tasks)
+        {
+            <div style="margin-bottom:.5rem;">
+                <strong>@t.Title</strong> — @t.Label (@t.Current/@t.Total)
+                <div style="background:#333;border-radius:4px;height:8px;margin-top:.25rem;">
+                    <div style="background:var(--accent);height:8px;border-radius:4px;width:@(t.Total > 0 ? (t.Current*100/t.Total) : 0)%"></div>
+                </div>
+            </div>
+        }
+    }
+    <button class="ghost" @onclick="RefreshTasks">Refresh</button>
+</div>
+@code {
+    private List<TaskDto> tasks = new();
+    private SchedStatus? schedStatus;
+    private string? maintMsg;
+
+    protected override async Task OnInitializedAsync() => await RefreshTasks();
+
+    private async Task RefreshTasks()
+    {
+        try
+        {
+            // No task list endpoint yet; placeholder
+            tasks = new();
+        }
+        catch { }
+    }
+
+    private async Task RebuildPlayouts()
+    {
+        var res = await Http.PostAsync("api/playout/generate-all", null);
+        maintMsg = await res.Content.ReadAsStringAsync();
+    }
+
+    private async Task ClearGuide()
+    {
+        // Clear guide for all channels
+        var channels = await Http.GetFromJsonAsync<List<ChannelDto>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (channels is not null)
+            foreach (var ch in channels)
+                await Http.DeleteAsync($"api/guide/{ch.Id}"); // may not exist; ignore errors
+        maintMsg = "Guide cleared.";
+    }
+
+    private async Task BuildSchedule()
+    {
+        await Http.PostAsync("api/plugins/com.channelflow.scheduler/build", null);
+        await PollScheduler();
+    }
+
+    private async Task CancelBuild()
+    {
+        await Http.PostAsync("api/plugins/com.channelflow.scheduler/cancel", null);
+        await PollScheduler();
+    }
+
+    private async Task PollScheduler()
+    {
+        try { schedStatus = await Http.GetFromJsonAsync<SchedStatus>("api/plugins/com.channelflow.scheduler/status", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { }
+    }
+
+    public class TaskDto { public string Key { get; set; } = ""; public string Title { get; set; } = ""; public string? Label { get; set; } public long Current { get; set; } public long Total { get; set; } }
+    public class SchedStatus { public string Status { get; set; } = ""; public bool Running { get; set; } public int Current { get; set; } public int Total { get; set; } }
+    public class ChannelDto { public Guid Id { get; set; } public double Number { get; set; } public string Name { get; set; } = ""; }
+}

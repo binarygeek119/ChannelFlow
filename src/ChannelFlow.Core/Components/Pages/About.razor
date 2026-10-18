@@ -1,0 +1,64 @@
+@page "/about"
+@inject HttpClient Http
+<h2>ChannelFlow-Server</h2>
+<p class="hint">Simulated live TV. Version, how this instance is running, and system info.</p>
+
+@if (info is null) { <p>Loading...</p> }
+else
+{
+    <div class="panel" style="margin-bottom:1rem;">
+        <h3>App</h3>
+        <dl class="about-dl">
+            <dt>Version</dt><dd>@info.App.Version</dd>
+            <dt>Author</dt><dd><a href="@info.App.AuthorUrl">@info.App.Author</a></dd>
+            <dt>Runtime</dt><dd>@info.App.Runtime</dd>
+            <dt>Packaging</dt><dd>@info.App.PackagingLabel</dd>
+            <dt>Homepage</dt><dd><a href="@info.App.Homepage">@info.App.Homepage</a></dd>
+        </dl>
+    </div>
+    <div class="panel" style="margin-bottom:1rem;">
+        <h3>System</h3>
+        <dl class="about-dl">
+            <dt>OS</dt><dd>@info.System.Os</dd>
+            <dt>Architecture</dt><dd>@info.System.Architecture</dd>
+            <dt>Machine</dt><dd>@info.System.MachineName</dd>
+            <dt>Processors</dt><dd>@info.System.ProcessorCount</dd>
+            <dt>Working Set</dt><dd>@(info.System.WorkingSet / 1024 / 1024) MB</dd>
+            <dt>Time Zone</dt><dd>@info.System.TimeZone</dd>
+            <dt>Config Folder</dt><dd>@info.System.ConfigFolder</dd>
+        </dl>
+    </div>
+}
+@code {
+    private AboutInfo? info;
+    protected override async Task OnInitializedAsync()
+    {
+        try { info = await Http.GetFromJsonAsync<AboutInfo>("api/about", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { }
+    }
+    public class AboutInfo
+    {
+        public AppInfo App { get; set; } = new();
+        public SystemInfo System { get; set; } = new();
+    }
+    public class AppInfo
+    {
+        public string Author { get; set; } = "";
+        public string AuthorUrl { get; set; } = "";
+        public string Version { get; set; } = "";
+        public string Revision { get; set; } = "";
+        public string Runtime { get; set; } = "";
+        public string PackagingLabel { get; set; } = "";
+        public string Homepage { get; set; } = "";
+    }
+    public class SystemInfo
+    {
+        public string Os { get; set; } = "";
+        public string Architecture { get; set; } = "";
+        public string MachineName { get; set; } = "";
+        public int ProcessorCount { get; set; }
+        public long WorkingSet { get; set; }
+        public string TimeZone { get; set; } = "";
+        public string ConfigFolder { get; set; } = "";
+    }
+}

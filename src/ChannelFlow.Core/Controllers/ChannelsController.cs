@@ -39,6 +39,8 @@ public class ChannelsController : ControllerBase
         existing.Description = channel.Description;
         existing.Enabled = channel.Enabled;
         existing.AiPrompt = channel.AiPrompt;
+        existing.TranscodeJson = channel.TranscodeJson;
+        existing.WatermarkJson = channel.WatermarkJson;
         existing.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(existing);

@@ -3269,6 +3269,17 @@ async fn proxy_bytes(
                 None => bytes.to_vec(),
             };
             let mut response = Response::builder().status(StatusCode::OK);
+            // Normalise content types the encoder sends (e.g. video/vnd.dlna.mpeg-tts)
+            // into ones players like VLC recognise for HLS segments.
+            let content_type = if url.ends_with(".ts") || url.ends_with(".ts?") {
+                Some(axum::http::HeaderValue::from_static("video/mp2t"))
+            } else if url.ends_with(".m3u8") {
+                Some(axum::http::HeaderValue::from_static(
+                    "application/vnd.apple.mpegurl",
+                ))
+            } else {
+                content_type
+            };
             if let Some(content_type) = content_type {
                 response = response.header(axum::http::header::CONTENT_TYPE, content_type);
             }

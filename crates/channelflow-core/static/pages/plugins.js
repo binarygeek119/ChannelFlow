@@ -55,14 +55,14 @@ function renderInstalled(plugins) {
         : `<img class="plugin-banner plugin-banner-inline" src="https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/banners/${escapeHtml(plugin.id)}.png" alt="" onerror="this.remove()">`;
       return `<tr>
         <td><div class="plugin-row-banner">${banner}</div><span class="channel-name">${escapeHtml(plugin.name)}</span>
-            <div class="channel-desc">${status}${needs}</div></td>
+            <div class="channel-desc">${status}${needs}</div>
+            <div class="plugin-row-actions">${update}
+              <button type="button" class="ghost danger" data-installed="${escapeHtml(plugin.id)}" data-act="remove">Remove</button>
+            </div></td>
         <td>${escapeHtml(plugin.category || "—")}</td>
         <td>${escapeHtml(plugin.version)}</td>
         <td class="perms"><button type="button" class="ghost perms-bubble" data-perms="${escapeHtml(perms)}" title="${escapeHtml(perms)}">Permissions</button></td>
         <td class="${plugin.health && plugin.health.ok ? "ok" : ""}">${escapeHtml(health)}</td>
-        <td class="actions">${update}
-          <button type="button" class="ghost danger" data-installed="${escapeHtml(plugin.id)}" data-act="remove">Remove</button>
-        </td>
       </tr>`;
     })
     .join("");

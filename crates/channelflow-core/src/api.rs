@@ -3135,7 +3135,8 @@ async fn live_segment(
         "http://127.0.0.1:{}/session/{channel}/{file}",
         state.encoder.port()
     );
-    proxy_bytes(client, &url, None).await
+    let api_key = query.apikey.clone().unwrap_or_default();
+    proxy_bytes(client, &url, Some(&api_key)).await
 }
 
 /// Check the API key, returning the `401` response to send when it fails.

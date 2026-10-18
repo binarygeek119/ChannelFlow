@@ -136,10 +136,19 @@ pub fn rewrite_playlist(body: &str, api_key: &str) -> String {
     let mut out = String::with_capacity(body.len() + 64);
     for line in body.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed
-            .strip_prefix("/session/")
-            .or_else(|| trimmed.strip_prefix("session/"))
-        {
+        // The encoder may return either a relative path ("/session/...") or an
+        // absolute URL ("http://127.0.0.1:8409/session/..."). Rewrite any line
+        // that carries a "/session/" path so the player fetches through us.
+        let session_path = if let Some(rest) = trimmed.strip_prefix("/session/") {
+            Some(rest.to_string())
+        } else if let Some(rest) = trimmed.strip_prefix("session/") {
+            Some(rest.to_string())
+        } else if let Some(index) = trimmed.find("/session/") {
+            Some(trimmed[index + "/session/".len()..].to_string())
+        } else {
+            None
+        };
+        if let Some(rest) = session_path {
             out.push_str(&format!("/live/session/{rest}{suffix}"));
         } else {
             out.push_str(line);

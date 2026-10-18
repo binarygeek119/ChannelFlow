@@ -1,0 +1,97 @@
+@page "/library"
+@inject HttpClient Http
+<h2>Library</h2>
+<p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
+
+<div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head">
+        <h2>Media Connections</h2>
+    </div>
+    <p class="hint">Connections to media servers whose plugin is installed.</p>
+    @if (connections is null) { <p>Loading...</p> }
+    else if (connections.Count == 0) { <p class="empty">No connections. Add one on the <a href="/connections">Connections</a> page.</p> }
+    else
+    {
+        <table>
+            <thead><tr><th>ID</th><th>Kind</th><th>Config</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var c in connections)
+            {
+                <tr>
+                    <td>@c.Id</td>
+                    <td>@c.Kind</td>
+                    <td><code>@c.ConfigJson</code></td>
+                    <td><a href="/connections" class="link">Edit</a></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head">
+        <h2>Sync Libraries</h2>
+    </div>
+    <p class="hint">Sync media from your connections into the catalog.</p>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">
+        <select @bind="syncSource">
+            <option value="jellyfin">Jellyfin</option>
+        </select>
+        <input @bind="syncUrl" placeholder="Server URL" style="width:250px;" />
+        <input @bind="syncApiKey" placeholder="API Key" style="width:180px;" />
+        <input @bind="syncLibraryId" placeholder="Library Id" style="width:120px;" />
+        <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
+    </div>
+    @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
+</div>
+
+<div class="panel">
+    <div class="panel-head">
+        <h2>Catalog</h2>
+        <span class="count">@mediaCount items</span>
+    </div>
+    <p class="hint">The items your media sources have synced.</p>
+    <a href="/media" class="link">Browse full catalog →</a>
+</div>
+@code {
+    private List<ConnDto>? connections;
+    private string syncSource = "jellyfin";
+    private string syncUrl = "http://localhost:8096";
+    private string syncApiKey = "";
+    private string syncLibraryId = "";
+    private bool syncing;
+    private string? syncResult;
+    private int mediaCount;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            connections = await Http.GetFromJsonAsync<List<ConnDto>>("api/connections", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var catalog = await Http.GetFromJsonAsync<CatalogResponse>("api/media/catalog?limit=1", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            mediaCount = catalog?.Count ?? 0;
+        }
+        catch { connections = new(); }
+    }
+
+    private async Task Sync()
+    {
+        syncing = true;
+        syncResult = null;
+        try
+        {
+            var req = new { Url = syncUrl, ApiKey = syncApiKey, LibraryId = syncLibraryId };
+            var res = await Http.PostAsJsonAsync("api/media/sync-jellyfin", req);
+            syncResult = await res.Content.ReadAsStringAsync();
+            await Load();
+        }
+        catch (Exception e) { syncResult = "Error: " + e.Message; }
+        syncing = false;
+    }
+
+    public record ConnDto(int Id, string Kind, string ConfigJson);
+    public class CatalogResponse { public int Count { get; set; } }
+}

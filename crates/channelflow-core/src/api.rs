@@ -3136,8 +3136,9 @@ async fn live_segment(
         state.encoder.port()
     );
     let api_key = query.apikey.clone().unwrap_or_default();
-    let base_path = format!("/live/session/{channel}");
-    proxy_bytes(client, &url, Some(&api_key), Some(&base_path)).await
+    // Segments are binary; do not run the playlist rewriter over them.
+    let _ = api_key;
+    proxy_bytes(client, &url, None, None).await
 }
 
 /// Check the API key, returning the `401` response to send when it fails.

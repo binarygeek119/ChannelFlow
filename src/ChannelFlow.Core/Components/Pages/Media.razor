@@ -26,7 +26,7 @@ else
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
         @foreach (var it in items)
         {
-            <div class="card jf-card" style="cursor:pointer;" title="@it.Title">
+            <div class="card jf-card" style="cursor:pointer;" title="@it.Title" @onclick="() => OpenDetail(it.MatchKey)">
                 <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
                     @if (!string.IsNullOrEmpty(it.PosterUrl))
                     {
@@ -42,6 +42,39 @@ else
             </div>
         }
     </div>
+    @if (selectedItem is not null)
+    {
+        <div class="panel" style="margin-top:1rem;">
+            <div class="panel-head">
+                <h2>@selectedItem.Item.Title</h2>
+                <button class="ghost" @onclick="() => selectedItem = null">Close</button>
+            </div>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                @if (!string.IsNullOrEmpty(selectedItem.Item.PosterUrl))
+                {
+                    <img src="@selectedItem.Item.PosterUrl" style="max-width:200px;border-radius:8px;" />
+                }
+                <div>
+                    <p><strong>Kind:</strong> @selectedItem.Item.Kind</p>
+                    <p><strong>Year:</strong> @(selectedItem.Item.Year?.ToString() ?? "—")</p>
+                    <p><strong>Genres:</strong> @string.Join(", ", selectedItem.Item.Genres)</p>
+                    <p><strong>Rating:</strong> @(selectedItem.Item.OfficialRating ?? "—")</p>
+                    <p><strong>Runtime:</strong> @(selectedItem.Item.RuntimeMs.HasValue ? (selectedItem.Item.RuntimeMs.Value / 60000) + " min" : "—")</p>
+                    @if (selectedItem.Credits is not null && selectedItem.Credits.Count > 0)
+                    {
+                        <h4>Credits</h4>
+                        <ul>
+                        @foreach (var c in selectedItem.Credits)
+                        {
+                            <li>@c.Role: @c.MediaMatchKey @(string.IsNullOrEmpty(c.Character) ? "" : $"({c.Character})")</li>
+                        }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
     @if (totalCount > items.Count)
     {
         <div style="margin-top:1rem;text-align:center;">
@@ -58,6 +91,7 @@ else
     private string activeTab = "Movies";
     private readonly List<string> tabs = new() { "Movies", "TV Shows", "Music", "Music Videos", "News" };
     private List<MediaItem> items = new();
+    private MediaDetail? selectedItem;
     private int totalCount;
     private int offset;
     private const int PageSize = 50;
@@ -101,6 +135,16 @@ else
         loading = false;
     }
 
+    private async Task OpenDetail(string matchKey)
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<MediaDetail>($"api/media/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            selectedItem = res;
+        }
+        catch { selectedItem = null; }
+    }
+
     private async Task LoadMore()
     {
         try
@@ -140,6 +184,21 @@ else
         public List<string> Genres { get; set; } = new();
         public string? OfficialRating { get; set; }
         public string? PosterUrl { get; set; }
+        public long? RuntimeMs { get; set; }
+    }
+    public class MediaDetail
+    {
+        public MediaItem? Item { get; set; }
+        public List<CreditDto> Credits { get; set; } = new();
+    }
+    public class CreditDto
+    {
+        public Guid Id { get; set; }
+        public Guid PersonId { get; set; }
+        public string MediaMatchKey { get; set; } = "";
+        public string Role { get; set; } = "";
+        public string? Character { get; set; }
+        public string? ImagePath { get; set; }
     }
     public class CatalogResponse
     {

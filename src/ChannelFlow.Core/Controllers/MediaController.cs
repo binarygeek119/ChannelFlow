@@ -1,5 +1,6 @@
 using ChannelFlow.PluginSdk;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ChannelFlow.Core.Controllers;
 
@@ -29,6 +30,17 @@ public class MediaController : ControllerBase
         var ctx = new SyncContext(req.ConnectionId, req.LibraryId, _storage, _logger, _core, req.ApiKey, conn);
         var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
         return Ok(report);
+    }
+
+    [HttpGet("{*matchKey}")]
+    public async Task<IActionResult> Get(string matchKey)
+    {
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlow.Database.ChannelFlowDbContext>();
+        var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == matchKey);
+        if (item is null) return NotFound();
+        var credits = await _core.GetCreditsForMediaAsync(matchKey);
+        return Ok(new { item, credits });
     }
 
     [HttpGet("catalog")]

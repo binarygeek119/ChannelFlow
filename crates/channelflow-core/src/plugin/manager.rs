@@ -57,6 +57,7 @@ impl ManagedPlugin {
 pub struct PluginManager {
     base_version: String,
     plugins: Vec<ManagedPlugin>,
+    media_sources: Option<std::sync::Arc<crate::media::MediaSources>>,
 }
 
 impl PluginManager {
@@ -64,7 +65,14 @@ impl PluginManager {
         Self {
             base_version: base_version.to_string(),
             plugins: Vec::new(),
+            media_sources: None,
         }
+    }
+
+    /// Attach the media-source registry so plugins can register sources
+    /// dynamically when enabled.
+    pub fn set_media_sources(&mut self, sources: std::sync::Arc<crate::media::MediaSources>) {
+        self.media_sources = Some(sources);
     }
 
     /// Call `on_unload` and drop the plugin from the registry. The dynamic
@@ -104,6 +112,7 @@ impl PluginManager {
     /// Call `on_enable` and mark the plugin enabled.
     pub async fn enable(&mut self, id: &str) -> Result<(), PluginError> {
         let base_version = self.base_version.clone();
+        let media_sources = self.media_sources.clone();
         let plugin = self
             .find_mut(id)
             .ok_or_else(|| PluginError::new(format!("no plugin with id {id}")))?;
@@ -115,16 +124,26 @@ impl PluginManager {
         }
         plugin.plugin.on_enable().await?;
         plugin.enabled = true;
+        // Register a media source, if the plugin provides one.
+        if let Some(sources) = media_sources {
+            if let Some(source) = plugin.plugin.media_source() {
+                sources.register(plugin.id(), source);
+            }
+        }
         Ok(())
     }
 
     /// Call `on_disable` and mark the plugin disabled.
     pub async fn disable(&mut self, id: &str) -> Result<(), PluginError> {
+        let media_sources = self.media_sources.clone();
         let plugin = self
             .find_mut(id)
             .ok_or_else(|| PluginError::new(format!("no plugin with id {id}")))?;
         plugin.plugin.on_disable().await?;
         plugin.enabled = false;
+        if let Some(sources) = media_sources {
+            sources.unregister(id);
+        }
         // Work a disabled plugin was running will never finish its reporting,
         // so clear its tasks rather than leave them showing forever.
         crate::tasks::clear_plugin(id);

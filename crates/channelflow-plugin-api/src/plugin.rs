@@ -149,6 +149,12 @@ pub trait Plugin: Send + Sync {
 
     /// The plugin's current health.
     fn health(&self) -> PluginHealth;
+
+    /// A media source this plugin provides, if any. The base registers it
+    /// dynamically when the plugin is enabled. Default: none.
+    fn media_source(&self) -> Option<Box<dyn crate::MediaSource>> {
+        None
+    }
 }
 
 /// A plugin whose methods are all no-ops, for layering implementations on top

@@ -5,51 +5,60 @@
 //! connection forms, the catalog, and (soon) the sync driver talk to; nothing
 //! here knows a specific source (Jellyfin, …) by name.
 
+use std::sync::{Arc, Mutex};
+
 use channelflow_plugin_api::media::MediaSource;
 
 /// The registered media sources, in registration order.
 ///
-/// Each source knows which plugin id registered it, so the connection tab can
-/// offer a type only when its plugin is actually installed — registering an
-/// Emby or Plex plugin later is what makes "emby"/"plex" appear; a
-/// compiled-in "local" source that has no installed plugin stays hidden.
+/// Interior mutability (Mutex) lets plugins register dynamically when enabled,
+/// even though the registry is shared as `Arc<MediaSources>`. Sources are stored
+/// as `Arc<dyn MediaSource>` so `find`/`find_installed` can return owned
+/// handles that outlive the lock guard.
 pub struct MediaSources {
-    sources: Vec<RegisteredSource>,
+    sources: Mutex<Vec<RegisteredSource>>,
 }
 
 struct RegisteredSource {
     /// The plugin id that provides this source, e.g. `com.channelflow.jellyfin`.
     plugin_id: String,
-    source: Box<dyn MediaSource>,
+    source: Arc<dyn MediaSource>,
 }
 
 impl MediaSources {
     pub fn new() -> Self {
         Self {
-            sources: Vec::new(),
+            sources: Mutex::new(Vec::new()),
         }
     }
 
     /// Register one source on behalf of a plugin. Later registrations of the
     /// same `type_id` replace the earlier one.
-    pub fn register(&mut self, plugin_id: &str, source: Box<dyn MediaSource>) {
+    pub fn register(&self, plugin_id: &str, source: Box<dyn MediaSource>) {
         let type_id = source.type_id().to_string();
-        self.sources
-            .retain(|entry| entry.source.type_id() != type_id);
-        self.sources.push(RegisteredSource {
+        let mut guard = self.sources.lock().expect("media sources lock");
+        guard.retain(|entry| entry.source.type_id() != type_id);
+        guard.push(RegisteredSource {
             plugin_id: plugin_id.to_string(),
-            source,
+            source: source.into(),
         });
+    }
+
+    /// Remove every source registered by `plugin_id`.
+    pub fn unregister(&self, plugin_id: &str) {
+        let mut guard = self.sources.lock().expect("media sources lock");
+        guard.retain(|entry| entry.plugin_id != plugin_id);
     }
 
     /// One source by `type_id` (the connection `kind`), if registered. Unlike
     /// [`Self::find_installed`] this ignores installation state — kept for
     /// tests and flows that must see a source even when its plugin is gone.
     #[allow(dead_code)]
-    pub fn find(&self, type_id: &str) -> Option<&dyn MediaSource> {
-        self.sources
+    pub fn find(&self, type_id: &str) -> Option<Arc<dyn MediaSource>> {
+        let guard = self.sources.lock().expect("media sources lock");
+        guard
             .iter()
-            .map(|entry| entry.source.as_ref())
+            .map(|entry| entry.source.clone())
             .find(|source| source.type_id() == type_id)
     }
 
@@ -60,18 +69,20 @@ impl MediaSources {
         &self,
         type_id: &str,
         installed: &dyn Fn(&str) -> bool,
-    ) -> Option<&dyn MediaSource> {
-        self.sources
+    ) -> Option<Arc<dyn MediaSource>> {
+        let guard = self.sources.lock().expect("media sources lock");
+        guard
             .iter()
             .find(|entry| entry.source.type_id() == type_id && installed(&entry.plugin_id))
-            .map(|entry| entry.source.as_ref())
+            .map(|entry| entry.source.clone())
     }
 
     /// The catalog the connection form renders — only sources whose plugin is
     /// installed — with their identity, connection fields, and supported
     /// media.
     pub fn catalog(&self, installed: &dyn Fn(&str) -> bool) -> Vec<serde_json::Value> {
-        self.sources
+        let guard = self.sources.lock().expect("media sources lock");
+        guard
             .iter()
             .filter(|entry| installed(&entry.plugin_id))
             .map(|entry| {
@@ -131,7 +142,7 @@ mod tests {
 
     #[test]
     fn registers_by_type_id_and_survives_re_registration() {
-        let mut sources = MediaSources::new();
+        let sources = MediaSources::new();
         let installed = |_id: &str| true;
         sources.register("stub.plugin", Box::new(StubSource));
         sources.register("stub.plugin", Box::new(StubSource));
@@ -146,7 +157,7 @@ mod tests {
 
     #[test]
     fn an_uninstalled_plugins_source_is_hidden() {
-        let mut sources = MediaSources::new();
+        let sources = MediaSources::new();
         sources.register("stub.plugin", Box::new(StubSource));
         let installed = |id: &str| id != "stub.plugin";
         assert!(sources.catalog(&installed).is_empty());
@@ -157,7 +168,7 @@ mod tests {
 
     #[test]
     fn shapes_stay_stable() {
-        let mut sources = MediaSources::new();
+        let sources = MediaSources::new();
         sources.register("stub.plugin", Box::new(StubSource));
         let catalog = sources.catalog(&|_id: &str| true);
         let field = &catalog[0]["fields"][0];

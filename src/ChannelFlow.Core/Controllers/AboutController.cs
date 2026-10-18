@@ -13,7 +13,7 @@ public class AboutController : ControllerBase
     public IActionResult Get()
     {
         var asm = typeof(Program).Assembly;
-        var ver = asm.GetName().Version?.ToString() ?? "3.0.0";
+        var ver = "3.0.0";
         var isDocker = System.IO.File.Exists("/.dockerenv");
         return Ok(new
         {

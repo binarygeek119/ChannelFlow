@@ -302,7 +302,7 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
 th.num, td.num { width: 3.5rem; }
 th.state, td.state { width: 5.5rem; }
-th.actions, td.actions { width: 12rem; text-align: right; }
+th.actions, td.actions { width: 12rem; text-align: right; vertical-align: middle; }
 
 .channel-name { font-weight: 600; }
 .channel-desc { color: var(--muted); font-size: 0.85rem; }

@@ -198,6 +198,6 @@ public class ErsatzTvPlugin : IPlugin
     }
 
     public IEnumerable<UiContribution> UiContributions => Array.Empty<UiContribution>();
-    public PluginHealth Health => new(_sup?.IsRunning ?? false, _sup?.IsRunning == true ? "running" : "stopped");
+    public PluginHealth Health => new(true, _sup?.IsRunning == true ? "running" : "stopped (sidecar not started)");
     public IMediaSource? MediaSource => null;
 }

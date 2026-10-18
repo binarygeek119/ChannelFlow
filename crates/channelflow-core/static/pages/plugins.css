@@ -50,6 +50,7 @@
 .plugin-perms-unknown { font-style: italic; }
 td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; vertical-align: middle; }
 #plugins-rows td { vertical-align: middle; }
+#plugins-rows td.actions button { padding: 0.5rem 0.75rem; }
 
 .plugin-remove-name { font-weight: 600; margin: 0.2rem 0 0.6rem; }
 .plugin-perms-popup {

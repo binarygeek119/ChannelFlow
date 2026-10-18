@@ -115,6 +115,7 @@ public class SchedulerPlugin : IPlugin
             {
                 if (ct.IsCancellationRequested) break;
                 _api.Tasks?.Report("scheduler.build", "Scheduler Build", ch.Name, _current, _total);
+                Console.WriteLine($"[sched] after report, tracker tasks: ...");
 
                 var kinds = _config.SourceRestrictionKinds.Count > 0 ? _config.SourceRestrictionKinds : _config.Kinds;
                 var catalog = await core.CatalogAsync(new CatalogFilter(kinds, _config.Genres, _config.Tags, null));

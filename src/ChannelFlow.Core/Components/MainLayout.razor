@@ -127,6 +127,7 @@
             @Body
         </div>
     </main>
+    <TaskPopup />
 </div>
 @code {
     private string PageTitle => Nav.Uri.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? "Home";

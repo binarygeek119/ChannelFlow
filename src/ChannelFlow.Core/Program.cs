@@ -6,10 +6,28 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database provider selection via connection string. Defaults to SQLite.
+// Check for saved setup config file
+var setupConfigPath = "/config/data/db-config.json";
+if (!File.Exists(setupConfigPath))
+    setupConfigPath = Path.Combine(builder.Environment.ContentRootPath, "data", "db-config.json");
+string? fileProvider = null, fileConnStr = null;
+if (File.Exists(setupConfigPath))
+{
+    try
+    {
+        var json = File.ReadAllText(setupConfigPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        fileProvider = doc.RootElement.TryGetProperty("provider", out var p) ? p.GetString() : null;
+        fileConnStr = doc.RootElement.TryGetProperty("connectionString", out var c) ? c.GetString() : null;
+    }
+    catch { }
+}
 var connectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING")
+    ?? fileConnStr
     ?? builder.Configuration.GetConnectionString("Default")
     ?? "Data Source=channelflow.db";
 var provider = Environment.GetEnvironmentVariable("DATABASE_PROVIDER")
+    ?? fileProvider
     ?? builder.Configuration["Database:Provider"]
     ?? "sqlite";
 
@@ -42,10 +60,11 @@ builder.Services.AddHttpClient("default", client =>
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 builder.Services.AddResponseCaching();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
-builder.Services.AddSingleton<EfCoreData>(sp => new EfCoreData(sp, Path.Combine(builder.Environment.ContentRootPath, "data")));
+builder.Services.AddSingleton<EfCoreData>(sp => new EfCoreData(sp, Directory.Exists("/config/data") ? "/config/data" : Path.Combine(builder.Environment.ContentRootPath, "data")));
 builder.Services.AddSingleton<ICoreData>(sp => sp.GetRequiredService<EfCoreData>());
 builder.Services.AddScoped<MigrationService>();
 builder.Services.AddHostedService<BuildQueue>();
+builder.Services.AddSingleton<TaskTracker>();
 builder.Services.AddSingleton<PluginManager>(sp => new PluginManager(sp));
 
 builder.Services.AddSingleton<ClientLogsService>(sp => new ClientLogsService(Path.Combine(builder.Environment.ContentRootPath, "data")));

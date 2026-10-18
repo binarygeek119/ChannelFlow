@@ -2,6 +2,30 @@
 @inject HttpClient Http
 <h2>Setup Wizard</h2>
 <p>Configure your database provider. Set these as environment variables in Docker or in appsettings.json, then restart.</p>
+
+<!-- Database Status Popup -->
+@if (showStatusPopup)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;" @onclick="() => showStatusPopup = false">
+        <div style="background:#fff;padding:1.5rem;border-radius:8px;max-width:500px;width:90%;" @onclick:stopPropagation="true">
+            <h3 style="margin-top:0;">Database Status</h3>
+            <table style="width:100%;border-collapse:collapse;">
+                <tr><td style="padding:.4rem;font-weight:bold;">Provider</td><td style="padding:.4rem;">@currentProvider</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;">Connection</td><td style="padding:.4rem;">@(string.IsNullOrEmpty(currentConnStr) ? "Not configured" : MaskPassword(currentConnStr))</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;">Status</td><td style="padding:.4rem;color:@(dbConnected ? "green" : "red");">@(dbConnected ? "Connected" : "Not connected")</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;">Tables</td><td style="padding:.4rem;">@tableCount</td></tr>
+            </table>
+            <div style="margin-top:1rem;text-align:right;">
+                <button @onclick="() => showStatusPopup = false">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div style="margin-bottom:1rem;">
+    <button class="primary" @onclick="ShowStatus">Show Database Status</button>
+</div>
+
 <div style="display:grid;gap:.5rem;max-width:600px;">
     <label>Provider
         <select @bind="provider">
@@ -22,8 +46,12 @@
         <label>Username <input @bind="username" style="width:100%;" /></label>
         <label>Password <input @bind="password" type="password" style="width:100%;" /></label>
     }
-    <button @onclick="Test">Test Connection</button>
+    <div style="display:flex;gap:.5rem;">
+        <button @onclick="Test">Test Connection</button>
+        <button @onclick="Configure">Save & Configure</button>
+    </div>
     @if (testResult is not null) { <p style="color:@(testResult.StartsWith("OK")?"green":"red")">@testResult</p> }
+    @if (configureResult is not null) { <p style="color:green;">@configureResult</p> }
 </div>
 <h3>Example configurations</h3>
 <pre>SQLite:    Data Source=/config/channelflow.db
@@ -41,12 +69,54 @@ CONNECTION_STRING=Host=postgres;Port=5432;Database=channelflow;Username=channelf
     private string username = "channelflow";
     private string password = "channelflow";
     private string? testResult;
+    private string? configureResult;
+
+    // Status popup state
+    private bool showStatusPopup;
+    private string currentProvider = "unknown";
+    private string currentConnStr = "";
+    private bool dbConnected;
+    private int tableCount;
 
     private string ConnectionString => provider == "sqlite"
         ? $"Data Source={sqlitePath}"
         : provider == "mariadb"
             ? $"Server={host};Port={port};Database={database};Uid={username};Pwd={password}"
             : $"Host={host};Port={port};Database={database};Username={username};Password={password}";
+
+    private async Task ShowStatus()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<DbStatus>("api/setup/db-status", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null)
+            {
+                currentProvider = res.Provider;
+                currentConnStr = res.ConnectionString;
+                dbConnected = res.Connected;
+                tableCount = res.TableCount;
+            }
+        }
+        catch (Exception e)
+        {
+            currentProvider = "error";
+            currentConnStr = e.Message;
+            dbConnected = false;
+            tableCount = 0;
+        }
+        showStatusPopup = true;
+    }
+
+    private string MaskPassword(string connStr)
+    {
+        // Mask password in connection string
+        var idx = connStr.IndexOf("Password=", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) idx = connStr.IndexOf("Pwd=", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return connStr;
+        var end = connStr.IndexOf(';', idx);
+        if (end < 0) end = connStr.Length;
+        return connStr[..idx] + "Password=****" + connStr[end..];
+    }
 
     private async Task Test()
     {
@@ -57,5 +127,24 @@ CONNECTION_STRING=Host=postgres;Port=5432;Database=channelflow;Username=channelf
             if (res.IsSuccessStatusCode) testResult = "OK: " + testResult;
         }
         catch (Exception e) { testResult = "Error: " + e.Message; }
+    }
+
+    private async Task Configure()
+    {
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/setup/configure", new { Provider = provider, ConnectionString = ConnectionString });
+            configureResult = await res.Content.ReadAsStringAsync();
+            if (!res.IsSuccessStatusCode) configureResult = "Error: " + configureResult;
+        }
+        catch (Exception e) { configureResult = "Error: " + e.Message; }
+    }
+
+    public class DbStatus
+    {
+        public string Provider { get; set; } = "";
+        public string ConnectionString { get; set; } = "";
+        public bool Connected { get; set; }
+        public int TableCount { get; set; }
     }
 }

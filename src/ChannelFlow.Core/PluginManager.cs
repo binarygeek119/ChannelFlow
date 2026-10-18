@@ -29,7 +29,8 @@ public class PluginManager
             Dir = Path.GetDirectoryName(dllPath)!,
             Logger = new ConsolePluginLogger(id),
             Core = _services.GetService(typeof(ICoreData)) as ICoreData ?? new NoCoreData(),
-            Tasks = new NoopTaskHost(),
+            Tasks = new NoopTaskHost(_services.GetService(typeof(TaskTracker)) as TaskTracker),
+            // debug: Console.WriteLine($"[pm] TaskTracker resolved: {_services.GetService(typeof(TaskTracker)) is not null}"),
         };
         await plugin.OnLoadAsync(api);
         _plugins[id] = new LoadedPlugin(plugin, alc);
@@ -92,7 +93,9 @@ public class NoCoreData : ICoreData
 
 public class NoopTaskHost : IPluginTaskHost
 {
-    public void Report(string k, string t, string? l, long? c, long? tot) { }
+    private readonly TaskTracker? _tracker;
+    public NoopTaskHost(TaskTracker? tracker = null) { _tracker = tracker; }
+    public void Report(string k, string t, string? l, long? c, long? tot) { _tracker?.Report(k, t, l, c ?? 0, tot ?? 0); }
 }
 
 // Discovery extension (appended)

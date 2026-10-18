@@ -1,0 +1,43 @@
+@inject HttpClient Http
+<div class="task-popup-wrap">
+    @foreach (var t in tasks)
+    {
+        <div class="task-popup @(t.Status == "done" ? "status-done fading" : t.Status == "failed" ? "status-fail fading" : "")">
+            <div class="task-popup-head">@t.Title</div>
+            <div class="task-popup-track">
+                <div class="task-popup-bar @(t.Total == 0 ? "indeterminate" : t.Status == "done" ? "done" : t.Status == "failed" ? "fail" : "")" style="width:@(t.Total > 0 ? (t.Current * 100 / t.Total) : 45)%"></div>
+            </div>
+            <div class="task-popup-status">@t.Label — @t.Current / @t.Total</div>
+        </div>
+    }
+</div>
+@code {
+    private List<TaskDto> tasks = new();
+    private System.Threading.Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        timer = new System.Threading.Timer(async _ => await Poll(), null, 0, 2000);
+    }
+
+    private async Task Poll()
+    {
+        try
+        {
+            var running = await Http.GetFromJsonAsync<List<TaskDto>>("api/tasks/running", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            tasks = running ?? new();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { }
+    }
+
+    public class TaskDto
+    {
+        public string Key { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string? Label { get; set; }
+        public long Current { get; set; }
+        public long Total { get; set; }
+        public string Status { get; set; } = "running";
+    }
+}

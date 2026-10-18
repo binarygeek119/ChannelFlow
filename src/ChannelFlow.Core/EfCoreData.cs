@@ -12,7 +12,7 @@ public class EfCoreData : ICoreData
     public EfCoreData(IServiceProvider sp, string dataDir)
     {
         _sp = sp;
-        _dataDir = dataDir;
+        _dataDir = Directory.Exists("/config/data") ? "/config/data" : dataDir;
         Directory.CreateDirectory(Path.Combine(_dataDir, "lineups"));
     }
 

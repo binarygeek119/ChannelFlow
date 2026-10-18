@@ -28,7 +28,7 @@
 
 <div style="display:grid;gap:.5rem;max-width:600px;">
     <label>Provider
-        <select @bind="provider">
+        <select @bind="provider" @bind:after="OnProviderChanged">
             <option value="sqlite">SQLite</option>
             <option value="postgres">PostgreSQL</option>
             <option value="mariadb">MariaDB/MySQL</option>
@@ -118,6 +118,7 @@ CONNECTION_STRING=Host=postgres;Port=5432;Database=channelflow;Username=channelf
         return connStr[..idx] + "Password=****" + connStr[end..];
     }
 
+    private void OnProviderChanged() { StateHasChanged(); }
     private async Task Test()
     {
         try

@@ -52,6 +52,14 @@ pub struct CatalogVersion {
     pub min_base_version: String,
     #[serde(default)]
     pub max_base_version: String,
+    /// Soft minimum server API version: the plugin can run without a server
+    /// update when the server's API is at least this. Informational.
+    #[serde(default)]
+    pub min_api: String,
+    /// Hard minimum server API version: installation is blocked until the
+    /// server's API reaches this.
+    #[serde(default)]
+    pub force_min_api_version: String,
     #[serde(default)]
     pub timestamp: String,
     /// Per-platform `rid` -> the zip that runs there.
@@ -155,6 +163,10 @@ pub fn catalog_view(
                     base_version,
                     &version.min_base_version,
                     &version.max_base_version,
+                ) && channelflow_plugin_api::version::compatible(
+                    base_version,
+                    &version.force_min_api_version,
+                    "",
                 )
             });
             let name = if entry.name.is_empty() {
@@ -178,6 +190,8 @@ pub fn catalog_view(
                         "version": version.version,
                         "min_base_version": version.min_base_version,
                         "max_base_version": version.max_base_version,
+                        "min_api": version.min_api,
+                        "force_min_api_version": version.force_min_api_version,
                         "timestamp": version.timestamp,
                         "rids": version.artifacts.keys().collect::<Vec<_>>(),
                     })

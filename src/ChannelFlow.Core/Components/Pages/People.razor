@@ -1,116 +1,185 @@
-@using Microsoft.AspNetCore.Components.Forms
 @page "/people"
+@page "/people/{name}"
 @inject HttpClient Http
-<h2>People</h2>
-<StatusBadge Ok="true" Label="Loaded" />
-<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
-    <input @bind="newName" placeholder="Name" style="width:200px;" />
-    <input @bind="newImage" placeholder="Image path (optional)" style="width:300px;" />
-    <button @onclick="Create">Add Person</button>
-</div>
-@if (people is null) { <p>Loading...</p> }
-else if (people.Count == 0) { <p>No people yet.</p> }
-else
+@inject NavigationManager Nav
+
+@if (selectedPerson is null)
 {
-    <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th>Name</th><th>Image</th><th>Credits</th><th></th></tr></thead>
-        <tbody>
-        @foreach (var p in people)
+    <div class="panel">
+        <div class="panel-head">
+            <h2>People</h2>
+            <span class="count">@peopleTotal</span>
+        </div>
+        <p class="hint">
+            Everyone synced from your media library's cast lists, alphabetical by name. Their
+            pictures come with the library scan's image pass.
+        </p>
+        <div class="people-toolbar" style="margin-bottom:1rem;">
+            <input type="search" @bind="filter" @bind:event="oninput" @bind:after="OnFilterChanged" placeholder="Filter people…" style="width:300px;" />
+        </div>
+        @if (loading) { <p>Loading...</p> }
+        else if (people.Count == 0) { <p class="empty">No people synced yet — run a library scan and the cast appears here.</p> }
+        else
         {
-            <tr>
-                <td>@p.Name</td>
-                <td>
-                    @if (!string.IsNullOrEmpty(p.ImagePath)) { <img src="@p.ImagePath" style="height:32px;width:32px;object-fit:cover;border-radius:4px;" /> }
-                    else { <span>-</span> }
-                    <InputFile OnChange="@(e => UploadImage(p.Id, e))" style="font-size:.7rem;" />
-                </td>
-                <td>
-                    @if (creditsMap.TryGetValue(p.Id, out var cr) && cr.Count > 0)
-                    {
-                        <ul style="margin:0;padding-left:1rem;">@foreach (var c in cr) { <li>@c.Role: @c.MediaMatchKey @if(!string.IsNullOrEmpty(c.Character)){<span>(@c.Character)</span>}</li> }</ul>
-                    }
-                    else { <span>-</span> }
-                </td>
-                <td>
-                    <button @onclick="() => ShowAddCredit(p.Id)">+ Credit</button>
-                    <button @onclick="() => Delete(p.Id)" style="margin-left:.5rem;color:red;">Delete</button>
-                </td>
-            </tr>
-            @if (addingCreditFor == p.Id)
-            {
-                <tr>
-                    <td colspan="4" style="background:#f9f9f9;padding:.5rem;">
-                        <div style="display:flex;gap:.5rem;align-items:center;">
-                            <input @bind="creditMatchKey" placeholder="Media match key" style="width:200px;" />
-                            <input @bind="creditRole" placeholder="Role (actor/director)" style="width:150px;" />
-                            <input @bind="creditCharacter" placeholder="Character" style="width:150px;" />
-                            <button @onclick="() => SaveCredit(p.Id)">Save</button>
-                            <button @onclick="() => addingCreditFor = null">Cancel</button>
+            <div class="people-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:1rem;">
+                @foreach (var p in people)
+                {
+                    <div class="people-card" style="cursor:pointer;text-align:center;" @onclick="() => OpenPerson(p.Name)">
+                        <div class="people-avatar" style="width:80px;height:80px;margin:0 auto;border-radius:50%;background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                            @if (!string.IsNullOrEmpty(p.ImagePath))
+                            {
+                                <img src="@p.ImagePath" alt="@p.Name" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
+                            }
+                            else
+                            {
+                                <span style="font-size:1.5rem;font-weight:bold;">@Initials(p.Name)</span>
+                            }
                         </div>
-                    </td>
-                </tr>
+                        <div class="people-name" title="@p.Name" style="margin-top:.5rem;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@p.Name</div>
+                    </div>
+                }
+            </div>
+            @if (people.Count < peopleTotal)
+            {
+                <div style="margin-top:1rem;text-align:center;">
+                    <button class="ghost" @onclick="LoadMore">Load more</button>
+                </div>
             }
         }
-        </tbody>
-    </table>
+    </div>
 }
+else
+{
+    <div class="people-person">
+        <button class="media-back" @onclick="BackToList">← People</button>
+        <div class="people-person-head" style="display:flex;gap:1rem;align-items:center;margin:1rem 0;">
+            <div class="people-person-photo-frame" style="width:120px;height:120px;border-radius:50%;background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                @if (!string.IsNullOrEmpty(selectedPerson.ImagePath))
+                {
+                    <img src="@selectedPerson.ImagePath" alt="@selectedPerson.Name" style="width:100%;height:100%;object-fit:cover;" />
+                }
+                else
+                {
+                    <span style="font-size:2rem;font-weight:bold;">@Initials(selectedPerson.Name)</span>
+                }
+            </div>
+            <div class="people-person-meta">
+                <h1>@selectedPerson.Name</h1>
+                <div class="people-person-sub">@(selectedPerson.Credits?.Count ?? 0) title(s) in your catalog</div>
+            </div>
+        </div>
+        @if (selectedPerson.Credits is not null && selectedPerson.Credits.Count > 0)
+        {
+            <div class="people-items" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem;">
+                @foreach (var c in selectedPerson.Credits)
+                {
+                    <div class="people-item" style="text-align:center;">
+                        <div class="people-item-poster" style="height:120px;background:var(--card-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem;">
+                            <span style="font-size:.7rem;color:var(--muted);">@c.Role</span>
+                        </div>
+                        <div class="people-item-title" style="font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@c.MediaMatchKey</div>
+                        @if (!string.IsNullOrEmpty(c.Character)) { <div class="people-item-sub" style="font-size:.75rem;color:var(--muted);">@c.Character</div> }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="hint">No catalog titles for this person yet.</p>
+        }
+    </div>
+}
+
 @code {
-    private List<PersonDto>? people;
-    private Dictionary<Guid, List<CreditDto>> creditsMap = new();
-    private string newName = "";
-    private string newImage = "";
-    private Guid? addingCreditFor;
-    private string creditMatchKey = "";
-    private string creditRole = "actor";
-    private string creditCharacter = "";
+    [Parameter] public string? name { get; set; }
+    private List<PersonDto> people = new();
+    private PersonDetail? selectedPerson;
+    private string filter = "";
+    private bool loading;
+    private int peopleTotal;
+    private int peopleOffset;
+    private System.Threading.Timer? filterTimer;
 
     protected override async Task OnInitializedAsync() => await Load();
 
     private async Task Load()
     {
+        if (!string.IsNullOrEmpty(name))
+        {
+            await LoadPerson(name);
+            return;
+        }
+        selectedPerson = null;
+        loading = true;
         try
         {
-            people = await Http.GetFromJsonAsync<List<PersonDto>>("api/people", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            creditsMap.Clear();
-            if (people is not null)
-                foreach (var p in people)
-                {
-                    var cr = await Http.GetFromJsonAsync<List<CreditDto>>($"api/credits/person/{p.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    if (cr is not null) creditsMap[p.Id] = cr;
-                }
+            var url = "api/people?limit=200";
+            if (!string.IsNullOrEmpty(filter)) url += $"&search={Uri.EscapeDataString(filter)}";
+            people = await Http.GetFromJsonAsync<List<PersonDto>>(url, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            peopleTotal = people.Count;
         }
         catch { people = new(); }
+        loading = false;
     }
-    private async Task Create()
+
+    private async Task LoadPerson(string personName)
     {
-        if (string.IsNullOrWhiteSpace(newName)) return;
-        await Http.PostAsJsonAsync("api/people", new { Name = newName, ImagePath = string.IsNullOrWhiteSpace(newImage) ? null : newImage });
-        newName = ""; newImage = "";
-        await Load();
+        try
+        {
+            var res = await Http.GetFromJsonAsync<PersonDetail>($"api/people/{Uri.EscapeDataString(personName)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            selectedPerson = res;
+        }
+        catch { selectedPerson = null; }
     }
-    private async Task UploadImage(Guid id, InputFileChangeEventArgs e)
+
+    private void OpenPerson(string personName)
     {
-        var file = e.File;
-        if (file is null) return;
-        using var content = new MultipartFormDataContent();
-        var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
-        content.Add(new StreamContent(stream), "file", file.Name);
-        await Http.PostAsync($"api/people/{id}/image", content);
-        await Load();
+        Nav.NavigateTo($"/people/{Uri.EscapeDataString(personName)}");
     }
-    private async Task Delete(Guid id)
+
+    private void BackToList()
     {
-        await Http.DeleteAsync($"api/people/{id}");
-        await Load();
+        Nav.NavigateTo("/people");
+        selectedPerson = null;
+        _ = Load();
     }
-    private void ShowAddCredit(Guid id) { addingCreditFor = id; creditMatchKey = ""; creditRole = "actor"; creditCharacter = ""; }
-    private async Task SaveCredit(Guid personId)
+
+    private async Task LoadMore()
     {
-        if (string.IsNullOrWhiteSpace(creditMatchKey)) return;
-        await Http.PostAsJsonAsync("api/credits", new { PersonId = personId, MediaMatchKey = creditMatchKey, Role = creditRole, Character = string.IsNullOrWhiteSpace(creditCharacter) ? null : creditCharacter });
-        addingCreditFor = null;
-        await Load();
+        // People API doesn't support offset yet; placeholder
     }
-    public record PersonDto(Guid Id, string Name, string? ImagePath);
-    public record CreditDto(Guid Id, Guid PersonId, string MediaMatchKey, string Role, string? Character, string? ImagePath);
+
+    private void OnFilterChanged()
+    {
+        // Debounce
+        _ = Load();
+    }
+
+    private static string Initials(string name)
+    {
+        return string.Join("", name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => w[0].ToString().ToUpper()));
+    }
+
+    public class PersonDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? ImagePath { get; set; }
+    }
+    public class PersonDetail
+    {
+        public PersonDto? Person { get; set; }
+        public List<CreditDto> Credits { get; set; } = new();
+        public string Name => Person?.Name ?? "";
+        public string? ImagePath => Person?.ImagePath;
+    }
+    public class CreditDto
+    {
+        public Guid Id { get; set; }
+        public Guid PersonId { get; set; }
+        public string MediaMatchKey { get; set; } = "";
+        public string Role { get; set; } = "";
+        public string? Character { get; set; }
+        public string? ImagePath { get; set; }
+    }
 }

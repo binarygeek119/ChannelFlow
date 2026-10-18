@@ -49,7 +49,8 @@
     color: var(--text);
 }
 .plugin-perms-unknown { font-style: italic; }
-td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; }
+td.perms { font-size: 0.75rem; color: var(--muted); max-width: 16rem; vertical-align: middle; }
+#plugins-rows td { vertical-align: middle; }
 
 .plugin-remove-name { font-weight: 600; margin: 0.2rem 0 0.6rem; }
 .plugin-perms-popup {

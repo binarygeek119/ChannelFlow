@@ -167,7 +167,8 @@ impl Store {
     /// happen here, before the first request.
     pub async fn open_postgres(url: &str, config: &Path) -> Result<Self, StoreError> {
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(20)
+            .acquire_timeout(std::time::Duration::from_secs(30))
             .connect(url)
             .await?;
         pg::ensure_schema(&pool).await?;

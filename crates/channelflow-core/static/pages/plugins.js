@@ -211,9 +211,15 @@ els.pluginsRows.addEventListener("click", (event) => {
     bubble.className = "plugin-perms-popup";
     document.body.appendChild(bubble);
   }
-  bubble.textContent = perms;
+  bubble.innerHTML = perms;
   const rect = button.getBoundingClientRect();
-  bubble.style.left = `${rect.left + window.scrollX}px`;
+  const bubbleWidth = 360;
+  let left = rect.left + window.scrollX;
+  if (left + bubbleWidth > window.innerWidth + window.scrollX) {
+    left = window.innerWidth + window.scrollX - bubbleWidth - 8;
+  }
+  if (left < window.scrollX + 8) left = window.scrollX + 8;
+  bubble.style.left = `${left}px`;
   bubble.style.top = `${rect.bottom + window.scrollY + 4}px`;
   bubble.hidden = false;
   const close = (e) => {

@@ -23,6 +23,8 @@ use channelflow_plugin_api::plugin::{PluginApi, PluginLogger};
 use clap::Parser;
 use tokio::sync::Mutex;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::plugin::PluginManager;
 use crate::store::Store;
@@ -54,15 +56,28 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+    let args = Args::parse();
+    let config = args.config.clone().unwrap_or_else(|| PathBuf::from("config"));
+
+    // Rolling log file under <config>/logs (i.e. /config/logs in the image),
+    // rotated daily, in addition to stdout so Docker still captures output.
+    let log_dir = config.join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "channelflow.log");
+    let (non_blocking, _log_guard) = tracing_appender::non_blocking(file_appender);
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let stdout_layer = tracing_subscriber::fmt::layer();
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false);
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
 
-    let args = Args::parse();
     let started = std::time::Instant::now();
-    let config = args.config.unwrap_or_else(|| PathBuf::from("config"));
 
     // The image runs as `ersatztv` (uid 1000, inherited from the next base), so
     // a bind-mounted config directory owned by someone else fails here. Say so

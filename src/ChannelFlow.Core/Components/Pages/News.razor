@@ -1,0 +1,98 @@
+@page "/news"
+@inject HttpClient Http
+<h2>News (FlowWire)</h2>
+<p class="hint">RSS news channel settings, headline preview, and bulletin schedule.</p>
+
+@if (settings is null) { <p>Loading...</p> }
+else
+{
+    <div style="display:grid;gap:.5rem;max-width:600px;">
+        <label>Header <input @bind="settings.Header" style="width:100%;" /></label>
+        <label>Article Count <input type="number" @bind="settings.ArticleCount" style="width:100px;" /></label>
+        <label>Refresh (min) <input type="number" @bind="settings.RefreshMinutes" style="width:100px;" /></label>
+        <label>TTS Voice <input @bind="settings.TtsVoice" style="width:100%;" /></label>
+        <label>TTS Engine <input @bind="settings.TtsEngine" style="width:100%;" /></label>
+        <label>Anchor Intro <textarea @bind="settings.AnchorIntro" style="width:100%;height:60px;"></textarea></label>
+        <label>Anchor Outro <textarea @bind="settings.AnchorOutro" style="width:100%;height:60px;"></textarea></label>
+        <label><input type="checkbox" @bind="settings.BulletinEnabled" /> Bulletin Enabled</label>
+        <label>Feeds (one URL per line) <textarea @bind="feedsText" style="width:100%;height:80px;"></textarea></label>
+        <div style="display:flex;gap:.5rem;">
+            <button class="primary" @onclick="Save" disabled="@saving">@(saving ? "Saving..." : "Save")</button>
+            <button class="ghost" @onclick="FetchHeadlines" disabled="@loading">@(loading ? "Loading..." : "Preview Headlines")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+    </div>
+    @if (headlines is not null)
+    {
+        <h3 style="margin-top:1rem;">Headlines (@headlines.Count)</h3>
+        <ul>
+        @foreach (var h in headlines)
+        {
+            <li><strong>@h.Title</strong> <small>@h.Feed</small></li>
+        }
+        </ul>
+    }
+}
+@code {
+    private NewsSettings? settings;
+    private string feedsText = "";
+    private bool saving, loading;
+    private string? msg;
+    private List<Headline>? headlines;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<NewsView>("api/plugins/com.channelflow.news/", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            settings = res?.Settings;
+            if (settings is not null) feedsText = string.Join("\n", settings.Feeds);
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+    }
+
+    private async Task Save()
+    {
+        if (settings is null) return;
+        saving = true;
+        settings.Feeds = feedsText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        try
+        {
+            var res = await Http.PutAsJsonAsync("api/plugins/com.channelflow.news/", settings);
+            msg = res.IsSuccessStatusCode ? "Saved." : "Error: " + await res.Content.ReadAsStringAsync();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        saving = false;
+    }
+
+    private async Task FetchHeadlines()
+    {
+        loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<HeadlinesResponse>("api/plugins/com.channelflow.news/headlines", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            headlines = res?.Headlines;
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    public class NewsView { public NewsSettings? Settings { get; set; } }
+    public class NewsSettings
+    {
+        public string Header { get; set; } = "FlowWire News";
+        public int ArticleCount { get; set; } = 5;
+        public int RefreshMinutes { get; set; } = 15;
+        public string TtsVoice { get; set; } = "alloy";
+        public string TtsEngine { get; set; } = "openai";
+        public string AnchorIntro { get; set; } = "";
+        public string AnchorOutro { get; set; } = "";
+        public bool BulletinEnabled { get; set; } = false;
+        public List<string> BulletinMarks { get; set; } = new();
+        public List<string> Feeds { get; set; } = new();
+    }
+    public class HeadlinesResponse { public List<Headline> Headlines { get; set; } = new(); public int Count { get; set; } }
+    public class Headline { public string Title { get; set; } = ""; public string Link { get; set; } = ""; public string Description { get; set; } = ""; public string Feed { get; set; } = ""; }
+}

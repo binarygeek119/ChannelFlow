@@ -1,12 +1,10 @@
 {
   "id": "com.channelflow.news",
   "name": "News",
-  "version": "2.0.60",
+  "version": "3.0.0",
   "minApi": "3.0.0",
   "forceMinApiVersion": "3.0.0",
-  "entrypoint": {
-    "dll": "ChannelFlow.Plugin.News.dll",
-    "type": "ChannelFlow.Plugin.News.NewsPlugin"
-  },
-  "category": "news"
+  "entrypoint": { "dll": "ChannelFlow.Plugin.News.dll", "type": "ChannelFlow.Plugin.News.NewsPlugin" },
+  "category": "news",
+  "permissions": ["storage:read", "storage:write", "network:outbound", "api:routes", "ui:pages"]
 }

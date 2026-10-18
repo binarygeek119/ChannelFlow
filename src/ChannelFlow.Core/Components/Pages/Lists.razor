@@ -1,0 +1,106 @@
+@page "/lists"
+@inject HttpClient Http
+<h2>Lists</h2>
+<p class="hint">Named collections of catalog items you can reuse across channels.</p>
+
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <input @bind="newName" placeholder="List name" style="width:200px;" />
+    <button class="primary" @onclick="Create">Create List</button>
+</div>
+
+@if (loading) { <p>Loading...</p> }
+else if (lists.Count == 0) { <p class="empty">No lists yet.</p> }
+else
+{
+    @foreach (var list in lists)
+    {
+        <div class="panel" style="margin-bottom:1rem;">
+            <div class="panel-head">
+                <h3>@list.Name</h3>
+                <button class="link danger" @onclick="() => Delete(list.Id)">Delete</button>
+            </div>
+            <p class="hint">@list.Items.Count items</p>
+            @if (list.Items.Count > 0)
+            {
+                <ul style="margin:0;padding-left:1.5rem;">
+                @foreach (var item in list.Items)
+                {
+                    <li>@item.Title (@item.Kind) <button class="link danger" @onclick="() => RemoveItem(list.Id, item.MatchKey)">remove</button></li>
+                }
+                </ul>
+            }
+            <div style="margin-top:.5rem;display:flex;gap:.5rem;">
+                <input @bind="addItemKey" placeholder="Match key" style="width:150px;" />
+                <input @bind="addItemTitle" placeholder="Title" style="width:150px;" />
+                <button class="ghost" @onclick="() => AddItem(list.Id)">Add Item</button>
+            </div>
+        </div>
+    }
+}
+@if (!string.IsNullOrEmpty(msg)) { <p class="field-note">@msg</p> }
+@code {
+    private List<ListDto> lists = new();
+    private string newName = "";
+    private string addItemKey = "";
+    private string addItemTitle = "";
+    private bool loading;
+    private string? msg;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<ListsResponse>("api/plugins/com.channelflow.lists/lists", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            lists = res?.Lists ?? new();
+        }
+        catch (Exception e) { msg = "Error: " + e.Message; }
+        loading = false;
+    }
+
+    private async Task Create()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        await Http.PostAsJsonAsync("api/plugins/com.channelflow.lists/lists", new { Name = newName });
+        newName = "";
+        await Load();
+    }
+
+    private async Task Delete(string id)
+    {
+        await Http.DeleteAsync($"api/plugins/com.channelflow.lists/lists/{id}");
+        await Load();
+    }
+
+    private async Task AddItem(string listId)
+    {
+        if (string.IsNullOrWhiteSpace(addItemKey) || string.IsNullOrWhiteSpace(addItemTitle)) return;
+        await Http.PostAsJsonAsync($"api/plugins/com.channelflow.lists/lists/{listId}/items", new { MatchKey = addItemKey, Title = addItemTitle, Kind = "movie" });
+        addItemKey = ""; addItemTitle = "";
+        await Load();
+    }
+
+    private async Task RemoveItem(string listId, string matchKey)
+    {
+        await Http.DeleteAsync($"api/plugins/com.channelflow.lists/lists/{listId}/items/{Uri.EscapeDataString(matchKey)}");
+        await Load();
+    }
+
+    public class ListsResponse { public List<ListDto> Lists { get; set; } = new(); }
+    public class ListDto
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string CreatedAt { get; set; } = "";
+        public List<ItemDto> Items { get; set; } = new();
+    }
+    public class ItemDto
+    {
+        public string MatchKey { get; set; } = "";
+        public string Kind { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+    }
+}

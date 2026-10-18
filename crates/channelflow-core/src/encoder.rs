@@ -67,17 +67,34 @@ impl Encoder {
         if is_running(guard.as_mut()) {
             return true;
         }
-        match Command::new(binary)
-            .arg(&self.lineup)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        let working_dir = self.lineup.parent().map(|path| path.to_path_buf());
+        let mut command = Command::new(binary);
+        command.arg(&self.lineup);
+        if let Some(dir) = &working_dir {
+            command.current_dir(dir);
+        }
+        // Keep the encoder's stderr in a file so a failure to start is debuggable.
+        if let Some(dir) = &working_dir {
+            if let Ok(file) = std::fs::File::create(dir.join("ersatztv.stderr.log")) {
+                command.stderr(std::process::Stdio::from(file));
+            } else {
+                command.stderr(Stdio::null());
+            }
+        } else {
+            command.stderr(Stdio::null());
+        }
+        command.stdout(Stdio::null());
+        match command.spawn()
         {
             Ok(child) => {
+                tracing::info!(binary = %binary.display(), lineup = %self.lineup.display(), "started the ersatztv encoder");
                 *guard = Some(child);
                 true
             }
-            Err(_) => false,
+            Err(error) => {
+                tracing::error!(%error, binary = %binary.display(), "could not start the ersatztv encoder");
+                false
+            }
         }
     }
 

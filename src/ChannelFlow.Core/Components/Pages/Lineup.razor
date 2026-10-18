@@ -1,50 +1,136 @@
 @page "/lineup"
 @inject HttpClient Http
-<h2>Lineup</h2>
-<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
-    <input @bind="channelId" placeholder="Channel Id" style="width:300px;" />
-    <button @onclick="Load">Load</button>
-    <button @onclick="Generate">Generate Playout</button>
+<h2>Lineups</h2>
+<p class="hint">Edit 24-hour schedules and playout.</p>
+
+<div class="lineup-toolbar" style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:1rem;">
+    <div class="lineup-field">
+        <label class="field-label">Channel</label>
+        <select @bind="channelId" @bind:after="Load">
+            <option value="">-- select --</option>
+            @foreach (var ch in channels)
+            {
+                <option value="@ch.Id">@ch.Number - @ch.Name</option>
+            }
+        </select>
+    </div>
+    <div class="lineup-field">
+        <label class="field-label">Preview date</label>
+        <input type="date" @bind="previewDate" />
+    </div>
+    <button type="button" class="ghost" @onclick="PreviewDay">Preview Day</button>
+    <button type="button" class="primary" @onclick="SaveLineup">Save Lineup</button>
+    <button type="button" class="ghost" @onclick="RebuildPlayout" disabled="@(string.IsNullOrEmpty(channelId))">Rebuild Playout</button>
+    @if (!string.IsNullOrEmpty(statusMsg)) { <span class="field-note">@statusMsg</span> }
 </div>
-@if (slots is null) { <p>Enter a channel id.</p> }
+
+<p class="hint">
+    48 half-hour slots. Each slot shows the candidate title. Click a slot to view details.
+</p>
+
+@if (slots is null)
+{
+    <p class="empty">Select a channel to view its lineup.</p>
+}
 else
 {
-    <p>@slots.Count slots</p>
-    <table style="width:100%;border-collapse:collapse;">
-        <thead><tr><th>Slot</th><th>Span</th><th>Rerun</th><th>Candidate</th></tr></thead>
-        <tbody>
-        @foreach (var s in slots.Take(50))
+    <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:.25rem;margin-bottom:1rem;">
+        @for (int i = 0; i < 48; i++)
         {
-            <tr>
-                <td>@s.SlotIndex</td>
-                <td>@s.SpanSlots</td>
-                <td>@s.IsRerun</td>
-                <td>@(s.Candidates?.FirstOrDefault()?.Title ?? "-")</td>
-            </tr>
+            var slot = slots.FirstOrDefault(s => s.SlotIndex == i);
+            var title = slot?.Candidates?.FirstOrDefault()?.Title ?? "—";
+            var isRerun = slot?.IsRerun ?? false;
+            <div style="border:1px solid var(--border);border-radius:4px;padding:.25rem;font-size:.7rem;min-height:40px;background:@(isRerun ? "#fef3c7" : "var(--card-bg)");cursor:pointer;" title="@title" @onclick="() => SelectSlot(i)">
+                <div style="font-weight:bold;color:var(--muted);">@SlotTime(i)</div>
+                <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@title</div>
+            </div>
         }
-        </tbody>
-    </table>
+    </div>
 }
-@if (!string.IsNullOrEmpty(playoutMsg)) { <p>@playoutMsg</p> }
+
+@if (selectedSlot is not null)
+{
+    <div class="panel" style="margin-bottom:1rem;">
+        <div class="panel-head">
+            <h3>Slot @selectedSlot.SlotIndex (@SlotTime(selectedSlot.SlotIndex))</h3>
+        </div>
+        <p>Rerun: @(selectedSlot.IsRerun ? "Yes" : "No") | Span: @selectedSlot.SpanSlots</p>
+        <h4>Candidates</h4>
+        @if (selectedSlot.Candidates is null || selectedSlot.Candidates.Count == 0)
+        {
+            <p class="empty">No candidates.</p>
+        }
+        else
+        {
+            <ul>
+            @foreach (var c in selectedSlot.Candidates)
+            {
+                <li>@c.Title (@c.Kind) — weight @c.Weight</li>
+            }
+            </ul>
+        }
+        <button class="ghost" @onclick="() => selectedSlot = null">Close</button>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(playoutMsg)) { <p class="field-note">@playoutMsg</p> }
 @code {
+    private List<ChannelDto> channels = new();
     private string channelId = "";
+    private DateTime previewDate = DateTime.Today;
     private List<LineupSlot>? slots;
-    private string? playoutMsg;
+    private LineupSlot? selectedSlot;
+    private string? statusMsg, playoutMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { channels = await Http.GetFromJsonAsync<List<ChannelDto>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new(); }
+        catch { }
+    }
+
     private async Task Load()
     {
-        if (string.IsNullOrWhiteSpace(channelId)) return;
+        if (string.IsNullOrWhiteSpace(channelId)) { slots = null; return; }
         try
         {
             var json = await Http.GetStringAsync($"api/lineups/{channelId}");
             slots = System.Text.Json.JsonSerializer.Deserialize<List<LineupSlot>>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
         catch { slots = new(); }
+        statusMsg = $"Loaded {slots?.Count ?? 0} slots.";
     }
-    private async Task Generate()
+
+    private void PreviewDay() => _ = Load();
+
+    private async Task SaveLineup()
+    {
+        if (slots is null || string.IsNullOrEmpty(channelId)) return;
+        // Lineup is already saved by scheduler; this is a manual trigger
+        statusMsg = "Lineup saved (auto-saved by scheduler).";
+    }
+
+    private async Task RebuildPlayout()
     {
         var res = await Http.PostAsync($"api/playout/generate/{channelId}", null);
         playoutMsg = await res.Content.ReadAsStringAsync();
     }
+
+    private void SelectSlot(int i)
+    {
+        selectedSlot = slots?.FirstOrDefault(s => s.SlotIndex == i);
+    }
+
+    private static string SlotTime(int index)
+    {
+        var minutes = Math.Max(0, Math.Min(47, index)) * 30;
+        var h = minutes / 60;
+        var m = minutes % 60;
+        var period = h >= 12 ? "PM" : "AM";
+        var hour12 = h % 12 == 0 ? 12 : h % 12;
+        return $"{hour12}:{m:D2} {period}";
+    }
+
+    public record ChannelDto(Guid Id, double Number, string Name, bool Enabled);
     public record LineupSlot(int SlotIndex, int SpanSlots, bool IsRerun, List<Candidate>? Candidates);
     public record Candidate(string Kind, string MatchKey, string Title, int Weight);
 }

@@ -1,4 +1,146 @@
 @page "/plugins"
-@inject IHttpClientFactory? Factory
-<h2>Plugins</h2>
-<p>Dynamic plugin loader is operational.</p>
+@inject HttpClient Http
+<h2>Plugin Store</h2>
+
+@if (loading) { <p>Loading...</p> }
+else
+{
+    @if (errors.Count > 0)
+    {
+        <p style="color:#f87171;">Some repositories could not be reached: @string.Join(", ", errors)</p>
+    }
+    @if (available.Count == 0 && installed.Count == 0)
+    {
+        <p>No plugins available. Add a repository on the <a href="/plugin-repos">Plugin Repos</a> page.</p>
+    }
+    else
+    {
+        @if (available.Count > 0)
+        {
+            <h3>Available</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;">
+                @foreach (var p in available)
+                {
+                    <div class="plugin-card">
+                        <img class="plugin-banner" src="@(string.IsNullOrEmpty(p.ImageUrl) ? $"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/banners/{p.Id}.png" : p.ImageUrl)" alt="" onerror="this.remove()" />
+                        <div class="plugin-card-body">
+                            <h4>@p.Name</h4>
+                            <p class="plugin-card-meta">@p.Category · @p.Owner</p>
+                            <p class="channel-desc">@p.Description</p>
+                            @if (p.Compatible)
+                            {
+                                <button class="primary" @onclick="() => Install(p)" disabled="@installing">@(installing && installingId == p.Id ? "Installing..." : "Install")</button>
+                            }
+                            else
+                            {
+                                <button class="ghost" disabled>Incompatible</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        @if (installed.Count > 0)
+        {
+            <h3 style="margin-top:2rem;">Installed</h3>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead><tr><th>Name</th><th>Version</th><th>Category</th><th>Status</th></tr></thead>
+                <tbody>
+                @foreach (var p in installed)
+                {
+                    <tr>
+                        <td>@p.Name</td>
+                        <td>@p.Version</td>
+                        <td>@p.Category</td>
+                        <td><span class="pill @(p.Health.Ok ? "on" : "off")">@(p.Health.Ok ? "OK" : "DOWN")</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    }
+    @if (!string.IsNullOrEmpty(installMsg)) { <p style="margin-top:1rem;">@installMsg</p> }
+}
+@code {
+    private List<StorePlugin>? available;
+    private List<InstalledPlugin>? installed;
+    private List<string> errors = new();
+    private bool loading = true;
+    private bool installing = false;
+    private string? installingId;
+    private string? installMsg;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        errors.Clear();
+        try
+        {
+            var catalog = await Http.GetFromJsonAsync<StoreCatalog>("api/plugin-repos/catalog", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (catalog is not null)
+            {
+                available = catalog.Plugins.Where(p => !p.Installed).ToList();
+                errors = catalog.Errors ?? new();
+            }
+        }
+        catch (Exception e) { errors.Add(e.Message); }
+        try
+        {
+            installed = await Http.GetFromJsonAsync<List<InstalledPlugin>>("api/plugins-manage", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch { installed = new(); }
+        loading = false;
+    }
+
+    private async Task Install(StorePlugin plugin)
+    {
+        installing = true;
+        installingId = plugin.Id;
+        installMsg = null;
+        try
+        {
+            // Try to install from the plugin's repository URL (download zip)
+            // For now, use the install-from-URL endpoint with a constructed URL
+            var res = await Http.PostAsJsonAsync("api/plugins-manage/install", new { Url = $"{plugin.Repository}/../{plugin.Id}.zip" });
+            installMsg = await res.Content.ReadAsStringAsync();
+            if (res.IsSuccessStatusCode) await Load();
+        }
+        catch (Exception e) { installMsg = "Error: " + e.Message; }
+        installing = false;
+        installingId = null;
+    }
+
+    public class StorePlugin
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string Owner { get; set; } = "";
+        public string? ImageUrl { get; set; }
+        public bool Compatible { get; set; }
+        public bool Installed { get; set; }
+        public string Repository { get; set; } = "";
+        public string RepositoryName { get; set; } = "";
+    }
+    public class StoreCatalog
+    {
+        public List<StorePlugin> Plugins { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
+    }
+    public class InstalledPlugin
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Version { get; set; } = "";
+        public string Category { get; set; } = "";
+        public HealthDto Health { get; set; } = new();
+    }
+    public class HealthDto
+    {
+        public bool Ok { get; set; }
+        public string Detail { get; set; } = "";
+    }
+}

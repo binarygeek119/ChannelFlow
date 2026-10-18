@@ -1,0 +1,57 @@
+name: Build Plugins
+
+on:
+  push:
+    branches: [main, v3]
+    paths:
+      - 'plugins/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build plugins
+        run: |
+          for p in plugins/ChannelFlow.Plugin.*/; do
+            echo "Building $p..."
+            dotnet build "$p" -c Release
+          done
+
+      - name: Package plugins
+        run: |
+          mkdir -p artifacts
+          for p in plugins/ChannelFlow.Plugin.*/; do
+            name=$(basename "$p" | sed 's/ChannelFlow.Plugin.//')
+            # Find the plugin id from plugin.json
+            idir=$(find plugins -maxdepth 1 -type d -name "com.channelflow.*" | while read d; do
+              if grep -q "\"$name\"" "$d/plugin.json" 2>/dev/null || grep -qi "$name" "$d/plugin.json" 2>/dev/null; then echo "$d"; break; fi
+            done)
+            if [ -z "$idir" ]; then
+              # fallback: find by dll name
+              idir=$(find plugins -maxdepth 1 -type d -name "com.channelflow.*" | head -1)
+            fi
+            id=$(basename "$idir")
+            mkdir -p "artifacts/$id"
+            # Copy DLL and plugin.json
+            cp "$p"bin/Release/net10.0/ChannelFlow.Plugin.$name.dll "artifacts/$id/" 2>/dev/null || \
+            cp "$p"bin/Release/net10.0/*.dll "artifacts/$id/"
+            cp "plugins/$id/plugin.json" "artifacts/$id/" 2>/dev/null || true
+            # Create zip
+            cd artifacts && zip -r "$id.zip" "$id" && cd ..
+            echo "Packaged $id"
+          done
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: artifacts/*.zip

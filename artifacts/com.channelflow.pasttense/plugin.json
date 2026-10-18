@@ -1,0 +1,12 @@
+{
+  "id": "com.channelflow.pasttense",
+  "name": "Past Tense News",
+  "version": "2.0.3",
+  "minApi": "3.0.0",
+  "forceMinApiVersion": "3.0.0",
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.PastTense.dll",
+    "type": "ChannelFlow.Plugin.PastTense.PastTensePlugin"
+  },
+  "category": "catalog"
+}

@@ -1,0 +1,78 @@
+@inherits LayoutComponentBase
+<div id="app-shell">
+    <aside class="app-drawer">
+        <a class="drawer-brand" href="/">
+            <span style="font-size:1.4rem;font-weight:800;color:var(--accent);">ChannelFlow</span>
+            <span style="font-size:.7rem;color:var(--muted);">v3</span>
+        </a>
+        <nav class="drawer-nav">
+            <a href="/" class="@(IsActive("/") ? "active" : "")">
+                <span class="nav-label">Home</span>
+            </a>
+            <a href="/dashboard" class="@(IsActive("/dashboard") ? "active" : "")">
+                <span class="nav-label">Dashboard</span>
+            </a>
+            <a href="/channels" class="@(IsActive("/channels") ? "active" : "")">
+                <span class="nav-label">Channels</span>
+            </a>
+            <a href="/media" class="@(IsActive("/media") ? "active" : "")">
+                <span class="nav-label">Media</span>
+            </a>
+            <a href="/guide" class="@(IsActive("/guide") ? "active" : "")">
+                <span class="nav-label">Guide</span>
+            </a>
+            <a href="/guide-grid" class="@(IsActive("/guide-grid") ? "active" : "")">
+                <span class="nav-label">Guide Grid</span>
+            </a>
+            <a href="/lineup" class="@(IsActive("/lineup") ? "active" : "")">
+                <span class="nav-label">Lineup</span>
+            </a>
+            <a href="/scheduler" class="@(IsActive("/scheduler") ? "active" : "")">
+                <span class="nav-label">Scheduler</span>
+            </a>
+            <a href="/people" class="@(IsActive("/people") ? "active" : "")">
+                <span class="nav-label">People</span>
+            </a>
+            <a href="/connections" class="@(IsActive("/connections") ? "active" : "")">
+                <span class="nav-label">Connections</span>
+            </a>
+            <a href="/plugins" class="@(IsActive("/plugins") ? "active" : "")">
+                <span class="nav-label">Plugins</span>
+            </a>
+            <a href="/plugins-manage" class="@(IsActive("/plugins-manage") ? "active" : "")">
+                <span class="nav-label">Plugin Mgmt</span>
+            </a>
+            <a href="/sidecar" class="@(IsActive("/sidecar") ? "active" : "")">
+                <span class="nav-label">Sidecar</span>
+            </a>
+            <a href="/live" class="@(IsActive("/live") ? "active" : "")">
+                <span class="nav-label">Live</span>
+            </a>
+            <a href="/settings" class="@(IsActive("/settings") ? "active" : "")">
+                <span class="nav-label">Settings</span>
+            </a>
+            <a href="/setup" class="@(IsActive("/setup") ? "active" : "")">
+                <span class="nav-label">Setup</span>
+            </a>
+            <a href="/migration" class="@(IsActive("/migration") ? "active" : "")">
+                <span class="nav-label">Migration</span>
+            </a>
+        </nav>
+    </aside>
+    <main class="app-main">
+        <div class="app-topbar">
+            <h1>@PageTitle</h1>
+            <div class="topbar-meta">
+                <span class="version">v3.0.0</span>
+            </div>
+        </div>
+        <div id="page">
+            @Body
+        </div>
+    </main>
+</div>
+@code {
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+    private string PageTitle => Nav.Uri.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? "Home";
+    private bool IsActive(string href) => Nav.Uri.EndsWith(href == "/" ? Nav.BaseUri : href, StringComparison.OrdinalIgnoreCase);
+}

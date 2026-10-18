@@ -1,0 +1,50 @@
+@page "/settings"
+@inject HttpClient Http
+<h2>Settings</h2>
+<h3>LLM Provider</h3>
+<div style="display:grid;gap:.5rem;max-width:500px;">
+    <label>Provider <input @bind="cfg.Provider" /></label>
+    <label>Base URL <input @bind="cfg.BaseUrl" style="width:100%;" /></label>
+    <label>API Key <input @bind="cfg.ApiKey" type="password" style="width:100%;" /></label>
+    <label>Model <input @bind="cfg.Model" /></label>
+    <label>Temperature <input @bind="cfg.Temperature" type="number" step="0.1" /></label>
+    <button @onclick="Save">Save</button>
+</div>
+@if (saved) { <p style="color:green;">Saved.</p> }
+<h3>General</h3>
+<div style="display:grid;gap:.5rem;max-width:500px;margin-bottom:1rem;">
+    <label>Timezone <input @bind="tz" style="width:100%;" /></label>
+    <button @onclick="SaveTz">Save Timezone</button>
+    @if (tzSaved) { <p style="color:green;">Saved.</p> }
+</div>
+
+@code {
+    private LlmConfig cfg = new();
+    private bool saved;
+    private string tz = "UTC";
+    private bool tzSaved;
+    private async Task Save()
+    {
+        await Http.PostAsJsonAsync("api/settings/llm", cfg);
+        saved = true;
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        try { cfg = await Http.GetFromJsonAsync<LlmConfig>("api/settings/llm") ?? new(); } catch { }
+        try { var g = await Http.GetFromJsonAsync<GenSettings>("api/settings/general", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); if (g is not null) tz = g.Timezone; } catch { }
+    }
+    private async Task SaveTz()
+    {
+        await Http.PutAsJsonAsync("api/settings/general", new { Timezone = tz });
+        tzSaved = true;
+    }
+    public class GenSettings { public string Timezone { get; set; } = "UTC"; }
+    public class LlmConfig
+    {
+        public string Provider { get; set; } = "openai";
+        public string BaseUrl { get; set; } = "https://api.openai.com/v1";
+        public string ApiKey { get; set; } = "";
+        public string Model { get; set; } = "gpt-4o-mini";
+        public double Temperature { get; set; } = 0.7;
+    }
+}

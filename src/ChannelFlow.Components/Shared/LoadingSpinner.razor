@@ -1,0 +1,8 @@
+@if (Visible)
+{
+    <div style="display:inline-block;width:20px;height:20px;border:3px solid #ccc;border-top-color:#333;border-radius:50%;animation:spin 1s linear infinite;"></div>
+    <style>@("@keyframes spin { to { transform: rotate(360deg); } }")</style>
+}
+@code {
+    [Parameter] public bool Visible { get; set; } = true;
+}

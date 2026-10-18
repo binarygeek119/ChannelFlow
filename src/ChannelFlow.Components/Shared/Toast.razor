@@ -1,0 +1,11 @@
+@if (Visible)
+{
+    <div style="position:fixed;bottom:1rem;right:1rem;background:@(IsError?"#ef4444":"#22c55e");color:#fff;padding:.75rem 1.25rem;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:300;max-width:400px;">
+        @Message
+    </div>
+}
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public bool IsError { get; set; }
+}

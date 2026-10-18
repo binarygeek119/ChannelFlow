@@ -1,0 +1,12 @@
+<div style="text-align:center;padding:3rem 1rem;color:#666;">
+    <div style="font-size:3rem;margin-bottom:1rem;">@Icon</div>
+    <h3 style="margin:.5rem 0;">@Title</h3>
+    @if (!string.IsNullOrEmpty(Description)) { <p>@Description</p> }
+    @if (Action is not null) { <div style="margin-top:1rem;">@Action</div> }
+</div>
+@code {
+    [Parameter] public string Icon { get; set; } = "📭";
+    [Parameter] public string Title { get; set; } = "Nothing here";
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public RenderFragment? Action { get; set; }
+}

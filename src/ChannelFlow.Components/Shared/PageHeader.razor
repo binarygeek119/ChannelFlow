@@ -1,0 +1,8 @@
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem;">
+    <h2 style="margin:0;">@Title</h2>
+    @if (Actions is not null) { <div>@Actions</div> }
+</div>
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

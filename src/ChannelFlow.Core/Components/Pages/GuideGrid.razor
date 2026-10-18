@@ -1,0 +1,163 @@
+@page "/guide-grid"
+@inject HttpClient Http
+<h2>TV Guide (Grid)</h2>
+<div style="margin-bottom:.5rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <button @onclick="PrevDay">◀ Prev Day</button>
+    <label>From <input type="date" @bind="fromDate" /></label>
+    <label>Hours <input type="number" @bind="hours" style="width:60px;" /></label>
+    <button @onclick="Load">Load</button>
+    <button @onclick="GoNow">Now</button>
+    <button @onclick="NextDay">Next Day ▶</button>
+    @if (selectedProgram is not null)
+    {
+        <span style="margin-left:1rem;font-weight:bold;">Selected: @selectedProgram.Title</span>
+    }
+</div>
+@if (loading) { <p>Loading...</p> }
+else if (channels is null || channels.Count == 0) { <p>No channels.</p> }
+else
+{
+    <div style="overflow-x:auto;max-width:100%;position:relative;">
+        <table style="border-collapse:collapse;min-width:@(hours*120)px;">
+            <thead>
+                <tr>
+                    <th style="position:sticky;left:0;background:#fff;z-index:2;min-width:120px;">Channel</th>
+                    @foreach (var t in timeSlots)
+                    {
+                        var isNow = t <= DateTime.Now && t.AddMinutes(30) > DateTime.Now;
+                        <th style="min-width:60px;font-size:.75rem;text-align:left;padding:2px;@(isNow?"background:#fef3c7;":"")">@t.ToString("HH:mm")</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var ch in channels)
+            {
+                <tr>
+                    <td style="position:sticky;left:0;background:#f5f5f5;z-index:1;font-weight:bold;padding:4px;white-space:nowrap;">@ch.Number @ch.Name</td>
+                    @foreach (var cell in gridCells[ch.Id])
+                    {
+                        if (cell is null)
+                        {
+                            <td style="border:1px solid #eee;height:40px;"></td>
+                        }
+                        else if (cell.IsStart)
+                        {
+                            var isNow = cell.Start <= DateTime.Now && cell.Finish > DateTime.Now;
+                            var color = GenreColor(cell.Detail?.Categories);
+                            <td colspan="@cell.Span" style="border:1px solid #ccc;padding:4px;vertical-align:top;height:40px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;background:@(isNow?"#bbf7d0":color);" title="@cell.Title" @onclick="() => SelectProgram(cell)">
+                                @if (isNow) { <span style="font-size:.7rem;color:#166534;font-weight:bold;">NOW </span> }
+                                @cell.Title
+                            </td>
+                        }
+                    }
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (selectedProgram is not null)
+{
+    <div style="position:fixed;top:20%;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #ccc;border-radius:8px;padding:1.5rem;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:100;max-width:500px;width:90%;">
+        <h3 style="margin-top:0;">@selectedProgram.Title</h3>
+        <p><strong>Start:</strong> @selectedProgram.Start</p>
+        <p><strong>Finish:</strong> @selectedProgram.Finish</p>
+        @if (!string.IsNullOrEmpty(selectedProgram.Description)) { <p>@selectedProgram.Description</p> }
+        @if (selectedProgram.Year.HasValue) { <p><strong>Year:</strong> @selectedProgram.Year</p> }
+        @if (selectedProgram.Categories is not null && selectedProgram.Categories.Count > 0) { <p><strong>Genres:</strong> @string.Join(", ", selectedProgram.Categories)</p> }
+        @if (selectedProgram.Rating is not null) { <p><strong>Rating:</strong> @selectedProgram.Rating</p> }
+        <p><strong>Duration:</strong> @((DateTime.Parse(selectedProgram.Finish) - DateTime.Parse(selectedProgram.Start)).TotalMinutes) min</p>
+        <button @onclick="() => selectedProgram = null">Close</button>
+    </div>
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:99;" @onclick="() => selectedProgram = null"></div>
+}
+
+@code {
+    private List<ChannelDto>? channels;
+    private Dictionary<Guid, List<Cell?>> gridCells = new();
+    private List<DateTime> timeSlots = new();
+    private DateTime fromDate = DateTime.Today;
+    private int hours = 6;
+    private bool loading;
+    private ProgramDetail? selectedProgram;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        gridCells.Clear();
+        timeSlots.Clear();
+        selectedProgram = null;
+        try
+        {
+            channels = await Http.GetFromJsonAsync<List<ChannelDto>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (channels is null) { loading = false; return; }
+            var start = fromDate.Date;
+            var end = start.AddHours(hours);
+            int slotCount = hours * 2;
+            for (int i = 0; i < slotCount; i++) timeSlots.Add(start.AddMinutes(i * 30));
+
+            foreach (var ch in channels)
+            {
+                var cells = new List<Cell?>(new Cell?[slotCount]);
+                try
+                {
+                    var progs = await Http.GetFromJsonAsync<List<GuideProgramDto>>($"api/guide/{ch.Id}?from={start:O}&to={end:O}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (progs is not null)
+                    {
+                        foreach (var p in progs)
+                        {
+                            if (!DateTime.TryParse(p.Start, out var ps)) continue;
+                            if (ps < start || ps >= end) continue;
+                            int slotIdx = (int)((ps - start).TotalMinutes / 30);
+                            if (slotIdx < 0 || slotIdx >= slotCount) continue;
+                            int span = 1;
+                            if (DateTime.TryParse(p.Finish, out var pf))
+                            {
+                                span = Math.Max(1, (int)Math.Round((pf - ps).TotalMinutes / 30));
+                                span = Math.Min(span, slotCount - slotIdx);
+                            }
+                            var detail = new ProgramDetail(p.Id, p.Title ?? "", p.Start, p.Finish, p.Description, p.Year, p.Categories, p.Rating);
+                            cells[slotIdx] = new Cell(true, span, p.Title ?? "", ps, pf, detail);
+                            for (int k = 1; k < span; k++)
+                            {
+                                if (slotIdx + k < slotCount) cells[slotIdx + k] = new Cell(false, 0, "", ps, pf, null);
+                            }
+                        }
+                    }
+                }
+                catch { }
+                gridCells[ch.Id] = cells;
+            }
+        }
+        catch { channels = new(); }
+        loading = false;
+    }
+
+    private void GoNow() { fromDate = DateTime.Today; hours = 6; _ = Load(); }
+    private void PrevDay() { fromDate = fromDate.AddDays(-1); _ = Load(); }
+    private void NextDay() { fromDate = fromDate.AddDays(1); _ = Load(); }
+    private void SelectProgram(Cell cell) { if (cell.Detail is not null) selectedProgram = cell.Detail; }
+
+    private static string GenreColor(List<string>? genres)
+    {
+        if (genres is null || genres.Count == 0) return "#dbeafe";
+        var g = genres[0].ToLowerInvariant();
+        return g switch
+        {
+            "action" => "#fecaca",
+            "comedy" => "#fef08a",
+            "drama" => "#ddd6fe",
+            "news" => "#bfdbfe",
+            "sports" => "#bbf7d0",
+            _ => "#dbeafe"
+        };
+    }
+
+    public record ChannelDto(Guid Id, double Number, string Name, bool Enabled);
+    public record GuideProgramDto(string Id, string ChannelId, string ProgramId, string Start, string Finish, string Title, string? Description, int? Year, List<string>? Categories, string? Rating, string? PosterUrl);
+    public record Cell(bool IsStart, int Span, string Title, DateTime Start, DateTime Finish, ProgramDetail? Detail);
+    public record ProgramDetail(string Id, string Title, string Start, string Finish, string? Description, int? Year, List<string>? Categories, string? Rating);
+}

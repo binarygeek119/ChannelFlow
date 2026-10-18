@@ -1,0 +1,37 @@
+@page "/scheduler"
+@inject HttpClient Http
+<h2>Scheduler</h2>
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <button @onclick="Build" disabled="@running">Build Horizon</button>
+    <button @onclick="Cancel" disabled="@(!running)">Cancel</button>
+</div>
+@if (status is not null)
+{
+    <p>Status: @status.status (running: @status.running) — @status.current / @status.total</p>
+}
+@code {
+    private SchedulerStatus? status;
+    private bool running => status?.running ?? false;
+    private System.Threading.Timer? timer;
+    protected override void OnInitialized()
+    {
+        timer = new System.Threading.Timer(async _ => await Poll(), null, 0, 2000);
+    }
+    private async Task Poll()
+    {
+        try { status = await Http.GetFromJsonAsync<SchedulerStatus>("api/plugins/com.channelflow.scheduler/status"); }
+        catch { }
+        await InvokeAsync(StateHasChanged);
+    }
+    private async Task Build()
+    {
+        await Http.PostAsync("api/plugins/com.channelflow.scheduler/build", null);
+        await Poll();
+    }
+    private async Task Cancel()
+    {
+        await Http.PostAsync("api/plugins/com.channelflow.scheduler/cancel", null);
+        await Poll();
+    }
+    public record SchedulerStatus(string status, bool running, int current, int total);
+}

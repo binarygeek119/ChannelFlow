@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ChannelFlow.Components/ChannelFlow.Components.csproj" />
+    <Project Path="src/ChannelFlow.Core/ChannelFlow.Core.csproj" />
+    <Project Path="src/ChannelFlow.Database/ChannelFlow.Database.csproj" />
+    <Project Path="src/ChannelFlow.PluginSdk/ChannelFlow.PluginSdk.csproj" />
+    <Project Path="src/ChannelFlow.Web/ChannelFlow.Web.csproj" />
+  </Folder>
+</Solution>

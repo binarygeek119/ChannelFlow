@@ -1,0 +1,12 @@
+{
+  "id": "com.channelflow.emergency",
+  "name": "Emergency Broadcast System",
+  "version": "2.0.8",
+  "minApi": "3.0.0",
+  "forceMinApiVersion": "3.0.0",
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.Emergency.dll",
+    "type": "ChannelFlow.Plugin.Emergency.EmergencyPlugin"
+  },
+  "category": "presentation"
+}

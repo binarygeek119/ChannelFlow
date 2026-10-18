@@ -1,0 +1,61 @@
+@page "/setup"
+@inject HttpClient Http
+<h2>Setup Wizard</h2>
+<p>Configure your database provider. Set these as environment variables in Docker or in appsettings.json, then restart.</p>
+<div style="display:grid;gap:.5rem;max-width:600px;">
+    <label>Provider
+        <select @bind="provider">
+            <option value="sqlite">SQLite</option>
+            <option value="postgres">PostgreSQL</option>
+            <option value="mariadb">MariaDB/MySQL</option>
+        </select>
+    </label>
+    @if (provider == "sqlite")
+    {
+        <label>File path <input @bind="sqlitePath" style="width:100%;" /></label>
+    }
+    else
+    {
+        <label>Host <input @bind="host" style="width:100%;" /></label>
+        <label>Port <input @bind="port" style="width:100%;" /></label>
+        <label>Database <input @bind="database" style="width:100%;" /></label>
+        <label>Username <input @bind="username" style="width:100%;" /></label>
+        <label>Password <input @bind="password" type="password" style="width:100%;" /></label>
+    }
+    <button @onclick="Test">Test Connection</button>
+    @if (testResult is not null) { <p style="color:@(testResult.StartsWith("OK")?"green":"red")">@testResult</p> }
+</div>
+<h3>Example configurations</h3>
+<pre>SQLite:    Data Source=/config/channelflow.db
+Postgres:  Host=localhost;Port=5432;Database=channelflow;Username=channelflow;Password=channelflow
+MariaDB:   Server=localhost;Port=3306;Database=channelflow;Uid=channelflow;Pwd=channelflow</pre>
+<h3>Docker environment variables</h3>
+<pre>DATABASE_PROVIDER=postgres
+CONNECTION_STRING=Host=postgres;Port=5432;Database=channelflow;Username=channelflow;Password=channelflow</pre>
+@code {
+    private string provider = "sqlite";
+    private string sqlitePath = "/config/channelflow.db";
+    private string host = "localhost";
+    private string port = "5432";
+    private string database = "channelflow";
+    private string username = "channelflow";
+    private string password = "channelflow";
+    private string? testResult;
+
+    private string ConnectionString => provider == "sqlite"
+        ? $"Data Source={sqlitePath}"
+        : provider == "mariadb"
+            ? $"Server={host};Port={port};Database={database};Uid={username};Pwd={password}"
+            : $"Host={host};Port={port};Database={database};Username={username};Password={password}";
+
+    private async Task Test()
+    {
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/setup/test-db", new { Provider = provider, ConnectionString = ConnectionString });
+            testResult = await res.Content.ReadAsStringAsync();
+            if (res.IsSuccessStatusCode) testResult = "OK: " + testResult;
+        }
+        catch (Exception e) { testResult = "Error: " + e.Message; }
+    }
+}

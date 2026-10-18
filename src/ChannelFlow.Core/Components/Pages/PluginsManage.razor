@@ -1,0 +1,76 @@
+@page "/plugins-manage"
+@inject HttpClient Http
+@using System.Text.Json
+<h2>Installed Plugins</h2>
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <input @bind="installUrl" placeholder="Plugin zip URL" style="width:400px;" />
+    <button @onclick="Install">Install from URL</button>
+</div>
+@if (!string.IsNullOrEmpty(installMsg)) { <p>@installMsg</p> }
+@if (plugins is null) { <p>Loading...</p> }
+else if (plugins.Count == 0) { <p>No plugins loaded.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Name</th><th>Version</th><th>Category</th><th>Health</th><th>Perms</th><th>Actions</th></tr></thead>
+        <tbody>
+        @foreach (var p in plugins)
+        {
+            <tr>
+                <td>
+                    <img class="plugin-banner-inline" src="@(string.IsNullOrEmpty(p.ImageUrl) ? $"https://raw.githubusercontent.com/binarygeek119/ChannelFlow-Plugins/main/banners/{p.Id}.png" : p.ImageUrl)" alt="" onerror="this.remove()" />
+                    <div class="channel-name">@p.Name</div>
+                    <small>@p.Id</small>
+                </td>
+                <td>@p.Version</td>
+                <td>@p.Category</td>
+                <td style="color:@(p.Health.Ok?"green":"red")">@p.Health.Detail</td>
+                <td>
+                    @if (p.Permissions is not null && p.Permissions.Count > 0)
+                    {
+                        <details><summary>@p.Permissions.Count</summary>
+                            <ul>@foreach (var perm in p.Permissions){<li>@perm</li>}</ul>
+                        </details>
+                    }
+                    else { <span>-</span> }
+                </td>
+                <td>
+                    <button @onclick="() => Toggle(p.Id, !p.Enabled)">@((p.Enabled)?"Disable":"Enable")</button>
+                    <button @onclick="() => Uninstall(p.Id)" style="margin-left:.5rem;color:red;">Uninstall</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private List<PluginDto>? plugins;
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load()
+    {
+        try { plugins = await Http.GetFromJsonAsync<List<PluginDto>>("api/plugins-manage", new JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { plugins = new(); }
+    }
+    private async Task Toggle(string id, bool enable)
+    {
+        if (enable) await Http.PostAsync($"api/plugins-manage/{id}/enable", null);
+        else await Http.PostAsync($"api/plugins-manage/{id}/disable", null);
+        await Load();
+    }
+    private string installUrl = "";
+    private string? installMsg;
+    private async Task Install()
+    {
+        if (string.IsNullOrWhiteSpace(installUrl)) return;
+        var res = await Http.PostAsJsonAsync("api/plugins-manage/install", new { Url = installUrl });
+        installMsg = await res.Content.ReadAsStringAsync();
+        if (res.IsSuccessStatusCode) await Load();
+    }
+    private async Task Uninstall(string id)
+    {
+        await Http.DeleteAsync($"api/plugins-manage/{id}");
+        await Load();
+    }
+    public record PluginDto(string Id, string Name, string Version, string Category, string Author, string Description, List<string>? Permissions, HealthDto Health, bool Enabled, bool HasMediaSource, List<object>? UiContributions, string? ImageUrl = null);
+    public record HealthDto(bool Ok, string Detail);
+}

@@ -1,0 +1,58 @@
+@page "/channels"
+@inject HttpClient Http
+<div class="panel">
+    <div class="panel-head">
+        <h2>Channels</h2>
+    </div>
+    <div style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+        <input type="number" step="0.1" @bind="newNumber" placeholder="Number" style="width:80px;" />
+        <input type="text" @bind="newName" placeholder="Name" style="width:200px;" />
+        <button class="primary" @onclick="Create">Add Channel</button>
+    </div>
+    @if (channels is null) { <p class="empty">Loading...</p> }
+    else if (channels.Count == 0) { <p class="empty">No channels yet.</p> }
+    else
+    {
+        <table>
+            <thead><tr><th class="num">Number</th><th>Name</th><th class="state">Enabled</th><th class="actions">Actions</th></tr></thead>
+            <tbody>
+            @foreach (var c in channels)
+            {
+                <tr>
+                    <td class="num">@c.Number</td>
+                    <td class="channel-name">@c.Name</td>
+                    <td class="state"><span class="pill @(c.Enabled ? "on" : "off")">@(c.Enabled ? "ON" : "OFF")</span></td>
+                    <td class="actions">
+                        <a href="/channels/@c.Id" class="link">Edit</a>
+                        <button class="link danger" @onclick="() => Delete(c.Id)">Delete</button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>
+@code {
+    private List<ChannelDto>? channels;
+    private double newNumber = 1;
+    private string newName = "";
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load()
+    {
+        try { channels = await Http.GetFromJsonAsync<List<ChannelDto>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { channels = new(); }
+    }
+    private async Task Create()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        await Http.PostAsJsonAsync("api/channels", new { Number = newNumber, Name = newName, Enabled = true });
+        newName = "";
+        await Load();
+    }
+    private async Task Delete(Guid id)
+    {
+        await Http.DeleteAsync($"api/channels/{id}");
+        await Load();
+    }
+    public record ChannelDto(Guid Id, double Number, string Name, bool Enabled);
+}

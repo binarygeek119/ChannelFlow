@@ -1,0 +1,12 @@
+{
+  "id": "com.channelflow.ai",
+  "name": "AI Provider Suite",
+  "version": "2.0.11",
+  "minApi": "3.0.0",
+  "forceMinApiVersion": "3.0.0",
+  "entrypoint": {
+    "dll": "ChannelFlow.Plugin.AIProviderSuite.dll",
+    "type": "ChannelFlow.Plugin.AIProviderSuite.AIProviderSuitePlugin"
+  },
+  "category": "ai"
+}

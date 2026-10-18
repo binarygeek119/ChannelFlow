@@ -1,0 +1,44 @@
+@page "/channels/{id:guid}"
+@inject HttpClient Http
+<h2>Edit Channel</h2>
+@if (channel is null) { <p>Loading...</p> }
+else
+{
+    <div style="display:grid;gap:.5rem;max-width:500px;">
+        <label>Number <input type="number" step="0.1" @bind="channel.Number" style="width:100px;" /></label>
+        <label>Name <input @bind="channel.Name" style="width:100%;" /></label>
+        <label>Description <textarea @bind="channel.Description" style="width:100%;height:80px;"></textarea></label>
+        <label>AI Prompt <textarea @bind="channel.AiPrompt" style="width:100%;height:80px;"></textarea></label>
+        <label><input type="checkbox" @bind="channel.Enabled" /> Enabled</label>
+        <div style="display:flex;gap:.5rem;">
+            <button @onclick="Save">Save</button>
+            <a href="/channels">Back</a>
+        </div>
+        @if (saved) { <p style="color:green;">Saved.</p> }
+    </div>
+}
+@code {
+    [Parameter] public Guid id { get; set; }
+    private ChannelDto? channel;
+    private bool saved;
+    protected override async Task OnInitializedAsync()
+    {
+        try { channel = await Http.GetFromJsonAsync<ChannelDto>($"api/channels/{id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { }
+    }
+    private async Task Save()
+    {
+        if (channel is null) return;
+        await Http.PutAsJsonAsync($"api/channels/{id}", channel);
+        saved = true;
+    }
+    public class ChannelDto
+    {
+        public Guid Id { get; set; }
+        public double Number { get; set; }
+        public string Name { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string AiPrompt { get; set; } = "";
+        public bool Enabled { get; set; }
+    }
+}

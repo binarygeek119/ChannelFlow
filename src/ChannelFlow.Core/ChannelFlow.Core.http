@@ -1,0 +1,6 @@
+@ChannelFlow.Core_HostAddress = http://localhost:5108
+
+GET {{ChannelFlow.Core_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

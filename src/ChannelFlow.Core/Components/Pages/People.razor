@@ -1,0 +1,116 @@
+@using Microsoft.AspNetCore.Components.Forms
+@page "/people"
+@inject HttpClient Http
+<h2>People</h2>
+<StatusBadge Ok="true" Label="Loaded" />
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <input @bind="newName" placeholder="Name" style="width:200px;" />
+    <input @bind="newImage" placeholder="Image path (optional)" style="width:300px;" />
+    <button @onclick="Create">Add Person</button>
+</div>
+@if (people is null) { <p>Loading...</p> }
+else if (people.Count == 0) { <p>No people yet.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Name</th><th>Image</th><th>Credits</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var p in people)
+        {
+            <tr>
+                <td>@p.Name</td>
+                <td>
+                    @if (!string.IsNullOrEmpty(p.ImagePath)) { <img src="@p.ImagePath" style="height:32px;width:32px;object-fit:cover;border-radius:4px;" /> }
+                    else { <span>-</span> }
+                    <InputFile OnChange="@(e => UploadImage(p.Id, e))" style="font-size:.7rem;" />
+                </td>
+                <td>
+                    @if (creditsMap.TryGetValue(p.Id, out var cr) && cr.Count > 0)
+                    {
+                        <ul style="margin:0;padding-left:1rem;">@foreach (var c in cr) { <li>@c.Role: @c.MediaMatchKey @if(!string.IsNullOrEmpty(c.Character)){<span>(@c.Character)</span>}</li> }</ul>
+                    }
+                    else { <span>-</span> }
+                </td>
+                <td>
+                    <button @onclick="() => ShowAddCredit(p.Id)">+ Credit</button>
+                    <button @onclick="() => Delete(p.Id)" style="margin-left:.5rem;color:red;">Delete</button>
+                </td>
+            </tr>
+            @if (addingCreditFor == p.Id)
+            {
+                <tr>
+                    <td colspan="4" style="background:#f9f9f9;padding:.5rem;">
+                        <div style="display:flex;gap:.5rem;align-items:center;">
+                            <input @bind="creditMatchKey" placeholder="Media match key" style="width:200px;" />
+                            <input @bind="creditRole" placeholder="Role (actor/director)" style="width:150px;" />
+                            <input @bind="creditCharacter" placeholder="Character" style="width:150px;" />
+                            <button @onclick="() => SaveCredit(p.Id)">Save</button>
+                            <button @onclick="() => addingCreditFor = null">Cancel</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private List<PersonDto>? people;
+    private Dictionary<Guid, List<CreditDto>> creditsMap = new();
+    private string newName = "";
+    private string newImage = "";
+    private Guid? addingCreditFor;
+    private string creditMatchKey = "";
+    private string creditRole = "actor";
+    private string creditCharacter = "";
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try
+        {
+            people = await Http.GetFromJsonAsync<List<PersonDto>>("api/people", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            creditsMap.Clear();
+            if (people is not null)
+                foreach (var p in people)
+                {
+                    var cr = await Http.GetFromJsonAsync<List<CreditDto>>($"api/credits/person/{p.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (cr is not null) creditsMap[p.Id] = cr;
+                }
+        }
+        catch { people = new(); }
+    }
+    private async Task Create()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        await Http.PostAsJsonAsync("api/people", new { Name = newName, ImagePath = string.IsNullOrWhiteSpace(newImage) ? null : newImage });
+        newName = ""; newImage = "";
+        await Load();
+    }
+    private async Task UploadImage(Guid id, InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+        using var content = new MultipartFormDataContent();
+        var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+        content.Add(new StreamContent(stream), "file", file.Name);
+        await Http.PostAsync($"api/people/{id}/image", content);
+        await Load();
+    }
+    private async Task Delete(Guid id)
+    {
+        await Http.DeleteAsync($"api/people/{id}");
+        await Load();
+    }
+    private void ShowAddCredit(Guid id) { addingCreditFor = id; creditMatchKey = ""; creditRole = "actor"; creditCharacter = ""; }
+    private async Task SaveCredit(Guid personId)
+    {
+        if (string.IsNullOrWhiteSpace(creditMatchKey)) return;
+        await Http.PostAsJsonAsync("api/credits", new { PersonId = personId, MediaMatchKey = creditMatchKey, Role = creditRole, Character = string.IsNullOrWhiteSpace(creditCharacter) ? null : creditCharacter });
+        addingCreditFor = null;
+        await Load();
+    }
+    public record PersonDto(Guid Id, string Name, string? ImagePath);
+    public record CreditDto(Guid Id, Guid PersonId, string MediaMatchKey, string Role, string? Character, string? ImagePath);
+}

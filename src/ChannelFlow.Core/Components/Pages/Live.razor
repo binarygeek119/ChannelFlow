@@ -1,0 +1,8 @@
+@page "/live"
+<h2>Live TV (HLS)</h2>
+<p>Proxy endpoint: <code>/hls/&#123;path&#125;</code> → ersatztv sidecar at <code>@sidecarUrl</code></p>
+<p>Example: <code>/hls/channel/1.m3u8</code></p>
+<video controls autoplay muted style="width:100%;max-width:800px;background:#000;" src="/hls/channel/1.m3u8"></video>
+@code {
+    private string sidecarUrl = "http://127.0.0.1:8409";
+}

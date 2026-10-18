@@ -1,0 +1,100 @@
+@page "/migration"
+@inject HttpClient Http
+<h2>Migration from v2</h2>
+<p>Import channels, media items, and people from a v2 database.</p>
+
+<button @onclick="FixSchema" style="margin-bottom:1rem;">Fix/Update Schema</button>
+@if (fixResult is not null) { <pre>@fixResult</pre> }
+
+<h3>From SQLite</h3>
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;">
+    <input @bind="sqlitePath" placeholder="/path/to/v2.db" style="width:400px;" />
+    <button @onclick="MigrateSqlite">Migrate</button>
+</div>
+
+<h3>From PostgreSQL</h3>
+<div style="display:grid;gap:.5rem;max-width:500px;margin-bottom:1rem;">
+    <label>Host <input @bind="pgHost" placeholder="localhost" style="width:100%;" /></label>
+    <label>Port <input @bind="pgPort" placeholder="5433" style="width:100%;" /></label>
+    <label>Database <input @bind="pgDb" placeholder="channelflow" style="width:100%;" /></label>
+    <label>Username <input @bind="pgUser" placeholder="channelflow" style="width:100%;" /></label>
+    <label>Password <input @bind="pgPass" type="password" placeholder="channelflow" style="width:100%;" /></label>
+    <button @onclick="MigratePg">Migrate</button>
+</div>
+
+@if (report is not null)
+{
+    <h4>Result</h4>
+    <ul>
+        <li>Channels: @report.Channels</li>
+        <li>Media items: @report.MediaItems</li>
+        <li>People: @report.People</li>
+    </ul>
+    @if (report.Errors.Count > 0)
+    {
+        <h5>Errors</h5>
+        <ul>@foreach (var e in report.Errors) { <li style="color:red;">@e</li> }</ul>
+    }
+}
+@code {
+    private string sqlitePath = "";
+    private string pgHost = "localhost";
+    private string pgPort = "5433";
+    private string pgDb = "channelflow";
+    private string pgUser = "channelflow";
+    private string pgPass = "channelflow";
+    private MigrationReport? report;
+    private string? fixResult;
+
+    private async Task FixSchema()
+    {
+        var res = await Http.PostAsync("api/migration/fix-schema", null);
+        fixResult = await res.Content.ReadAsStringAsync();
+    }
+    private async Task MigrateSqlite()
+    {
+        try
+        {
+            await Http.PostAsync("api/migration/fix-schema", null);
+            var res = await Http.PostAsJsonAsync("api/migration/sqlite", new { V2DbPath = sqlitePath });
+            var body = await res.Content.ReadAsStringAsync();
+            if (!res.IsSuccessStatusCode)
+            {
+                report = new MigrationReport { Errors = new List<string> { $"HTTP {(int)res.StatusCode}: {body}" } };
+                return;
+            }
+            report = System.Text.Json.JsonSerializer.Deserialize<MigrationReport>(body, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception e)
+        {
+            report = new MigrationReport { Errors = new List<string> { e.Message } };
+        }
+    }
+    private async Task MigratePg()
+    {
+        try
+        {
+            await Http.PostAsync("api/migration/fix-schema", null);
+            var connStr = $"Host={pgHost};Port={pgPort};Database={pgDb};Username={pgUser};Password={pgPass}";
+            var res = await Http.PostAsJsonAsync("api/migration/postgres", new { ConnectionString = connStr });
+            var body = await res.Content.ReadAsStringAsync();
+            if (!res.IsSuccessStatusCode)
+            {
+                report = new MigrationReport { Errors = new List<string> { $"HTTP {(int)res.StatusCode}: {body}" } };
+                return;
+            }
+            report = System.Text.Json.JsonSerializer.Deserialize<MigrationReport>(body, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception e)
+        {
+            report = new MigrationReport { Errors = new List<string> { e.Message } };
+        }
+    }
+    public class MigrationReport
+    {
+        public int Channels { get; set; }
+        public int MediaItems { get; set; }
+        public int People { get; set; }
+        public List<string> Errors { get; set; } = new();
+    }
+}

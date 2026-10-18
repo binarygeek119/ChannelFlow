@@ -1,0 +1,7 @@
+<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:bold;color:#fff;background:@(Ok ? "#22c55e" : "#ef4444");">
+    @(Ok ? (Label ?? "OK") : (Label ?? "Error"))
+</span>
+@code {
+    [Parameter] public bool Ok { get; set; }
+    [Parameter] public string? Label { get; set; }
+}

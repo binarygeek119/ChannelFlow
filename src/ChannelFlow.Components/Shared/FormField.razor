@@ -1,0 +1,10 @@
+<div style="display:flex;flex-direction:column;gap:.25rem;margin-bottom:.75rem;">
+    @if (!string.IsNullOrEmpty(Label)) { <label style="font-weight:bold;font-size:.9rem;">@Label</label> }
+    @ChildContent
+    @if (!string.IsNullOrEmpty(HelpText)) { <small style="color:#666;">@HelpText</small> }
+</div>
+@code {
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? HelpText { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

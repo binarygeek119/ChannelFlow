@@ -1,0 +1,18 @@
+@if (Visible)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;">
+        <div style="background:#fff;padding:1.5rem;border-radius:8px;max-width:400px;width:90%;">
+            <p>@Message</p>
+            <div style="display:flex;gap:.5rem;justify-content:flex-end;">
+                <button @onclick="OnCancel">Cancel</button>
+                <button @onclick="OnConfirm" style="background:#ef4444;color:#fff;">Confirm</button>
+            </div>
+        </div>
+    </div>
+}
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string Message { get; set; } = "Are you sure?";
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

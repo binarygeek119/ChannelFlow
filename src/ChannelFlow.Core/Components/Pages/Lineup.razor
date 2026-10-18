@@ -1,0 +1,50 @@
+@page "/lineup"
+@inject HttpClient Http
+<h2>Lineup</h2>
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <input @bind="channelId" placeholder="Channel Id" style="width:300px;" />
+    <button @onclick="Load">Load</button>
+    <button @onclick="Generate">Generate Playout</button>
+</div>
+@if (slots is null) { <p>Enter a channel id.</p> }
+else
+{
+    <p>@slots.Count slots</p>
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Slot</th><th>Span</th><th>Rerun</th><th>Candidate</th></tr></thead>
+        <tbody>
+        @foreach (var s in slots.Take(50))
+        {
+            <tr>
+                <td>@s.SlotIndex</td>
+                <td>@s.SpanSlots</td>
+                <td>@s.IsRerun</td>
+                <td>@(s.Candidates?.FirstOrDefault()?.Title ?? "-")</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@if (!string.IsNullOrEmpty(playoutMsg)) { <p>@playoutMsg</p> }
+@code {
+    private string channelId = "";
+    private List<LineupSlot>? slots;
+    private string? playoutMsg;
+    private async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(channelId)) return;
+        try
+        {
+            var json = await Http.GetStringAsync($"api/lineups/{channelId}");
+            slots = System.Text.Json.JsonSerializer.Deserialize<List<LineupSlot>>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch { slots = new(); }
+    }
+    private async Task Generate()
+    {
+        var res = await Http.PostAsync($"api/playout/generate/{channelId}", null);
+        playoutMsg = await res.Content.ReadAsStringAsync();
+    }
+    public record LineupSlot(int SlotIndex, int SpanSlots, bool IsRerun, List<Candidate>? Candidates);
+    public record Candidate(string Kind, string MatchKey, string Title, int Weight);
+}

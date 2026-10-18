@@ -1,0 +1,17 @@
+@if (Visible)
+{
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;" @onclick="OnClose">
+        <div style="background:#fff;padding:1.5rem;border-radius:8px;max-width:600px;width:90%;max-height:80vh;overflow:auto;" @onclick:stopPropagation="true">
+            @if (!string.IsNullOrEmpty(Title)) { <h3 style="margin-top:0;">@Title</h3> }
+            @ChildContent
+            @if (ShowClose) { <div style="margin-top:1rem;text-align:right;"><button @onclick="OnClose">Close</button></div> }
+        </div>
+    </div>
+}
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public bool ShowClose { get; set; } = true;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+}

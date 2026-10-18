@@ -1,0 +1,72 @@
+@page "/plugin-repos"
+@inject HttpClient Http
+<h2>Plugin Repositories</h2>
+
+<h3>Add Repository</h3>
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;">
+    <input @bind="newUrl" placeholder="https://example.com/plugins" style="width:400px;" />
+    <input @bind="newName" placeholder="Name (optional)" style="width:200px;" />
+    <button @onclick="Add">Add</button>
+</div>
+
+<h3>Repositories</h3>
+@if (repos is null) { <p>Loading...</p> }
+else if (repos.Count == 0) { <p>No repositories configured.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Name</th><th>URL</th><th>Enabled</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var r in repos)
+        {
+            <tr>
+                <td>@r.Name</td>
+                <td><code>@r.Url</code></td>
+                <td>@(r.Enabled ? "yes" : "no")</td>
+                <td>
+                    <button @onclick="() => Browse(r.Id)">Browse</button>
+                    <button @onclick="() => Remove(r.Id)" style="margin-left:.5rem;color:red;">Remove</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@if (browseResult is not null)
+{
+    <h3>Available Plugins</h3>
+    <pre style="max-height:300px;overflow:auto;background:#111;color:#0f0;padding:1rem;">@browseResult</pre>
+}
+@code {
+    private List<RepoDto>? repos;
+    private string newUrl = "";
+    private string newName = "";
+    private string? browseResult;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        try { repos = await Http.GetFromJsonAsync<List<RepoDto>>("api/plugin-repos", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { repos = new(); }
+    }
+    private async Task Add()
+    {
+        if (string.IsNullOrWhiteSpace(newUrl)) return;
+        await Http.PostAsJsonAsync("api/plugin-repos", new { Url = newUrl, Name = newName });
+        newUrl = ""; newName = "";
+        await Load();
+    }
+    private async Task Remove(int id)
+    {
+        await Http.DeleteAsync($"api/plugin-repos/{id}");
+        await Load();
+    }
+    private async Task Browse(int id)
+    {
+        try { browseResult = await Http.GetStringAsync($"api/plugin-repos/{id}/index"); }
+        catch (Exception e) { browseResult = "Error: " + e.Message; }
+    }
+    public record RepoDto(int Id, string Url, string Name, bool Enabled);
+}

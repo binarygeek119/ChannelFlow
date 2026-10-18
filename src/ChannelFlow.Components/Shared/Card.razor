@@ -1,0 +1,11 @@
+<div class="cf-card" style="border:1px solid #ddd;border-radius:8px;padding:1rem;margin:.5rem 0;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+    @if (!string.IsNullOrEmpty(Title))
+    {
+        <h3 style="margin-top:0;">@Title</h3>
+    }
+    @ChildContent
+</div>
+@code {
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

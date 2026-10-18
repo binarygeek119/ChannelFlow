@@ -1,0 +1,47 @@
+@page "/media"
+@inject HttpClient Http
+<h2>Media Catalog</h2>
+<div style="margin-bottom:1rem;">
+    <input @bind="url" placeholder="Server URL" style="width:300px;" />
+    <input @bind="libraryId" placeholder="Library Id" style="width:150px;" />
+    <button @onclick="Sync">Sync</button>
+</div>
+@if (!string.IsNullOrEmpty(syncResult)) { <pre>@syncResult</pre> }
+@if (items is null) { <p>Loading...</p> }
+else
+{
+    <p>@items.Count items</p>
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Title</th><th>Kind</th><th>Year</th><th>Genres</th></tr></thead>
+        <tbody>
+        @foreach (var it in items)
+        {
+            <tr><td>@it.Title</td><td>@it.Kind</td><td>@it.Year</td><td>@string.Join(", ", it.Genres)</td></tr>
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private string url = "http://localhost:8096";
+    private string apiKey = "";
+    private string libraryId = "";
+    private string? syncResult;
+    private List<CatalogItem>? items;
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load()
+    {
+        try { items = await Http.GetFromJsonAsync<List<CatalogItem>>("api/media/catalog?limit=200"); }
+        catch { items = new(); }
+    }
+    private async Task Sync()
+    {
+        object req;
+        string endpoint;
+        req = new { Url = url, ApiKey = apiKey, LibraryId = libraryId };
+        endpoint = "api/media/sync-jellyfin";
+        var res = await Http.PostAsJsonAsync(endpoint, req);
+        syncResult = await res.Content.ReadAsStringAsync();
+        await Load();
+    }
+    public record CatalogItem(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags);
+}

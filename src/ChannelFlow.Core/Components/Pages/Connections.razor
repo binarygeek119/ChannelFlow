@@ -1,0 +1,51 @@
+@page "/connections"
+@inject HttpClient Http
+<h2>Connections</h2>
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <input @bind="newKind" placeholder="Kind (jellyfin, etc.)" style="width:200px;" />
+    <input @bind="newConfig" placeholder='{"url":"..."}' style="width:300px;" />
+    <button @onclick="Create">Add</button>
+</div>
+@if (conns is null) { <p>Loading...</p> }
+else if (conns.Count == 0) { <p>No connections.</p> }
+else
+{
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>ID</th><th>Kind</th><th>Config</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var c in conns)
+        {
+            <tr>
+                <td>@c.Id</td>
+                <td>@c.Kind</td>
+                <td><code>@c.ConfigJson</code></td>
+                <td><button @onclick="() => Delete(c.Id)">Delete</button></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private List<ConnDto>? conns;
+    private string newKind = "";
+    private string newConfig = "{}";
+    protected override async Task OnInitializedAsync() => await Load();
+    private async Task Load()
+    {
+        try { conns = await Http.GetFromJsonAsync<List<ConnDto>>("api/connections", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { conns = new(); }
+    }
+    private async Task Create()
+    {
+        if (string.IsNullOrWhiteSpace(newKind)) return;
+        await Http.PostAsJsonAsync("api/connections", new { Kind = newKind, ConfigJson = newConfig });
+        newKind = ""; newConfig = "{}";
+        await Load();
+    }
+    private async Task Delete(int id)
+    {
+        await Http.DeleteAsync($"api/connections/{id}");
+        await Load();
+    }
+    public record ConnDto(int Id, string Kind, string ConfigJson);
+}

@@ -1,0 +1,74 @@
+@page "/dashboard"
+@inject HttpClient Http
+<PageHeader Title="Dashboard" />
+@if (loading) { <p>Loading...</p> }
+else
+{
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;" class="settings">
+        <div class="panel"><h3>Channels</h3><div style="font-size:2rem;font-weight:bold;">@channelCount</div><a href="/channels" class="link">Manage</a></div>
+        <div class="panel"><h3>Media Items</h3><div style="font-size:2rem;font-weight:bold;">@mediaCount</div><a href="/media" class="link">Browse</a></div>
+        <div class="panel"><h3>Guide Programs</h3><div style="font-size:2rem;font-weight:bold;">@guideCount</div><a href="/guide-grid" class="link">View</a></div>
+        <div class="panel"><h3>People</h3><div style="font-size:2rem;font-weight:bold;">@peopleCount</div><a href="/people" class="link">Manage</a></div>
+        <div class="panel"><h3>Plugins</h3><div style="font-size:2rem;font-weight:bold;">@pluginCount</div><a href="/plugins-manage" class="link">Manage</a></div>
+        <div class="panel"><h3>Sidecar</h3><div style="font-size:1.2rem;">@(sidecarRunning ? "Running" : "Stopped")</div><a href="/sidecar" class="link">Manage</a></div>
+    </div>
+    <div style="margin-top:2rem;">
+        <h3>Quick Actions</h3>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+            <button @onclick="BuildSchedule">Build Schedule</button>
+            <button @onclick="GeneratePlayouts">Generate All Playouts</button>
+            <a href="/scheduler"><button>Scheduler</button></a>
+        </div>
+        @if (!string.IsNullOrEmpty(actionMsg)) { <p>@actionMsg</p> }
+    </div>
+}
+@code {
+    private bool loading = true;
+    private int channelCount, mediaCount, guideCount, peopleCount, pluginCount;
+    private bool sidecarRunning;
+    private string? actionMsg;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        loading = true;
+        try
+        {
+            var channels = await Http.GetFromJsonAsync<List<object>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            channelCount = channels?.Count ?? 0;
+            var media = await Http.GetFromJsonAsync<List<object>>("api/media/catalog?limit=10000", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            mediaCount = media?.Count ?? 0;
+            var people = await Http.GetFromJsonAsync<List<object>>("api/people", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            peopleCount = people?.Count ?? 0;
+            var plugins = await Http.GetFromJsonAsync<List<object>>("api/plugins-manage", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            pluginCount = plugins?.Count ?? 0;
+            try
+            {
+                var sidecar = await Http.GetFromJsonAsync<SidecarStatus>("api/sidecar/status", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                sidecarRunning = sidecar?.running ?? false;
+            }
+            catch { }
+            // guide count: sum across channels
+            guideCount = 0;
+            if (channels is not null)
+            {
+                // we don't have channel ids easily from object; skip detailed count
+            }
+        }
+        catch { }
+        loading = false;
+    }
+    private async Task BuildSchedule()
+    {
+        actionMsg = "Starting build...";
+        await Http.PostAsync("api/plugins/com.channelflow.scheduler/build", null);
+        actionMsg = "Build started.";
+    }
+    private async Task GeneratePlayouts()
+    {
+        var res = await Http.PostAsync("api/playout/generate-all", null);
+        actionMsg = await res.Content.ReadAsStringAsync();
+    }
+    public record SidecarStatus(bool running);
+}

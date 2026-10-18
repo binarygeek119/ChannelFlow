@@ -1,0 +1,32 @@
+@page "/guide"
+@inject HttpClient Http
+<h2>Guide</h2>
+<div style="margin-bottom:1rem;">
+    <input @bind="channelId" placeholder="Channel Id" style="width:300px;" />
+    <button @onclick="Load">Load</button>
+</div>
+@if (programs is null) { <p>Enter a channel id.</p> }
+else
+{
+    <p>@programs.Count programs</p>
+    <table style="width:100%;border-collapse:collapse;">
+        <thead><tr><th>Start</th><th>Finish</th><th>Title</th></tr></thead>
+        <tbody>
+        @foreach (var p in programs)
+        {
+            <tr><td>@p.Start</td><td>@p.Finish</td><td>@p.Title</td></tr>
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private string channelId = "";
+    private List<GuideProgram>? programs;
+    private async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(channelId)) return;
+        try { programs = await Http.GetFromJsonAsync<List<GuideProgram>>($"api/guide/{channelId}"); }
+        catch { programs = new(); }
+    }
+    public record GuideProgram(string Id, string ChannelId, string ProgramId, string Start, string Finish, string Title, string? Description, string? PosterUrl);
+}

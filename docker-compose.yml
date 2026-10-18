@@ -1,0 +1,42 @@
+services:
+  channelflow:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_PROVIDER=sqlite
+      - CONNECTION_STRING=Data Source=/config/channelflow.db
+      - ERSATZTV_PATH=ersatztv
+      - ERSATZTV_URL=http://127.0.0.1:8409
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
+
+  # Optional: PostgreSQL
+  # postgres:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_DB: channelflow
+  #     POSTGRES_USER: channelflow
+  #     POSTGRES_PASSWORD: channelflow
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # Optional: MariaDB
+  # mariadb:
+  #   image: mariadb:11
+  #   environment:
+  #     MARIADB_DATABASE: channelflow
+  #     MARIADB_USER: channelflow
+  #     MARIADB_PASSWORD: channelflow
+  #     MARIADB_ROOT_PASSWORD: root
+  #   volumes:
+  #     - mariadbdata:/var/lib/mysql
+  #   ports:
+  #     - "3306:3306"
+
+# volumes:
+#   pgdata:
+#   mariadbdata:

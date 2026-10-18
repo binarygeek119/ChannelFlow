@@ -1,0 +1,38 @@
+@page "/sidecar"
+@inject HttpClient Http
+<h2>ErsatzTV Sidecar</h2>
+<div style="margin-bottom:1rem;display:flex;gap:.5rem;">
+    <button @onclick="Start">Start</button>
+    <button @onclick="Stop">Stop</button>
+    <button @onclick="Restart">Restart</button>
+    <button @onclick="Poll">Refresh</button>
+    <button @onclick="ClearLogs">Clear Logs</button>
+</div>
+@if (status is null) { <p>Loading...</p> }
+else
+{
+    <p>Running: @status.running (PID: @status.pid) | Restarts: @status.restartCount</p>
+    <p>Healthy: @status.healthy | URL: @status.url</p>
+    <h3>Logs (last 100)</h3>
+    <pre style="background:#111;color:#0f0;padding:1rem;max-height:400px;overflow:auto;font-size:.8rem;">@string.Join("\n", logs)</pre>
+}
+@code {
+    private SidecarStatus? status;
+    private List<string> logs = new();
+    protected override async Task OnInitializedAsync() { await Poll(); await PollLogs(); }
+    private async Task Poll()
+    {
+        try { status = await Http.GetFromJsonAsync<SidecarStatus>("api/plugins/com.channelflow.ersatztv/status", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }); }
+        catch { }
+    }
+    private async Task PollLogs()
+    {
+        try { logs = await Http.GetFromJsonAsync<List<string>>("api/plugins/com.channelflow.ersatztv/logs?tail=100", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new(); }
+        catch { }
+    }
+    private async Task Start() { await Http.PostAsync("api/plugins/com.channelflow.ersatztv/start", null); await Poll(); await PollLogs(); }
+    private async Task Stop() { await Http.PostAsync("api/plugins/com.channelflow.ersatztv/stop", null); await Poll(); await PollLogs(); }
+    private async Task Restart() { await Http.PostAsync("api/plugins/com.channelflow.ersatztv/restart", null); await Poll(); await PollLogs(); }
+    private async Task ClearLogs() { await Http.PostAsync("api/plugins/com.channelflow.ersatztv/logs/clear", null); await PollLogs(); }
+    public record SidecarStatus(bool running, int? pid, string url, bool healthy, int restartCount, List<string>? logs);
+}

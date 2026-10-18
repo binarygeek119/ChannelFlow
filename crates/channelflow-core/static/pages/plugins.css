@@ -23,9 +23,10 @@
     background: var(--card-bg);
 }
 .plugin-banner-inline {
-    width: 120px;
-    height: 48px;
-    object-fit: contain;
+    width: 100%;
+    max-width: 280px;
+    height: 80px;
+    object-fit: cover;
     display: block;
     margin-bottom: 0.4rem;
     border-radius: 4px;

@@ -3136,9 +3136,18 @@ async fn live_segment(
         state.encoder.port()
     );
     let api_key = query.apikey.clone().unwrap_or_default();
-    // Segments are binary; do not run the playlist rewriter over them.
-    let _ = api_key;
-    proxy_bytes(client, &url, None, None).await
+    let is_playlist = file.ends_with(".m3u8");
+    let rewrite_key = if is_playlist {
+        Some(api_key.as_str())
+    } else {
+        None
+    };
+    let base_path = if is_playlist {
+        Some(format!("/live/session/{channel}"))
+    } else {
+        None
+    };
+    proxy_bytes(client, &url, rewrite_key, base_path.as_deref()).await
 }
 
 /// Check the API key, returning the `401` response to send when it fails.

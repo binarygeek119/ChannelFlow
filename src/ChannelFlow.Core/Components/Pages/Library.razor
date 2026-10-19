@@ -1,5 +1,6 @@
+@using Microsoft.AspNetCore.Components.Web
 @page "/library"
-@page "/library/{connId:int}"
+@page "/library/{connId}"
 @inject HttpClient Http
 @inject NavigationManager Nav
 <h2>Library</h2>
@@ -101,7 +102,7 @@ else if (activeTab.StartsWith("conn-"))
     }
 }
 @code {
-    [Parameter] public int? connId { get; set; }
+    [Parameter] public string? connId { get; set; }
     private string activeTab = "connections";
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
@@ -126,9 +127,10 @@ else if (activeTab.StartsWith("conn-"))
     protected override async Task OnInitializedAsync()
     {
         await Load();
-        if (connId.HasValue && connections is not null)
+        int? parsedConnId = int.TryParse(connId, out var ci) ? ci : null;
+        if (parsedConnId.HasValue && connections is not null)
         {
-            var c = connections.FirstOrDefault(x => x.Id == connId.Value);
+            var c = connections.FirstOrDefault(x => x.Id == parsedConnId.Value);
             if (c is not null) await SelectConnection(c);
         }
     }
@@ -148,7 +150,6 @@ else if (activeTab.StartsWith("conn-"))
     {
         selectedConn = c;
         activeTab = $"conn-{c.Id}";
-        Nav.NavigateTo($"/library/{c.Id}", false);
         libraries = new();
         loadingLibs = true;
         try

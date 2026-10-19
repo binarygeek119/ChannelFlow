@@ -50,9 +50,12 @@ builder.Services.AddDbContext<ChannelFlowDbContext>(options =>
 });
 
 builder.Services.AddControllers();
+var aspNetUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? "http://localhost:5108";
+var defaultUrl = aspNetUrls.Split(';').FirstOrDefault()?.Replace("+", "localhost").Replace("*", "localhost") ?? "http://localhost:5108";
+if (!defaultUrl.EndsWith("/")) defaultUrl += "/";
 var baseUrl = Environment.GetEnvironmentVariable("BASE_URL")
     ?? builder.Configuration["BaseUrl"]
-    ?? "http://localhost:5108/";
+    ?? defaultUrl;
 builder.Services.AddHttpClient("default", client =>
 {
     client.BaseAddress = new Uri(baseUrl);

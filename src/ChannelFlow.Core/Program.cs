@@ -96,6 +96,8 @@ foreach (var plugin in pm.Plugins)
 }
 
 app.UseResponseCaching();
+app.UseRouting();
+app.UseWebSockets();
 app.UseStaticFiles();
 app.MapControllers();
 

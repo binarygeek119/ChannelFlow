@@ -36,6 +36,10 @@ else
             <h1 style="margin-top:0;">@item.Title</h1>
             <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center;">
                 @if (item.Year.HasValue) { <span style="color:var(--muted);font-size:1.1rem;">@item.Year</span> }
+            @if (!string.IsNullOrEmpty(item.SourceKind))
+            {
+                <img src="/logos/@(item.SourceKind.ToLowerInvariant() switch { "jellyfin" => "Jellyfin", "plex" => "Plex", "emby" => "Emby", "local" => "LOCAL", _ => item.SourceKind } + ".png")" alt="@item.SourceKind" style="height:20px;opacity:.8;" onerror="this.style.display='none'" />
+            }
                 @if (!string.IsNullOrEmpty(item.OfficialRating)) { <span class="pill off">@item.OfficialRating</span> }
                 @if (item.RuntimeMs.HasValue) { <span class="pill off">@(item.RuntimeMs.Value / 60000) min</span> }
                 <span class="pill off">@item.Kind</span>

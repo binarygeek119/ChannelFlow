@@ -10,12 +10,21 @@
     }
 </div>
 
+<!-- A-Z quick jump bar -->
+<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:1rem;">
+    <button class="ghost" style="min-width:32px;padding:.2rem .4rem;@(filterLetter == "" ? "background:var(--accent);color:#fff;" : "")" @onclick='() => SetFilter("")'>All</button>
+    @foreach (var letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray())
+    {
+        <button class="ghost" style="min-width:32px;padding:.2rem .4rem;@(filterLetter == letter.ToString() ? "background:var(--accent);color:#fff;" : "")" @onclick="() => SetFilter(letter.ToString())">@letter</button>
+    }
+</div>
+
 @if (loading) { <p>Loading...</p> }
 else if (items.Count == 0) { <p class="empty">No items in this category.</p> }
 else
 {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
-        @foreach (var it in items)
+        @foreach (var it in FilteredItems)
         {
             <div class="card jf-card" style="cursor:pointer;position:relative;" title="@it.Title" @onclick="() => OpenItem(it.MatchKey)">
                 <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
@@ -58,6 +67,7 @@ else
     private int totalCount;
     private int offset;
     private const int PageSize = 50;
+    private string filterLetter = "";
 
     private string TabToKind(string tab) => tab switch
     {
@@ -99,6 +109,15 @@ else
     }
 
     private void OpenItem(string matchKey) => Nav.NavigateTo($"/media/item/{Uri.EscapeDataString(matchKey)}");
+
+    private void SetFilter(string letter)
+    {
+        filterLetter = letter;
+    }
+
+    private List<MediaItem> FilteredItems => string.IsNullOrEmpty(filterLetter)
+        ? items
+        : items.Where(i => !string.IsNullOrEmpty(i.Title) && i.Title.StartsWith(filterLetter, StringComparison.OrdinalIgnoreCase)).ToList();
 
     private async Task LoadMore()
     {

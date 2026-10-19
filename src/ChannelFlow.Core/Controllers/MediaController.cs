@@ -119,7 +119,19 @@ public class MediaController : ControllerBase
         var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == matchKey);
         if (item is null) return NotFound();
         var credits = await _core.GetCreditsForMediaAsync(matchKey);
-        return Ok(new { item, credits });
+        var personIds = credits.Select(c => c.PersonId).Distinct().ToList();
+        var people = await db.People.Where(p => personIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id);
+        var enriched = credits.Select(c => new
+        {
+            c.Id,
+            c.PersonId,
+            personName = people.TryGetValue(c.PersonId, out var p) ? p.Name : "",
+            imagePath = people.TryGetValue(c.PersonId, out var p2) ? p2.ImagePath : c.ImagePath,
+            c.MediaMatchKey,
+            c.Role,
+            c.Character
+        }).ToList();
+        return Ok(new { item, credits = enriched });
     }
 
     [HttpGet("catalog")]

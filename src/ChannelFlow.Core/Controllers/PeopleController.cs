@@ -35,6 +35,29 @@ public class PeopleController : ControllerBase
         return Ok(new { items, total, offset = off, limit = lim });
     }
 
+    [HttpGet("lookup")]
+    public async Task<IActionResult> LookupByName([FromQuery] string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return BadRequest("name required");
+        var p = await _db.People.AsNoTracking().FirstOrDefaultAsync(x => x.Name == name);
+        if (p is null) return NotFound();
+        var credits = await _db.PersonCredits.AsNoTracking().Where(c => c.PersonId == p.Id).ToListAsync();
+        var keys = credits.Select(c => c.MediaMatchKey).Distinct().ToList();
+        var media = await _db.MediaItems.AsNoTracking().Where(m => keys.Contains(m.MatchKey)).ToDictionaryAsync(m => m.MatchKey);
+        var enriched = credits.Select(c => new
+        {
+            c.Id,
+            c.PersonId,
+            c.MediaMatchKey,
+            c.Role,
+            c.Character,
+            title = media.TryGetValue(c.MediaMatchKey, out var m) ? m.Title : c.MediaMatchKey,
+            posterUrl = media.TryGetValue(c.MediaMatchKey, out var m2) ? m2.PosterUrl : null,
+            year = media.TryGetValue(c.MediaMatchKey, out var m3) ? m3.Year : null,
+        });
+        return Ok(new { person = p, credits = enriched });
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
     {

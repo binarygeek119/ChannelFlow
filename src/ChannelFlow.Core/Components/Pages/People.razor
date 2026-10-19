@@ -99,13 +99,22 @@ else
             <div class="people-items" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem;">
                 @foreach (var c in selectedPerson.Credits)
                 {
-                    <div class="people-item" style="text-align:center;">
-                        <div class="people-item-poster" style="height:120px;background:var(--card-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem;">
-                            <span style="font-size:.7rem;color:var(--muted);">@c.Role</span>
+                    <a href="/media/item/@Uri.EscapeDataString(c.MediaMatchKey)" class="people-item" style="text-align:center;text-decoration:none;color:inherit;display:block;">
+                        <div class="people-item-poster" style="height:120px;background:var(--card-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem;overflow:hidden;">
+                            @if (!string.IsNullOrEmpty(c.PosterUrl))
+                            {
+                                <img src="@c.PosterUrl" alt="@c.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
+                            }
+                            else
+                            {
+                                <span style="font-size:.7rem;color:var(--muted);">@c.Role</span>
+                            }
                         </div>
-                        <div class="people-item-title" style="font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@c.MediaMatchKey</div>
+                        <div class="people-item-title" style="font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@(string.IsNullOrEmpty(c.Title) ? c.MediaMatchKey : c.Title)</div>
+                        @if (c.Year.HasValue) { <div class="people-item-sub" style="font-size:.75rem;color:var(--muted);">@c.Year</div> }
                         @if (!string.IsNullOrEmpty(c.Character)) { <div class="people-item-sub" style="font-size:.75rem;color:var(--muted);">@c.Character</div> }
-                    </div>
+                        @if (!string.IsNullOrEmpty(c.Role)) { <div class="people-item-sub" style="font-size:.7rem;color:var(--muted);">@c.Role</div> }
+                    </a>
                 }
             </div>
         }
@@ -195,7 +204,7 @@ else
     {
         try
         {
-            var res = await Http.GetFromJsonAsync<PersonDetail>($"api/people/{Uri.EscapeDataString(personName)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var res = await Http.GetFromJsonAsync<PersonDetail>($"api/people/lookup?name={Uri.EscapeDataString(personName)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             selectedPerson = res;
         }
         catch { selectedPerson = null; }
@@ -272,5 +281,8 @@ else
         public string Role { get; set; } = "";
         public string? Character { get; set; }
         public string? ImagePath { get; set; }
+        public string? Title { get; set; }
+        public string? PosterUrl { get; set; }
+        public int? Year { get; set; }
     }
 }

@@ -812,3 +812,9 @@ code {
 .plugin-row-banner {
     margin-bottom: 0.4rem;
 }
+
+/* Word-wrap for long unbroken strings */
+code, pre, .field-note, td {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}

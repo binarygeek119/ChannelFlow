@@ -13,7 +13,7 @@
             <h3 style="margin-top:0;">Database Status</h3>
             <table style="width:100%;border-collapse:collapse;">
                 <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Provider</td><td style="padding:.4rem;">@currentProvider</td></tr>
-                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Connection</td><td style="padding:.4rem;">@(string.IsNullOrEmpty(currentConnStr) ? "Not configured" : MaskPassword(currentConnStr))</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Connection</td><td style="padding:.4rem;word-break:break-all;overflow-wrap:anywhere;">@(string.IsNullOrEmpty(currentConnStr) ? "Not configured" : MaskPassword(currentConnStr))</td></tr>
                 <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Status</td><td style="padding:.4rem;color:@(dbConnected ? "green" : "red");">@(dbConnected ? "Connected" : "Not connected")</td></tr>
                 <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Tables</td><td style="padding:.4rem;">@tableCount</td></tr>
             </table>

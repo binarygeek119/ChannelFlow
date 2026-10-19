@@ -17,7 +17,20 @@ public class CreditsController : ControllerBase
     public async Task<IActionResult> ForMedia(string matchKey)
     {
         var credits = await _core.GetCreditsForMediaAsync(matchKey);
-        return Ok(credits);
+        // Enrich with person names
+        var personIds = credits.Select(c => c.PersonId).Distinct().ToList();
+        var people = await _db.People.Where(p => personIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id);
+        var result = credits.Select(c => new
+        {
+            c.Id,
+            c.PersonId,
+            personName = people.TryGetValue(c.PersonId, out var p) ? p.Name : "Unknown",
+            imagePath = people.TryGetValue(c.PersonId, out var p2) ? p2.ImagePath : c.ImagePath,
+            c.MediaMatchKey,
+            c.Role,
+            c.Character
+        });
+        return Ok(result);
     }
 
     [HttpPost]

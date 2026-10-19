@@ -223,6 +223,55 @@ public class EfCoreData : ICoreData
         if (c is not null) { db.PersonCredits.Remove(c); await db.SaveChangesAsync(); }
     }
 
+    public async Task<List<PersonDto>> UpsertPeopleAsync(List<PersonDto> people)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var result = new List<PersonDto>();
+        foreach (var p in people)
+        {
+            var existing = await db.People.FirstOrDefaultAsync(x => x.Name == p.Name);
+            if (existing is null)
+            {
+                var person = new Person { Name = p.Name, ImagePath = p.ImagePath };
+                db.People.Add(person);
+                await db.SaveChangesAsync();
+                result.Add(new PersonDto(person.Id, person.Name, person.ImagePath));
+            }
+            else
+            {
+                if (p.ImagePath is not null && existing.ImagePath is null)
+                {
+                    existing.ImagePath = p.ImagePath;
+                    await db.SaveChangesAsync();
+                }
+                result.Add(new PersonDto(existing.Id, existing.Name, existing.ImagePath));
+            }
+        }
+        return result;
+    }
+
+    public async Task LinkCreditsAsync(string mediaMatchKey, List<PersonCreditDto> credits)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        // Remove existing credits for this media item
+        var existing = db.PersonCredits.Where(c => c.MediaMatchKey == mediaMatchKey);
+        db.PersonCredits.RemoveRange(existing);
+        foreach (var cr in credits)
+        {
+            db.PersonCredits.Add(new PersonCredit
+            {
+                Id = cr.Id == Guid.Empty ? Guid.NewGuid() : cr.Id,
+                PersonId = cr.PersonId,
+                MediaMatchKey = mediaMatchKey,
+                Role = cr.Role,
+                Character = cr.Character
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
     public Task FileForAsync(string matchKey) => Task.CompletedTask;
 
     public async Task SetChannelGuideAsync(string channelId, List<GuideProgram> programs)

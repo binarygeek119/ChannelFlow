@@ -89,6 +89,8 @@ public class NoCoreData : ICoreData
     public Task<List<PersonCreditDto>> GetCreditsForMediaAsync(string mk) => Task.FromResult(new List<PersonCreditDto>());
     public Task<PersonCreditDto> AddCreditAsync(PersonCreditDto c) => Task.FromResult(c);
     public Task RemoveCreditAsync(Guid id) => Task.CompletedTask;
+    public Task<List<PersonDto>> UpsertPeopleAsync(List<PersonDto> p) => Task.FromResult(new List<PersonDto>());
+    public Task LinkCreditsAsync(string mk, List<PersonCreditDto> c) => Task.CompletedTask;
 }
 
 public class NoopTaskHost : IPluginTaskHost

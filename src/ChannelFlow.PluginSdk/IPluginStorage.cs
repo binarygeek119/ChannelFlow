@@ -35,6 +35,8 @@ public interface ICoreData
     Task<List<PersonCreditDto>> GetCreditsForMediaAsync(string MediaMatchKey);
     Task<PersonCreditDto> AddCreditAsync(PersonCreditDto Credit);
     Task RemoveCreditAsync(Guid CreditId);
+    Task<List<PersonDto>> UpsertPeopleAsync(List<PersonDto> People);
+    Task LinkCreditsAsync(string MediaMatchKey, List<PersonCreditDto> Credits);
     Task<ChatResponse> ChatAsync(ChatRequest Request);
     Task FileForAsync(string MatchKey);
     Task SetChannelGuideAsync(string ChannelId, List<GuideProgram> Programs);
@@ -49,6 +51,7 @@ public record CatalogRow(string MatchKey, string Kind, string Title, int? Year, 
 public record MediaItemDto(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? ConnectionId, string? LibraryId, string? PosterUrl = null, string? WebUrl = null, string? SourceKind = null, string? Overview = null, string? SeriesName = null, string? SeriesId = null, string? SeasonName = null, string? SeasonId = null);
 
 public record PersonCreditDto(Guid Id, Guid PersonId, string MediaMatchKey, string Role, string? Character, string? ImagePath);
+public record PersonDto(Guid Id, string Name, string? ImagePath = null);
 
 public record CatalogFilter(List<string> Kinds, List<string> Genres, List<string> Tags, int? Limit);
 

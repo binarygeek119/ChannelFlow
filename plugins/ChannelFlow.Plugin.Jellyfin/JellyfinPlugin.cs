@@ -24,7 +24,7 @@ public class JellyfinMediaSource : IMediaSource
         };
         var c = new HttpClient(handler);
         c.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("MediaBrowser", $"Token=\"{apiKey}\"");
-        c.Timeout = TimeSpan.FromSeconds(30);
+        c.Timeout = TimeSpan.FromMinutes(10);
         return c;
     }
 

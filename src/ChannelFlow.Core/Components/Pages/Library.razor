@@ -179,15 +179,20 @@ else if (activeTab.StartsWith("conn-"))
         try
         {
             var libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/media/libraries/{c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            // Restore saved selections
+            var savedLibs = new List<string>();
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(c.ConfigJson);
+                if (doc.RootElement.TryGetProperty("selectedLibraries", out var sl) && sl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    savedLibs = sl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+            }
+            catch { }
             if (libs is not null)
                 foreach (var l in libs)
                 {
-                    l.Selected = false;
-                    // Default media type from collection type
-                    if (string.IsNullOrEmpty(l.MediaTypeStr))
-                    {
-                        l.MediaTypeStr = "movie";
-                    }
+                    l.Selected = savedLibs.Contains(l.Id);
+                    if (string.IsNullOrEmpty(l.MediaTypeStr)) l.MediaTypeStr = "movie";
                     libraries.Add(l);
                 }
             // Set sync URL from connection config

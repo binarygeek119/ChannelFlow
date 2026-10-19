@@ -169,14 +169,7 @@ else if (activeTab == "catalog")
         if (selectedConnId == 0 || connections is null) { selectedConn = null; return; }
         selectedConn = connections.FirstOrDefault(x => x.Id == selectedConnId);
         if (selectedConn is null) return;
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(selectedConn.ConfigJson);
-            if (doc.RootElement.TryGetProperty("url", out var url)) syncUrl = url.GetString() ?? syncUrl;
-            if (doc.RootElement.TryGetProperty("apiKey", out var key)) syncApiKey = key.GetString() ?? syncApiKey;
-            if (doc.RootElement.TryGetProperty("libraryId", out var lib)) syncLibraryId = lib.GetString() ?? syncLibraryId;
-        }
-        catch { }
+        // Connections and Sync use their own URLs - no auto-population
     }
 
     private async Task TestConn()

@@ -139,15 +139,7 @@ else
         if (firstRender)
         {
             dotNetRef = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("eval", $@"
-                window._peopleObserver = new IntersectionObserver(async (entries) => {{
-                    if (entries[0].isIntersecting) {{
-                        await DotNet.invokeMethodAsync('ChannelFlow.Core', 'PeopleLoadMore');
-                    }}
-                }}, {{ rootMargin: '400px' }});
-                var sentinel = document.getElementById('people-sentinel');
-                if (sentinel) window._peopleObserver.observe(sentinel);
-            ");
+            await JS.InvokeVoidAsync("setupPeopleInfiniteScroll", dotNetRef);
         }
     }
 

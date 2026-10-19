@@ -19,9 +19,10 @@ public class MediaController : ControllerBase
     private readonly IPluginStorage _storage;
     private readonly IPluginLogger _logger;
     private readonly ChannelFlowDbContext _db;
-    public MediaController(PluginManager pm, ICoreData core, ChannelFlowDbContext db)
+    private readonly TaskTracker _tasks;
+    public MediaController(PluginManager pm, ICoreData core, ChannelFlowDbContext db, TaskTracker tasks)
     {
-        _pm = pm; _core = core; _db = db;
+        _pm = pm; _core = core; _db = db; _tasks = tasks;
         _storage = new InMemoryPluginStorage();
         _logger = new ConsolePluginLogger("media");
     }
@@ -60,13 +61,17 @@ public class MediaController : ControllerBase
     {
         var plugin = _pm.Get("com.channelflow.jellyfin");
         if (plugin?.MediaSource is null) return BadRequest("jellyfin plugin not loaded");
+        var taskKey = $"jellyfin.sync.{req.LibraryId}";
+        _tasks.Report(taskKey, "Jellyfin Sync", req.LibraryId, 0, 1, "running");
         var conn = new SdkConnection(req.ConnectionId, "jellyfin", new Dictionary<string, string> { ["url"] = req.Url, ["apiKey"] = req.ApiKey ?? "" });
         if (req.LibraryId is not null)
         {
             var ctx = new SyncContext(req.ConnectionId, req.LibraryId, _storage, _logger, _core, req.ApiKey ?? "", conn, "movie");
             var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
+            _tasks.Report(taskKey, "Jellyfin Sync", req.LibraryId, report.ItemsAdded, Math.Max(1, report.ItemsAdded), report.Errors.Count > 0 ? "failed" : "done", string.Join("; ", report.Errors));
             return Ok(report);
         }
+        _tasks.Report(taskKey, "Jellyfin Sync", req.LibraryId, 0, 1, "failed", "libraryId required");
         return BadRequest("libraryId required");
     }
 
@@ -89,8 +94,11 @@ public class MediaController : ControllerBase
         foreach (var libId in req.LibraryIds)
         {
             var mediaType = req.MediaTypes?.TryGetValue(libId, out var mt) == true ? mt : "movie";
+            var taskKey = $"jellyfin.sync.{connection.Id}.{libId}";
+            _tasks.Report(taskKey, "Jellyfin Sync", $"{connection.Name ?? "Jellyfin"}: {libId}", 0, 1, "running");
             var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn, mediaType);
             var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
+            _tasks.Report(taskKey, "Jellyfin Sync", $"{connection.Name ?? "Jellyfin"}: {libId}", report.ItemsAdded, Math.Max(1, report.ItemsAdded), report.Errors.Count > 0 ? "failed" : "done", string.Join("; ", report.Errors));
             reports.Add(new { libraryId = libId, mediaType, report });
         }
         return Ok(reports);

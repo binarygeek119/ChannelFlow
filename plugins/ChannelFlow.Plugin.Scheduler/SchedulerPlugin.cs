@@ -114,7 +114,7 @@ public class SchedulerPlugin : IPlugin
             foreach (var ch in channels)
             {
                 if (ct.IsCancellationRequested) break;
-                _api.Tasks?.Report("scheduler.build", "Scheduler Build", ch.Name, _current, _total);
+                _api.Tasks?.Report("scheduler.build", "Scheduler Build", ch.Name, _current, _total, "running", $"Building channel {_current + 1} of {_total}");
 
                 var kinds = _config.SourceRestrictionKinds.Count > 0 ? _config.SourceRestrictionKinds : _config.Kinds;
                 var catalog = await core.CatalogAsync(new CatalogFilter(kinds, _config.Genres, _config.Tags, null));
@@ -268,6 +268,7 @@ public class SchedulerPlugin : IPlugin
             }
 
             _status = ct.IsCancellationRequested ? "cancelled" : "completed";
+            _api?.Tasks?.Report("scheduler.build", "Scheduler Build", null, _total, _total, _status == "completed" ? "done" : "failed", _status);
         }
         catch (Exception e)
         {

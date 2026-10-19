@@ -23,7 +23,7 @@ public interface IPluginDatabase
 
 public interface IPluginTaskHost
 {
-    void Report(string Key, string Title, string? Label, long? Current, long? Total, string? Detail = null);
+    void Report(string Key, string Title, string? Label, long? Current, long? Total, string Status = "running", string? Detail = null);
 }
 
 public interface ICoreData

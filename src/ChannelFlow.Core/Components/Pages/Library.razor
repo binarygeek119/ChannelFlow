@@ -33,16 +33,22 @@
     <div class="panel-head">
         <h2>Sync Libraries</h2>
     </div>
-    <p class="hint">Sync media from your connections into the catalog.</p>
+    <p class="hint">Sync media from your Jellyfin server into the catalog.</p>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">
-        <select @bind="syncSource">
-            <option value="jellyfin">Jellyfin</option>
-        </select>
-        <input @bind="syncUrl" placeholder="Server URL" style="width:250px;" />
+        @if (connections is not null && connections.Count > 0)
+        {
+            <select @bind="selectedConnId" @bind:after="OnConnChanged">
+                <option value="0">-- manual --</option>
+                @foreach (var c in connections) { <option value="@c.Id">@c.Id - @c.Kind</option> }
+            </select>
+        }
+        <input @bind="syncUrl" placeholder="Server URL (e.g. http://192.168.1.10:8096)" style="width:280px;" />
         <input @bind="syncApiKey" placeholder="API Key" style="width:180px;" />
         <input @bind="syncLibraryId" placeholder="Library Id" style="width:120px;" />
+        <button class="ghost" @onclick="TestConn" disabled="@testing">@(testing ? "Testing..." : "Test")</button>
         <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
     </div>
+    @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
     @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
 </div>
 
@@ -56,12 +62,12 @@
 </div>
 @code {
     private List<ConnDto>? connections;
-    private string syncSource = "jellyfin";
+    private int selectedConnId;
     private string syncUrl = "http://localhost:8096";
     private string syncApiKey = "";
     private string syncLibraryId = "";
-    private bool syncing;
-    private string? syncResult;
+    private bool syncing, testing;
+    private string? syncResult, testResult;
     private int mediaCount;
 
     protected override async Task OnInitializedAsync() => await Load();
@@ -75,6 +81,37 @@
             mediaCount = catalog?.Count ?? 0;
         }
         catch { connections = new(); }
+    }
+
+    private void OnConnChanged()
+    {
+        if (selectedConnId == 0 || connections is null) return;
+        var c = connections.FirstOrDefault(x => x.Id == selectedConnId);
+        if (c is null) return;
+        // Try to parse config JSON
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(c.ConfigJson);
+            if (doc.RootElement.TryGetProperty("url", out var url)) syncUrl = url.GetString() ?? syncUrl;
+            if (doc.RootElement.TryGetProperty("apiKey", out var key)) syncApiKey = key.GetString() ?? syncApiKey;
+            if (doc.RootElement.TryGetProperty("libraryId", out var lib)) syncLibraryId = lib.GetString() ?? syncLibraryId;
+        }
+        catch { }
+    }
+
+    private async Task TestConn()
+    {
+        testing = true;
+        testResult = null;
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/media/test-jellyfin", new { Url = syncUrl, ApiKey = syncApiKey });
+            testResult = await res.Content.ReadAsStringAsync();
+            if (res.IsSuccessStatusCode) testResult = "OK: " + testResult;
+            else testResult = "Error: " + testResult;
+        }
+        catch (Exception e) { testResult = "Error: " + e.Message; }
+        testing = false;
     }
 
     private async Task Sync()

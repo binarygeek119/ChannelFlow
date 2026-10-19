@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ChannelFlow.Core.Controllers;
 
-public record JellyfinSyncRequest(string Url, string ApiKey, string LibraryId, string ConnectionId = "jellyfin-1");
+public record JellyfinSyncRequest(string Url, string ApiKey, string? LibraryId = null, string ConnectionId = "jellyfin-1");
 
 [ApiController]
 [Route("api/media")]
@@ -41,6 +41,16 @@ public class MediaController : ControllerBase
         if (item is null) return NotFound();
         var credits = await _core.GetCreditsForMediaAsync(matchKey);
         return Ok(new { item, credits });
+    }
+
+    [HttpPost("test-jellyfin")]
+    public async Task<IActionResult> TestJellyfin([FromBody] JellyfinSyncRequest req)
+    {
+        var plugin = _pm.Get("com.channelflow.jellyfin");
+        if (plugin?.MediaSource is null) return BadRequest("jellyfin plugin not loaded");
+        var conn = new Connection(req.ConnectionId, "jellyfin", new Dictionary<string, string> { ["url"] = req.Url, ["apiKey"] = req.ApiKey });
+        var result = await plugin.MediaSource.TestConnectionAsync(conn, req.ApiKey);
+        return Ok(result);
     }
 
     [HttpGet("catalog")]

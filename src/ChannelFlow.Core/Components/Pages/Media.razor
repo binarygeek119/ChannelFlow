@@ -36,6 +36,12 @@ else
                 }
                 <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@it.Title</div>
                 <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(it.Year?.ToString() ?? it.Kind)</div>
+                @if (!string.IsNullOrEmpty(it.SourceKind))
+                {
+                    <div style="margin-top:.25rem;">
+                        <img src="/logos/@(it.SourceKind.ToLowerInvariant() switch { "jellyfin" => "Jellyfin", "plex" => "Plex", "emby" => "Emby", "local" => "LOCAL", _ => it.SourceKind } + ".png")" alt="@it.SourceKind" style="height:16px;opacity:.7;" onerror="this.style.display='none'" />
+                    </div>
+                }
             </div>
         }
     </div>

@@ -119,6 +119,18 @@ else if (activeTab.StartsWith("conn-"))
             </div>
         </div>
     }
+    @if (showSyncPopup)
+    {
+        <div class="task-popup-wrap" style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:120;">
+            <div class="task-popup @(syncPopupOk ? "status-done" : "status-fail") @(syncDone ? "fading" : "")">
+                <div class="task-popup-head">@(syncing ? "Syncing..." : "Sync Complete")</div>
+                <div class="task-popup-track">
+                    <div class="task-popup-bar @(syncing ? "indeterminate" : (syncPopupOk ? "done" : "fail"))" style="width:@(syncing ? "45%" : "100%")"></div>
+                </div>
+                <div class="task-popup-status">@(syncPopupMsg ?? "")</div>
+            </div>
+        </div>
+    }
             }
         </div>
     }
@@ -137,6 +149,11 @@ else if (activeTab.StartsWith("conn-"))
     private string? syncResult, testResult;
     private bool showSavePopup;
     private string? savePopupMsg;
+    private bool showSyncPopup;
+    private bool syncPopupOk;
+    private bool syncDone;
+    private string? syncPopupMsg;
+    private System.Threading.Timer? syncPopupTimer;
     private System.Threading.Timer? savePopupTimer;
     private int mediaCount;
 
@@ -299,16 +316,26 @@ else if (activeTab.StartsWith("conn-"))
         if (selected.Count == 0) { syncResult = "No libraries selected."; StateHasChanged(); return; }
         syncing = true;
         syncResult = null;
+        showSyncPopup = true;
+        syncDone = false;
+        syncPopupOk = true;
+        syncPopupMsg = $"Syncing {selected.Count} libraries...";
+        StateHasChanged();
         try
         {
             var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
             var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
             syncResult = await res.Content.ReadAsStringAsync();
+            syncPopupMsg = syncResult;
+            syncPopupOk = res.IsSuccessStatusCode;
+            syncDone = true;
             StateHasChanged();
+            syncPopupTimer?.Dispose();
+            syncPopupTimer = new System.Threading.Timer(_ => { showSyncPopup = false; InvokeAsync(StateHasChanged); }, null, 5000, Timeout.Infinite);
             await Load();
             StateHasChanged();
         }
-        catch (Exception e) { syncResult = "Error: " + e.Message; }
+        catch (Exception e) { syncResult = "Error: " + e.Message; syncPopupMsg = "Error: " + e.Message; syncPopupOk = false; syncDone = true; StateHasChanged(); }
         syncing = false;
     }
 

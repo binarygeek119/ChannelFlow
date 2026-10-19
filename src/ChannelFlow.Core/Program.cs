@@ -59,6 +59,7 @@ var baseUrl = Environment.GetEnvironmentVariable("BASE_URL")
 builder.Services.AddHttpClient("default", client =>
 {
     client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromMinutes(10);
 });
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 builder.Services.AddResponseCaching();

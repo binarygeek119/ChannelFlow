@@ -105,9 +105,11 @@ app.MapControllers();
 app.MapGet("/api/health", () => new { name = "ChannelFlow", status = "ok", version = "3.0.0" });
 
 app.UseAntiforgery();
-// Serve uploaded images
-var imagesDir = Path.Combine(builder.Environment.ContentRootPath, "data", "images");
+// Serve images (posters, people, uploads)
+var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(builder.Environment.ContentRootPath, "images");
 Directory.CreateDirectory(imagesDir);
+Directory.CreateDirectory(Path.Combine(imagesDir, "posters"));
+Directory.CreateDirectory(Path.Combine(imagesDir, "people"));
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(imagesDir),

@@ -105,8 +105,9 @@ public class PeopleController : ControllerBase
         if (file is null || file.Length == 0) return BadRequest("no file");
         var ext = Path.GetExtension(file.FileName);
         var fileName = $"{id}{ext}";
-        var dir = Path.Combine(_env.ContentRootPath, "data", "images");
-        Directory.CreateDirectory(dir);
+        var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(_env.ContentRootPath, "images");
+        Directory.CreateDirectory(imagesDir);
+        var dir = imagesDir;
         var path = Path.Combine(dir, fileName);
         using (var stream = System.IO.File.Create(path))
             await file.CopyToAsync(stream);

@@ -140,7 +140,13 @@ public class JellyfinMediaSource : IMediaSource
                     string? seasonId = it.TryGetProperty("SeasonId", out var si2) ? si2.ToString() : null;
                     string? posterUrl = null;
                     if (it.TryGetProperty("ImageTags", out var imgTags) && imgTags.ValueKind == JsonValueKind.Object && imgTags.TryGetProperty("Primary", out _))
-                        posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
+                    {
+                        var imageUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
+                        var destDir = Path.Combine(GetImagesDir(), "posters");
+                        var destPath = Path.Combine(destDir, $"{Sanitize(id)}.jpg");
+                        var local = await DownloadImageAsync(c, imageUrl, destPath, "/images/posters");
+                        posterUrl = local ?? imageUrl;
+                    }
                     var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
@@ -187,7 +193,14 @@ public class JellyfinMediaSource : IMediaSource
                             bool hasImage = false;
                             if (person.TryGetProperty("ImageTags", out var pit) && pit.ValueKind == JsonValueKind.Object && pit.TryGetProperty("Primary", out _)) hasImage = true;
                             else if (person.TryGetProperty("PrimaryImageTag", out var ptag) && ptag.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(ptag.GetString())) hasImage = true;
-                            if (hasImage) imagePath = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
+                            if (hasImage)
+                            {
+                                var imageUrl = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
+                                var destDir = Path.Combine(GetImagesDir(), "people");
+                                var destPath = Path.Combine(destDir, $"{Sanitize(personId)}.jpg");
+                                var local = await DownloadImageAsync(c, imageUrl, destPath, "/images/people");
+                                imagePath = local ?? imageUrl;
+                            }
                         }
                         allPeople.Add(new PersonDto(Guid.Empty, personName, imagePath));
                         credits.Add((personName, role, character, imagePath));
@@ -211,6 +224,35 @@ public class JellyfinMediaSource : IMediaSource
         }
         catch (Exception e) { errors.Add(e.Message); }
         return new SyncReport(added, 0, 0, errors);
+    }
+
+    static string GetImagesDir()
+    {
+        if (Directory.Exists("/config")) return "/config/images";
+        if (Directory.Exists("/config/data")) return "/config/data/images";
+        return Path.Combine(Directory.GetCurrentDirectory(), "images");
+    }
+
+    static string Sanitize(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+        return s;
+    }
+
+    static async Task<string?> DownloadImageAsync(HttpClient c, string imageUrl, string destPath, string urlPrefix)
+    {
+        try
+        {
+            var res = await c.GetAsync(imageUrl);
+            if (!res.IsSuccessStatusCode) return null;
+            var bytes = await res.Content.ReadAsByteArrayAsync();
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            await File.WriteAllBytesAsync(destPath, bytes);
+            var fileName = Path.GetFileName(destPath);
+            var subDir = Path.GetFileName(Path.GetDirectoryName(destPath)!);
+            return $"{urlPrefix}/{fileName}";
+        }
+        catch { return null; }
     }
 }
 

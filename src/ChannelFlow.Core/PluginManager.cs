@@ -87,6 +87,7 @@ public class NoCoreData : ICoreData
     public Task UpsertMediaItemsAsync(List<MediaItemDto> items) => Task.CompletedTask;
     public Task RemoveMediaItemsAsync(string conn, string lib) => Task.CompletedTask;
     public Task<List<PersonCreditDto>> GetCreditsForMediaAsync(string mk) => Task.FromResult(new List<PersonCreditDto>());
+    public Task<string?> SaveImageAsync(string c, string id, string url, string? apiKey = null) => Task.FromResult<string?>(null);
     public Task<PersonCreditDto> AddCreditAsync(PersonCreditDto c) => Task.FromResult(c);
     public Task RemoveCreditAsync(Guid id) => Task.CompletedTask;
     public Task<List<PersonDto>> UpsertPeopleAsync(List<PersonDto> p) => Task.FromResult(new List<PersonDto>());

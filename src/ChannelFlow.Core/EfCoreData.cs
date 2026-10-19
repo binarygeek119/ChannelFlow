@@ -8,12 +8,49 @@ public class EfCoreData : ICoreData
 {
     private readonly IServiceProvider _sp;
     private readonly string _dataDir;
+    private readonly string _imagesRoot;
 
     public EfCoreData(IServiceProvider sp, string dataDir)
     {
         _sp = sp;
         _dataDir = Directory.Exists("/config/data") ? "/config/data" : dataDir;
+        _imagesRoot = Directory.Exists("/config") ? "/config/images" : Path.Combine(Path.GetDirectoryName(_dataDir)!, "images");
         Directory.CreateDirectory(Path.Combine(_dataDir, "lineups"));
+        Directory.CreateDirectory(_imagesRoot);
+    }
+
+    public async Task<string?> SaveImageAsync(string category, string id, string sourceUrl, string? apiKey = null)
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl)) return null;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            if (!string.IsNullOrEmpty(apiKey)) http.DefaultRequestHeaders.TryAddWithoutValidation("X-Emby-Token", apiKey);
+            var res = await http.GetAsync(sourceUrl);
+            if (!res.IsSuccessStatusCode) return null;
+            var bytes = await res.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0) return null;
+            var ct = res.Content.Headers.ContentType?.MediaType ?? "";
+            var ext = ct switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                "image/gif" => ".gif",
+                _ => ".jpg"
+            };
+            var dir = Path.Combine(_imagesRoot, category);
+            Directory.CreateDirectory(dir);
+            // sanitize id for filename
+            var safeId = string.Join("_", id.Split(Path.GetInvalidFileNameChars()));
+            var fileName = $"{safeId}{ext}";
+            var path = Path.Combine(dir, fileName);
+            await File.WriteAllBytesAsync(path, bytes);
+            return $"/images/{category}/{fileName}";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<List<CoreChannel>> ChannelsAsync()

@@ -59,8 +59,8 @@ public class JellyfinMediaSource : IMediaSource
         {
             foreach (var it in items.EnumerateArray())
             {
-                var id = it.GetProperty("Id").GetString() ?? "";
-                var name = it.GetProperty("Name").GetString() ?? id;
+                var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
+                var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                 var type = it.TryGetProperty("CollectionType", out var ct) ? ct.GetString() : null;
                 var mt = type?.ToLowerInvariant() switch
                 {
@@ -78,7 +78,7 @@ public class JellyfinMediaSource : IMediaSource
     {
         var conn = ctx.Connection;
         if (conn is null) return new SyncReport(0, 0, 0, new List<string> { "No connection provided" });
-        var url = conn.Config["url"].TrimEnd('/');
+        var url = conn.Config.TryGetValue("url", out var u) ? u.TrimEnd('/') : "";
         var apiKey = ctx.ApiKey;
         using var c = Client(apiKey);
         int added = 0;
@@ -95,8 +95,8 @@ public class JellyfinMediaSource : IMediaSource
             {
                 foreach (var it in arr.EnumerateArray())
                 {
-                    var id = it.GetProperty("Id").GetString() ?? "";
-                    var name = it.GetProperty("Name").GetString() ?? id;
+                    var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
+                    var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
                     var kind = ctx.MediaType != "movie" ? ctx.MediaType : (type?.ToLowerInvariant() switch
                     {

@@ -105,6 +105,7 @@ public class JellyfinMediaSource : IMediaSource
                     if (it.TryGetProperty("Genres", out var g) && g.ValueKind == JsonValueKind.Array)
                         foreach (var gg in g.EnumerateArray()) if (gg.GetString() is string gs) genres.Add(gs);
                     string? rating = it.TryGetProperty("OfficialRating", out var r) ? r.GetString() : null;
+                    var posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
                         Kind: kind,
@@ -115,7 +116,8 @@ public class JellyfinMediaSource : IMediaSource
                         OfficialRating: rating,
                         Tags: new List<string>(),
                         ConnectionId: ctx.ConnectionId,
-                        LibraryId: ctx.LibraryId));
+                        LibraryId: ctx.LibraryId,
+                        PosterUrl: posterUrl));
                 }
             }
             await ctx.Core.UpsertMediaItemsAsync(items);

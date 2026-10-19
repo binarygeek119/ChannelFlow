@@ -111,6 +111,17 @@ public class MediaController : ControllerBase
         return Ok(reports);
     }
 
+    [HttpGet("{*matchKey}")]
+    public async Task<IActionResult> Get(string matchKey)
+    {
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == matchKey);
+        if (item is null) return NotFound();
+        var credits = await _core.GetCreditsForMediaAsync(matchKey);
+        return Ok(new { item, credits });
+    }
+
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog([FromQuery] string? kind, [FromQuery] int? limit, [FromQuery] int? offset)
     {

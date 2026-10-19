@@ -13,12 +13,14 @@ public class PeopleController : ControllerBase
     public PeopleController(ChannelFlowDbContext db, IWebHostEnvironment env) { _db = db; _env = env; }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? search, [FromQuery] string? role)
+    public async Task<IActionResult> List([FromQuery] string? search, [FromQuery] string? role, [FromQuery] int? limit, [FromQuery] int? offset)
     {
+        var lim = limit ?? 200;
+        var off = offset ?? 0;
         var q = _db.People.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(search))
             q = q.Where(p => p.Name.Contains(search));
-        if (!string.IsNullOrWhiteSpace(role))
+        if (!string.IsNullOrWhiteSpace(role) && role != "All")
         {
             var personIds = await _db.PersonCredits
                 .AsNoTracking()
@@ -28,7 +30,9 @@ public class PeopleController : ControllerBase
                 .ToListAsync();
             q = q.Where(p => personIds.Contains(p.Id));
         }
-        return Ok(await q.OrderBy(p => p.Name).ToListAsync());
+        var total = await q.CountAsync();
+        var items = await q.OrderBy(p => p.Name).Skip(off).Take(lim).ToListAsync();
+        return Ok(new { items, total, offset = off, limit = lim });
     }
 
     [HttpGet("{id:guid}")]
@@ -70,14 +74,6 @@ public class PeopleController : ControllerBase
         return NoContent();
     }
 
-    [HttpPost("{id:guid}/credits")]
-    public async Task<IActionResult> AddCredit(Guid id, [FromBody] PersonCredit credit)
-    {
-        credit.PersonId = id;
-        _db.PersonCredits.Add(credit);
-        await _db.SaveChangesAsync();
-        return Ok(credit);
-    }
     [HttpPost("{id:guid}/image")]
     public async Task<IActionResult> UploadImage(Guid id, IFormFile file)
     {
@@ -94,5 +90,14 @@ public class PeopleController : ControllerBase
         person.ImagePath = $"/images/{fileName}";
         await _db.SaveChangesAsync();
         return Ok(new { imagePath = person.ImagePath });
+    }
+
+    [HttpPost("{id:guid}/credits")]
+    public async Task<IActionResult> AddCredit(Guid id, [FromBody] PersonCredit credit)
+    {
+        credit.PersonId = id;
+        _db.PersonCredits.Add(credit);
+        await _db.SaveChangesAsync();
+        return Ok(credit);
     }
 }

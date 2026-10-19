@@ -63,7 +63,7 @@
             @if (people.Count < peopleTotal)
             {
                 <div style="margin-top:1rem;text-align:center;">
-                    <button class="ghost" @onclick="LoadMore">Load more</button>
+                    <button class="ghost" @onclick="LoadMore">Load more (@people.Count/@peopleTotal)</button>
                 </div>
             }
         }
@@ -127,7 +127,7 @@ else
 
     protected override async Task OnInitializedAsync() => await Load();
 
-    private async Task Load()
+    private async Task Load(bool reset = true)
     {
         if (!string.IsNullOrEmpty(name))
         {
@@ -135,17 +135,29 @@ else
             return;
         }
         selectedPerson = null;
+        if (reset) { people = new(); peopleOffset = 0; peopleTotal = 0; }
         loading = true;
         try
         {
-            var url = "api/people?limit=200";
+            var url = $"api/people?limit=100&offset={peopleOffset}";
             if (!string.IsNullOrEmpty(filter)) url += $"&search={Uri.EscapeDataString(filter)}";
             if (activeRole != "All") url += $"&role={Uri.EscapeDataString(activeRole)}";
-            people = await Http.GetFromJsonAsync<List<PersonDto>>(url, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
-            peopleTotal = people.Count;
+            var res = await Http.GetFromJsonAsync<PeopleResponse>(url, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null)
+            {
+                people.AddRange(res.Items ?? new());
+                peopleTotal = res.Total;
+                peopleOffset = people.Count;
+            }
         }
-        catch { people = new(); }
+        catch { if (reset) people = new(); }
         loading = false;
+    }
+
+    private async Task LoadMore()
+    {
+        if (people.Count >= peopleTotal) return;
+        await Load(false);
     }
 
     private async Task LoadPerson(string personName)
@@ -170,14 +182,9 @@ else
         _ = Load();
     }
 
-    private async Task LoadMore()
-    {
-        // People API doesn't support offset yet; placeholder
-    }
-
     private void OnFilterChanged()
     {
-        _ = Load();
+        _ = Load(true);
     }
 
     private void SetLetter(string letter) { filterLetter = letter; }
@@ -204,7 +211,7 @@ else
     private async Task SwitchRole(string role)
     {
         activeRole = role;
-        await Load();
+        await Load(true);
     }
 
     private static string Initials(string name)
@@ -212,6 +219,7 @@ else
         return string.Join("", name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => w[0].ToString().ToUpper()));
     }
 
+    public class PeopleResponse { public List<PersonDto> Items { get; set; } = new(); public int Total { get; set; } public int Offset { get; set; } public int Limit { get; set; } }
     public class PersonDto
     {
         public Guid Id { get; set; }

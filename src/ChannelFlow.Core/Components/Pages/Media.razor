@@ -19,7 +19,7 @@ else
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
         @foreach (var it in items)
         {
-            <div class="card jf-card" style="cursor:pointer;" title="@it.Title" @onclick="() => OpenItem(it.MatchKey)">
+            <div class="card jf-card" style="cursor:pointer;position:relative;" title="@it.Title" @onclick="() => OpenItem(it.MatchKey)">
                 <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
                     @if (!string.IsNullOrEmpty(it.PosterUrl))
                     {
@@ -30,6 +30,10 @@ else
                         <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">No poster</div>
                     }
                 </div>
+                @if (!string.IsNullOrEmpty(it.WebUrl))
+                {
+                    <a href="@it.WebUrl" target="_blank" rel="noopener" style="position:absolute;top:.5rem;right:.5rem;background:var(--accent);color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:.9rem;" title="Play on @it.SourceKind">▶</a>
+                }
                 <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@it.Title</div>
                 <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(it.Year?.ToString() ?? it.Kind)</div>
             </div>
@@ -117,6 +121,8 @@ else
         public string? OfficialRating { get; set; }
         public string? PosterUrl { get; set; }
         public long? RuntimeMs { get; set; }
+        public string? WebUrl { get; set; }
+        public string? SourceKind { get; set; }
     }
     public class MediaDetail
     {

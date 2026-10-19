@@ -113,6 +113,7 @@ public class JellyfinMediaSource : IMediaSource
                         foreach (var gg in g.EnumerateArray()) if (gg.GetString() is string gs) genres.Add(gs);
                     string? rating = it.TryGetProperty("OfficialRating", out var r) ? r.GetString() : null;
                     var posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
+                    var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
                         Kind: kind,
@@ -124,7 +125,9 @@ public class JellyfinMediaSource : IMediaSource
                         Tags: new List<string>(),
                         ConnectionId: ctx.ConnectionId,
                         LibraryId: ctx.LibraryId,
-                        PosterUrl: posterUrl));
+                        PosterUrl: posterUrl,
+                        WebUrl: webUrl,
+                        SourceKind: "jellyfin"));
                 }
             }
             await ctx.Core.UpsertMediaItemsAsync(items);

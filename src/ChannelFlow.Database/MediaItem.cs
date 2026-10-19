@@ -11,6 +11,8 @@ public class MediaItem
     public List<string> Genres { get; set; } = new();
     public string? OfficialRating { get; set; }
     public string? PosterUrl { get; set; }
+    public string? WebUrl { get; set; }
+    public string? SourceKind { get; set; }
     public List<string> Tags { get; set; } = new();
     public string? ConnectionId { get; set; }
     public string? LibraryId { get; set; }

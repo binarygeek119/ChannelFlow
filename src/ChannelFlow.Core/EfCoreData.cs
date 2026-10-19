@@ -96,6 +96,8 @@ public class EfCoreData : ICoreData
                     OfficialRating = it.OfficialRating,
                     Tags = it.Tags ?? new(),
                     PosterUrl = it.PosterUrl,
+                    WebUrl = it.WebUrl,
+                    SourceKind = it.SourceKind,
                     ConnectionId = it.ConnectionId,
                     LibraryId = it.LibraryId
                 });
@@ -110,6 +112,8 @@ public class EfCoreData : ICoreData
                 existing.OfficialRating = it.OfficialRating;
                 existing.Tags = it.Tags ?? new();
                 existing.PosterUrl = it.PosterUrl;
+                existing.WebUrl = it.WebUrl;
+                existing.SourceKind = it.SourceKind;
                 existing.ConnectionId = it.ConnectionId;
                 existing.LibraryId = it.LibraryId;
             }

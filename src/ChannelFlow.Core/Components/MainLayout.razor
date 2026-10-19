@@ -134,6 +134,25 @@
     <TaskPopup />
 </div>
 @code {
-    private string PageTitle => Nav.Uri.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? "Home";
+    private string PageTitle
+    {
+        get
+        {
+            var segment = Nav.Uri.Split('/').LastOrDefault(s => !string.IsNullOrEmpty(s)) ?? "Home";
+            return segment.ToLowerInvariant() switch
+            {
+                "media" => "MEDIA",
+                "guide-grid" => "Guide Grid",
+                "client-logs" => "Client Logs",
+                "plugins-manage" => "Plugin Management",
+                "plugin-repos" => "Plugin Repositories",
+                "commercialbrainz" => "CommercialBrainz",
+                "holidaychannel" => "Holiday Channel",
+                "offair" => "Off Air",
+                "quickpin" => "Quick Pin",
+                _ => char.ToUpperInvariant(segment[0]) + segment[1..]
+            };
+        }
+    }
     private bool IsActive(string href) => Nav.Uri.EndsWith(href == "/" ? Nav.BaseUri : href, StringComparison.OrdinalIgnoreCase);
 }

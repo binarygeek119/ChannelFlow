@@ -124,6 +124,7 @@ else if (activeTab.StartsWith("conn-"))
         <div class="task-popup-wrap" style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:120;">
             <div class="task-popup @(syncPopupOk ? "status-done" : "status-fail") @(syncDone ? "fading" : "")">
                 <div class="task-popup-head">@(syncing ? "Syncing..." : "Sync Complete")</div>
+                @if (!string.IsNullOrEmpty(syncStage)) { <div class="task-popup-status" style="font-weight:bold;">@syncStage</div> }
                 <div class="task-popup-track">
                     <div class="task-popup-bar @(syncing ? "indeterminate" : (syncPopupOk ? "done" : "fail"))" style="width:@(syncing ? "45%" : "100%")"></div>
                 </div>
@@ -150,6 +151,7 @@ else if (activeTab.StartsWith("conn-"))
     private bool showSavePopup;
     private string? savePopupMsg;
     private bool showSyncPopup;
+    private string syncStage = "";
     private bool syncPopupOk;
     private bool syncDone;
     private string? syncPopupMsg;
@@ -319,13 +321,21 @@ else if (activeTab.StartsWith("conn-"))
         showSyncPopup = true;
         syncDone = false;
         syncPopupOk = true;
+        syncStage = "Preparing...";
         syncPopupMsg = $"Syncing {selected.Count} libraries...";
         StateHasChanged();
         try
         {
+            syncStage = "Connecting to server...";
+            StateHasChanged();
+            await Task.Delay(300);
             var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
+            syncStage = $"Syncing {selected.Count} libraries...";
+            StateHasChanged();
             var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
             syncResult = await res.Content.ReadAsStringAsync();
+            syncStage = "Finalizing...";
+            StateHasChanged();
             syncPopupMsg = syncResult;
             syncPopupOk = res.IsSuccessStatusCode;
             syncDone = true;
@@ -337,6 +347,7 @@ else if (activeTab.StartsWith("conn-"))
         }
         catch (Exception e) { syncResult = "Error: " + e.Message; syncPopupMsg = "Error: " + e.Message; syncPopupOk = false; syncDone = true; StateHasChanged(); }
         syncing = false;
+        syncStage = "";
     }
 
     public record ConnDto(int Id, string Name, string Kind, string ConfigJson);

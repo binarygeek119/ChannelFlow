@@ -13,11 +13,21 @@ public class PeopleController : ControllerBase
     public PeopleController(ChannelFlowDbContext db, IWebHostEnvironment env) { _db = db; _env = env; }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? search)
+    public async Task<IActionResult> List([FromQuery] string? search, [FromQuery] string? role)
     {
         var q = _db.People.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(search))
             q = q.Where(p => p.Name.Contains(search));
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            var personIds = await _db.PersonCredits
+                .AsNoTracking()
+                .Where(c => c.Role.ToLower() == role.ToLower())
+                .Select(c => c.PersonId)
+                .Distinct()
+                .ToListAsync();
+            q = q.Where(p => personIds.Contains(p.Id));
+        }
         return Ok(await q.OrderBy(p => p.Name).ToListAsync());
     }
 

@@ -15,6 +15,12 @@
             Everyone synced from your media library's cast lists, alphabetical by name. Their
             pictures come with the library scan's image pass.
         </p>
+        <div class="inner-tabs" style="margin-bottom:1rem;">
+            @foreach (var r in roles)
+            {
+                <button class="inner-tab @(activeRole == r ? "active" : "")" @onclick="() => SwitchRole(r)">@r</button>
+            }
+        </div>
         <div class="people-toolbar" style="margin-bottom:1rem;">
             <input type="search" @bind="filter" @bind:event="oninput" @bind:after="OnFilterChanged" placeholder="Filter people…" style="width:300px;" />
         </div>
@@ -96,6 +102,8 @@ else
     private List<PersonDto> people = new();
     private PersonDetail? selectedPerson;
     private string filter = "";
+    private string activeRole = "All";
+    private readonly List<string> roles = new() { "All", "Actor", "Director", "Writer", "Producer", "Artist" };
     private bool loading;
     private int peopleTotal;
     private int peopleOffset;
@@ -116,6 +124,7 @@ else
         {
             var url = "api/people?limit=200";
             if (!string.IsNullOrEmpty(filter)) url += $"&search={Uri.EscapeDataString(filter)}";
+            if (activeRole != "All") url += $"&role={Uri.EscapeDataString(activeRole)}";
             people = await Http.GetFromJsonAsync<List<PersonDto>>(url, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
             peopleTotal = people.Count;
         }
@@ -152,8 +161,13 @@ else
 
     private void OnFilterChanged()
     {
-        // Debounce
         _ = Load();
+    }
+
+    private async Task SwitchRole(string role)
+    {
+        activeRole = role;
+        await Load();
     }
 
     private static string Initials(string name)

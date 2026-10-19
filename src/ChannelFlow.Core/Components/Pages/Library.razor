@@ -1,3 +1,4 @@
+@using ChannelFlow.Components.Shared
 @using Microsoft.AspNetCore.Components.Web
 @page "/library"
 @rendermode RenderMode.InteractiveServer
@@ -55,7 +56,7 @@
                         <td>@(!string.IsNullOrEmpty(c.Name) ? c.Name : $"Connection {c.Id}")</td>
                         <td>@c.Kind</td>
                         <td><code>@c.ConfigJson</code></td>
-                        <td><button class="link danger" @onclick="() => DeleteConnection(c.Id)">Delete</button></td>
+                        <td><button class="link danger" @onclick="() => AskDelete(c.Id)">Delete</button></td>
                     </tr>
                 }
                 </tbody>
@@ -122,6 +123,7 @@ else if (activeTab.StartsWith("conn-"))
         </div>
     }
 }
+<ConfirmDialog Visible="@showConfirm" Message="@confirmMsg" OnConfirm="ConfirmDelete" OnCancel="() => showConfirm = false" />
 @code {
     [Parameter] public string? connId { get; set; }
     private string activeTab = "connections";
@@ -129,6 +131,9 @@ else if (activeTab.StartsWith("conn-"))
     private ConnDto? selectedConn;
     private List<LibraryDto> libraries = new();
     private bool loadingLibs, syncing, testing, saving;
+    private bool showConfirm;
+    private string confirmMsg = "Are you sure you want to delete this connection?";
+    private int deleteId;
     private string? syncResult, testResult;
     private bool showSavePopup;
     private string? savePopupMsg;
@@ -243,10 +248,12 @@ else if (activeTab.StartsWith("conn-"))
         creating = false;
     }
 
-    private async Task DeleteConnection(int id)
+    private void AskDelete(int id) { deleteId = id; showConfirm = true; }
+    private async Task ConfirmDelete()
     {
-        await Http.DeleteAsync($"api/connections/{id}");
-        if (selectedConn?.Id == id) { selectedConn = null; activeTab = "connections"; }
+        showConfirm = false;
+        await Http.DeleteAsync($"api/connections/{deleteId}");
+        if (selectedConn?.Id == deleteId) { selectedConn = null; activeTab = "connections"; }
         await Load();
     }
 

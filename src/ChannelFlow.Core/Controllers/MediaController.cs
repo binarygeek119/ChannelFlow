@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace ChannelFlow.Core.Controllers;
 
 public record JellyfinSyncRequest(string Url, string ApiKey, string? LibraryId = null, string ConnectionId = "jellyfin-1");
-public record SyncLibrariesRequest(int ConnectionId, List<string> LibraryIds);
+public record SyncLibrariesRequest(int ConnectionId, List<string> LibraryIds, Dictionary<string, string>? MediaTypes = null);
 
 [ApiController]
 [Route("api/media")]
@@ -63,7 +63,7 @@ public class MediaController : ControllerBase
         var conn = new SdkConnection(req.ConnectionId, "jellyfin", new Dictionary<string, string> { ["url"] = req.Url, ["apiKey"] = req.ApiKey ?? "" });
         if (req.LibraryId is not null)
         {
-            var ctx = new SyncContext(req.ConnectionId, req.LibraryId, _storage, _logger, _core, req.ApiKey ?? "", conn);
+            var ctx = new SyncContext(req.ConnectionId, req.LibraryId, _storage, _logger, _core, req.ApiKey ?? "", conn, "movie");
             var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
             return Ok(report);
         }
@@ -88,9 +88,10 @@ public class MediaController : ControllerBase
         var reports = new List<object>();
         foreach (var libId in req.LibraryIds)
         {
-            var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn);
+            var mediaType = req.MediaTypes?.TryGetValue(libId, out var mt) == true ? mt : "movie";
+            var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn, mediaType);
             var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
-            reports.Add(new { libraryId = libId, report });
+            reports.Add(new { libraryId = libId, mediaType, report });
         }
         return Ok(reports);
     }

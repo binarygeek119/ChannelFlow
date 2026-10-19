@@ -78,7 +78,7 @@ else if (activeTab.StartsWith("conn-"))
             else
             {
                 <table style="width:100%;border-collapse:collapse;">
-                    <thead><tr><th></th><th>Name</th><th>ID</th><th>Type</th></tr></thead>
+                    <thead><tr><th></th><th>Name</th><th>ID</th><th>Media Type</th></tr></thead>
                     <tbody>
                     @foreach (var lib in libraries)
                     {
@@ -86,7 +86,16 @@ else if (activeTab.StartsWith("conn-"))
                             <td><input type="checkbox" @bind="lib.Selected" /></td>
                             <td>@lib.Name</td>
                             <td><code>@lib.Id</code></td>
-                            <td>@lib.CollectionType</td>
+                            <td>
+                                <select @bind="lib.MediaTypeStr">
+                                    <option value="movie">Movie</option>
+                                    <option value="series">TV Show</option>
+                                    <option value="album">Music (Album)</option>
+                                    <option value="artist">Music (Artist)</option>
+                                    <option value="musicvideo">Music Video</option>
+                                    <option value="news">News</option>
+                                </select>
+                            </td>
                         </tr>
                     }
                     </tbody>
@@ -156,7 +165,16 @@ else if (activeTab.StartsWith("conn-"))
         {
             var libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/media/libraries/{c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (libs is not null)
-                foreach (var l in libs) { l.Selected = false; libraries.Add(l); }
+                foreach (var l in libs)
+                {
+                    l.Selected = false;
+                    // Default media type from collection type
+                    if (string.IsNullOrEmpty(l.MediaTypeStr))
+                    {
+                        l.MediaTypeStr = "movie";
+                    }
+                    libraries.Add(l);
+                }
             // Set sync URL from connection config
             try
             {
@@ -222,7 +240,8 @@ else if (activeTab.StartsWith("conn-"))
         syncResult = null;
         try
         {
-            var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected });
+            var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
+            var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
             syncResult = await res.Content.ReadAsStringAsync();
             await Load();
         }
@@ -235,7 +254,12 @@ else if (activeTab.StartsWith("conn-"))
     {
         public string Id { get; set; } = "";
         public string Name { get; set; } = "";
-        public string CollectionType { get; set; } = "";
+        public int MediaType { get; set; }
+        public string MediaTypeStr
+        {
+            get => MediaType switch { 0 => "movie", 1 => "series", 2 => "album", 3 => "artist", 4 => "musicvideo", 5 => "news", _ => "movie" };
+            set => MediaType = value switch { "movie" => 0, "series" => 1, "album" => 2, "artist" => 3, "musicvideo" => 4, "news" => 5, _ => 0 };
+        }
         public bool Selected { get; set; }
     }
     public class CatalogResponse { public int Count { get; set; } }

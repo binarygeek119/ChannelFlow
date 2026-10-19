@@ -98,12 +98,12 @@ public class JellyfinMediaSource : IMediaSource
                     var id = it.GetProperty("Id").GetString() ?? "";
                     var name = it.GetProperty("Name").GetString() ?? id;
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
-                    var kind = type?.ToLowerInvariant() switch
+                    var kind = ctx.MediaType != "movie" ? ctx.MediaType : (type?.ToLowerInvariant() switch
                     {
                         "series" => "series",
                         "episode" => "episode",
                         _ => "movie"
-                    };
+                    });
                     int? year = it.TryGetProperty("ProductionYear", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : null;
                     long? runtime = null;
                     if (it.TryGetProperty("RunTimeTicks", out var rt) && rt.ValueKind == JsonValueKind.Number)

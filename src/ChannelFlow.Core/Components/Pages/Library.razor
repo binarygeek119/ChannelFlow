@@ -184,8 +184,18 @@ else if (activeTab.StartsWith("conn-"))
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(c.ConfigJson);
-                if (doc.RootElement.TryGetProperty("selectedLibraries", out var sl) && sl.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    savedLibs = sl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                if (doc.RootElement.TryGetProperty("selectedLibraries", out var sl))
+                {
+                    if (sl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        savedLibs = sl.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                    else if (sl.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var str = sl.GetString() ?? "[]";
+                        using var inner = System.Text.Json.JsonDocument.Parse(str);
+                        if (inner.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            savedLibs = inner.RootElement.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                    }
+                }
             }
             catch { }
             if (libs is not null)

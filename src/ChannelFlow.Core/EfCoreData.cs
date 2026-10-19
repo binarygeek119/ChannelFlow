@@ -48,7 +48,7 @@ public class EfCoreData : ICoreData
             var t = filter.Tags.Select(x => x.ToLowerInvariant()).ToList();
             rows = rows.Where(m => t.Any(x => m.Tags.Any(mt => mt.ToLowerInvariant().Contains(x)))).ToList();
         }
-        return rows.Select(m => new CatalogRow(m.MatchKey, m.Kind, m.Title, m.Year, m.RuntimeMs, m.Genres, m.OfficialRating, m.Tags, m.PosterUrl)).ToList();
+        return rows.Select(m => new CatalogRow(m.MatchKey, m.Kind, m.Title, m.Year, m.RuntimeMs, m.Genres, m.OfficialRating, m.Tags, m.PosterUrl, m.WebUrl, m.SourceKind)).ToList();
     }
 
     public async Task<ChatResponse> ChatAsync(ChatRequest request)
@@ -98,6 +98,7 @@ public class EfCoreData : ICoreData
                     PosterUrl = it.PosterUrl,
                     WebUrl = it.WebUrl,
                     SourceKind = it.SourceKind,
+                    Overview = it.Overview,
                     ConnectionId = it.ConnectionId,
                     LibraryId = it.LibraryId
                 });
@@ -114,6 +115,7 @@ public class EfCoreData : ICoreData
                 existing.PosterUrl = it.PosterUrl;
                 existing.WebUrl = it.WebUrl;
                 existing.SourceKind = it.SourceKind;
+                existing.Overview = it.Overview;
                 existing.ConnectionId = it.ConnectionId;
                 existing.LibraryId = it.LibraryId;
             }

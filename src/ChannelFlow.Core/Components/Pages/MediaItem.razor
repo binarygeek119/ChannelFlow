@@ -6,51 +6,71 @@
 else if (item is null) { <p class="empty">That item isn't in the catalog any more.</p> }
 else
 {
+    <!-- Backdrop -->
+    @if (!string.IsNullOrEmpty(item.PosterUrl))
+    {
+        <div style="position:relative;height:300px;overflow:hidden;margin:-1rem -1.5rem 1rem;background:var(--card-bg);">
+            <img src="@item.PosterUrl" style="width:100%;height:100%;object-fit:cover;filter:blur(8px) brightness(.4);" />
+            <div style="position:absolute;inset:0;background:linear-gradient(to top, var(--page-bg), transparent 60%);"></div>
+        </div>
+    }
+
     <button class="ghost" @onclick="Back">← Back to Media</button>
+
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem;">
         @if (!string.IsNullOrEmpty(item.PosterUrl))
         {
-            <img src="@item.PosterUrl" alt="@item.Title" style="max-width:240px;border-radius:8px;align-self:flex-start;" />
+            <img src="@item.PosterUrl" alt="@item.Title" style="max-width:220px;border-radius:8px;align-self:flex-start;box-shadow:0 4px 16px rgba(0,0,0,.4);" />
         }
         else
         {
-            <div style="width:240px;height:360px;background:var(--card-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);">No poster</div>
+            <div style="width:220px;height:330px;background:var(--card-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);">No poster</div>
         }
         <div style="flex:1;min-width:300px;">
-            <h2 style="margin-top:0;">@item.Title</h2>
-            @if (item.Year.HasValue) { <p class="hint">@item.Year</p> }
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+            <h1 style="margin-top:0;">@item.Title</h1>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center;">
+                @if (item.Year.HasValue) { <span style="color:var(--muted);font-size:1.1rem;">@item.Year</span> }
                 @if (!string.IsNullOrEmpty(item.OfficialRating)) { <span class="pill off">@item.OfficialRating</span> }
                 @if (item.RuntimeMs.HasValue) { <span class="pill off">@(item.RuntimeMs.Value / 60000) min</span> }
                 <span class="pill off">@item.Kind</span>
+                @if (!string.IsNullOrEmpty(item.WebUrl))
+                {
+                    <a href="@item.WebUrl" target="_blank" rel="noopener" class="primary" style="display:inline-flex;align-items:center;gap:.4rem;text-decoration:none;margin-left:.5rem;">▶ Play on @item.SourceKind</a>
+                }
             </div>
             @if (item.Genres.Count > 0)
             {
-                <p><strong>Genres:</strong> @string.Join(", ", item.Genres)</p>
+                <div style="margin-bottom:.75rem;">
+                    @foreach (var g in item.Genres) { <span class="pill on" style="margin-right:.3rem;">@g</span> }
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(item.Overview))
+            {
+                <p style="line-height:1.6;color:var(--text);">@item.Overview</p>
             }
             @if (item.Tags.Count > 0)
             {
-                <p><strong>Tags:</strong> @string.Join(", ", item.Tags)</p>
+                <p class="hint"><strong>Tags:</strong> @string.Join(", ", item.Tags)</p>
             }
             @if (credits.Count > 0)
             {
-                <h3>Cast & Crew</h3>
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.75rem;">
+                <h3 style="margin-top:1.5rem;">Cast & Crew</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:1rem;">
                     @foreach (var c in credits)
                     {
                         <div style="text-align:center;">
-                            <div style="width:80px;height:80px;margin:0 auto;border-radius:50%;background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                            <div style="width:80px;height:80px;margin:0 auto;border-radius:50%;background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;border:2px solid var(--border);">
                                 @if (!string.IsNullOrEmpty(c.ImagePath))
                                 {
-                                    <img src="@c.ImagePath" alt="@c.MediaMatchKey" style="width:100%;height:100%;object-fit:cover;" />
+                                    <img src="@c.ImagePath" alt="@c.Role" style="width:100%;height:100%;object-fit:cover;" />
                                 }
                                 else
                                 {
-                                    <span style="font-size:1.2rem;font-weight:bold;">@Initials(c.Role)</span>
+                                    <span style="font-size:1.2rem;font-weight:bold;color:var(--muted);">@Initials(c.Role)</span>
                                 }
                             </div>
-                            <div style="margin-top:.25rem;font-size:.8rem;">@c.Role</div>
-                            @if (!string.IsNullOrEmpty(c.Character)) { <div style="font-size:.7rem;color:var(--muted);">@c.Character</div> }
+                            <div style="margin-top:.4rem;font-size:.85rem;font-weight:600;">@c.Role</div>
+                            @if (!string.IsNullOrEmpty(c.Character)) { <div style="font-size:.75rem;color:var(--muted);">@c.Character</div> }
                         </div>
                     }
                 </div>
@@ -102,6 +122,7 @@ else
         public string? PosterUrl { get; set; }
         public string? WebUrl { get; set; }
         public string? SourceKind { get; set; }
+        public string? Overview { get; set; }
         public List<string> Tags { get; set; } = new();
     }
     public class CreditDto

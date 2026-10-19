@@ -6,6 +6,7 @@ public class MediaItem
     public string MatchKey { get; set; } = "";
     public string Kind { get; set; } = "";
     public string Title { get; set; } = "";
+    public string? Overview { get; set; }
     public int? Year { get; set; }
     public long? RuntimeMs { get; set; }
     public List<string> Genres { get; set; } = new();

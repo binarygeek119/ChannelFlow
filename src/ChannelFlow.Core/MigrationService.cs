@@ -231,6 +231,7 @@ public class MigrationService
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"PosterUrl\" TEXT");
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"WebUrl\" TEXT");
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"SourceKind\" TEXT");
+            cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"Overview\" TEXT");
         }
         else if (isMariaDb)
         {

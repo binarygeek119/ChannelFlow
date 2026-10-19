@@ -4,13 +4,15 @@
 <p class="hint">Scheduled jobs like library scans and cache cleanup.</p>
 
 <div class="panel" style="margin-bottom:1rem;">
-    <div class="panel-head"><h2>Maintenance</h2></div>
-    <p class="hint">One-off jobs you run yourself — these are not on a timer.</p>
-    <div class="actions">
-        <button class="ghost" @onclick="RebuildPlayouts">Rebuild All Playouts</button>
-        <button class="ghost" @onclick="ClearGuide">Clear Guide Data</button>
+    <div class="panel-head"><h2>Jellyfin Library Scan</h2></div>
+    <p class="hint">
+        Syncs the Jellyfin libraries you selected on the Library page. It runs daily on the
+        server's clock, or whenever you hit Run now.
+    </p>
+    <div class="ms-form-actions">
+        <button type="button" class="primary" @onclick="RunJellyfinSync" disabled="@syncing">@(syncing ? "Syncing..." : "Run now")</button>
     </div>
-    @if (!string.IsNullOrEmpty(maintMsg)) { <p class="hint">@maintMsg</p> }
+    @if (!string.IsNullOrEmpty(jellyfinMsg)) { <p class="hint">@jellyfinMsg</p> }
 </div>
 
 <div class="panel" style="margin-bottom:1rem;">
@@ -21,6 +23,15 @@
         <button class="ghost" @onclick="CancelBuild">Cancel</button>
     </div>
     @if (schedStatus is not null) { <p class="hint">Status: @schedStatus.Status (@schedStatus.Current/@schedStatus.Total)</p> }
+</div>
+
+<div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head"><h2>Maintenance</h2></div>
+    <p class="hint">One-off jobs you run yourself — these are not on a timer.</p>
+    <div class="actions">
+        <button type="button" class="ghost" @onclick="RebuildPlayouts">Rebuild All Playouts</button>
+    </div>
+    @if (!string.IsNullOrEmpty(maintMsg)) { <p class="hint">@maintMsg</p> }
 </div>
 
 <div class="panel">
@@ -35,6 +46,7 @@
                 <div style="background:#333;border-radius:4px;height:8px;margin-top:.25rem;">
                     <div style="background:var(--accent);height:8px;border-radius:4px;width:@(t.Total > 0 ? (t.Current*100/t.Total) : 0)%"></div>
                 </div>
+                @if (!string.IsNullOrEmpty(t.Detail)) { <p class="hint" style="margin:.25rem 0 0;">@t.Detail</p> }
             </div>
         }
     }
@@ -43,7 +55,8 @@
 @code {
     private List<TaskDto> tasks = new();
     private SchedStatus? schedStatus;
-    private string? maintMsg;
+    private string? maintMsg, jellyfinMsg;
+    private bool syncing;
 
     protected override async Task OnInitializedAsync() => await RefreshTasks();
 
@@ -51,26 +64,66 @@
     {
         try
         {
-            // No task list endpoint yet; placeholder
-            tasks = new();
+            tasks = await Http.GetFromJsonAsync<List<TaskDto>>("api/tasks/running", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
         }
-        catch { }
+        catch { tasks = new(); }
     }
 
-    private async Task RebuildPlayouts()
+    private async Task RunJellyfinSync()
     {
-        var res = await Http.PostAsync("api/playout/generate-all", null);
-        maintMsg = await res.Content.ReadAsStringAsync();
-    }
-
-    private async Task ClearGuide()
-    {
-        // Clear guide for all channels
-        var channels = await Http.GetFromJsonAsync<List<ChannelDto>>("api/channels", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        if (channels is not null)
-            foreach (var ch in channels)
-                await Http.DeleteAsync($"api/guide/{ch.Id}"); // may not exist; ignore errors
-        maintMsg = "Guide cleared.";
+        syncing = true;
+        jellyfinMsg = "Starting sync...";
+        try
+        {
+            // Get all connections
+            var conns = await Http.GetFromJsonAsync<List<ConnDto>>("api/connections", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            foreach (var conn in conns.Where(c => c.Kind == "jellyfin"))
+            {
+                // Parse config
+                Dictionary<string, string> config = new();
+                try { config = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(conn.ConfigJson) ?? new(); } catch { }
+                var url = config.TryGetValue("url", out var u) ? u : "";
+                var apiKey = config.TryGetValue("apiKey", out var k) ? k : "";
+                // Get saved libraries
+                var savedLibs = new List<string>();
+                if (config.TryGetValue("selectedLibraries", out var sl))
+                {
+                    try
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(sl);
+                        if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            savedLibs = doc.RootElement.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                        else if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            using var inner = System.Text.Json.JsonDocument.Parse(doc.RootElement.GetString() ?? "[]");
+                            if (inner.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                savedLibs = inner.RootElement.EnumerateArray().Select(e => e.GetString() ?? "").ToList();
+                        }
+                    }
+                    catch { }
+                }
+                if (savedLibs.Count == 0)
+                {
+                    // Fall back to fetching libraries
+                    try
+                    {
+                        var libs = await Http.GetFromJsonAsync<List<LibDto>>($"api/media/libraries/{conn.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (libs is not null) savedLibs = libs.Select(l => l.Id).ToList();
+                    }
+                    catch { }
+                }
+                if (savedLibs.Count == 0) { jellyfinMsg = $"No libraries configured for {conn.Name}."; continue; }
+                var mediaTypes = new Dictionary<string, string>();
+                foreach (var lib in savedLibs) mediaTypes[lib] = "movie";
+                var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = conn.Id, LibraryIds = savedLibs, MediaTypes = mediaTypes });
+                var body = await res.Content.ReadAsStringAsync();
+                jellyfinMsg = $"{conn.Name}: {body}";
+            }
+            if (conns.Count(c => c.Kind == "jellyfin") == 0) jellyfinMsg = "No Jellyfin connections configured.";
+        }
+        catch (Exception e) { jellyfinMsg = "Error: " + e.Message; }
+        syncing = false;
+        await RefreshTasks();
     }
 
     private async Task BuildSchedule()
@@ -91,7 +144,14 @@
         catch { }
     }
 
-    public class TaskDto { public string Key { get; set; } = ""; public string Title { get; set; } = ""; public string? Label { get; set; } public long Current { get; set; } public long Total { get; set; } }
+    private async Task RebuildPlayouts()
+    {
+        var res = await Http.PostAsync("api/playout/generate-all", null);
+        maintMsg = await res.Content.ReadAsStringAsync();
+    }
+
+    public class TaskDto { public string Key { get; set; } = ""; public string Title { get; set; } = ""; public string? Label { get; set; } public long Current { get; set; } public long Total { get; set; } public string Status { get; set; } = "running"; public string? Detail { get; set; } }
     public class SchedStatus { public string Status { get; set; } = ""; public bool Running { get; set; } public int Current { get; set; } public int Total { get; set; } }
-    public class ChannelDto { public Guid Id { get; set; } public double Number { get; set; } public string Name { get; set; } = ""; }
+    public class ConnDto { public int Id { get; set; } public string Name { get; set; } = ""; public string Kind { get; set; } = ""; public string ConfigJson { get; set; } = ""; }
+    public class LibDto { public string Id { get; set; } = ""; public string Name { get; set; } = ""; }
 }

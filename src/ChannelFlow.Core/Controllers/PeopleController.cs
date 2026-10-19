@@ -105,7 +105,8 @@ public class PeopleController : ControllerBase
         if (file is null || file.Length == 0) return BadRequest("no file");
         var ext = Path.GetExtension(file.FileName);
         var fileName = $"{id}{ext}";
-        var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(_env.ContentRootPath, "images");
+        var localConfigDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "channelflow");
+        var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(localConfigDir, "images");
         Directory.CreateDirectory(imagesDir);
         var dir = imagesDir;
         var path = Path.Combine(dir, fileName);

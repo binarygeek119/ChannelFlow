@@ -7,9 +7,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Database provider selection via connection string. Defaults to SQLite.
 // Check for saved setup config file
+var localConfigDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "channelflow");
 var setupConfigPath = "/config/data/db-config.json";
 if (!File.Exists(setupConfigPath))
-    setupConfigPath = Path.Combine(builder.Environment.ContentRootPath, "data", "db-config.json");
+{
+    Directory.CreateDirectory(localConfigDir);
+    setupConfigPath = Path.Combine(localConfigDir, "db-config.json");
+}
 string? fileProvider = null, fileConnStr = null;
 if (File.Exists(setupConfigPath))
 {
@@ -64,14 +68,14 @@ builder.Services.AddHttpClient("default", client =>
 builder.Services.AddScoped(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("default"));
 builder.Services.AddResponseCaching();
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
-builder.Services.AddSingleton<EfCoreData>(sp => new EfCoreData(sp, Directory.Exists("/config/data") ? "/config/data" : Path.Combine(builder.Environment.ContentRootPath, "data")));
+builder.Services.AddSingleton<EfCoreData>(sp => new EfCoreData(sp, Directory.Exists("/config/data") ? "/config/data" : localConfigDir));
 builder.Services.AddSingleton<ICoreData>(sp => sp.GetRequiredService<EfCoreData>());
 builder.Services.AddScoped<MigrationService>();
 builder.Services.AddHostedService<BuildQueue>();
 builder.Services.AddSingleton<TaskTracker>();
 builder.Services.AddSingleton<PluginManager>(sp => new PluginManager(sp));
 
-builder.Services.AddSingleton<ClientLogsService>(sp => new ClientLogsService(Path.Combine(builder.Environment.ContentRootPath, "data")));
+builder.Services.AddSingleton<ClientLogsService>(sp => new ClientLogsService(localConfigDir));
 var app = builder.Build();
 
 // Auto-create schema on startup (dev; use Migrate in prod).
@@ -106,7 +110,7 @@ app.MapGet("/api/health", () => new { name = "ChannelFlow", status = "ok", versi
 
 app.UseAntiforgery();
 // Serve images (posters, people, uploads)
-var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(builder.Environment.ContentRootPath, "images");
+var imagesDir = Directory.Exists("/config") ? "/config/images" : Path.Combine(localConfigDir, "images");
 Directory.CreateDirectory(imagesDir);
 Directory.CreateDirectory(Path.Combine(imagesDir, "posters"));
 Directory.CreateDirectory(Path.Combine(imagesDir, "people"));

@@ -229,8 +229,8 @@ public class JellyfinMediaSource : IMediaSource
     static string GetImagesDir()
     {
         if (Directory.Exists("/config")) return "/config/images";
-        if (Directory.Exists("/config/data")) return "/config/data/images";
-        return Path.Combine(Directory.GetCurrentDirectory(), "images");
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".config", "channelflow", "images");
     }
 
     static string Sanitize(string s)

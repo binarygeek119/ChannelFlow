@@ -14,7 +14,7 @@ public class EfCoreData : ICoreData
     {
         _sp = sp;
         _dataDir = Directory.Exists("/config/data") ? "/config/data" : dataDir;
-        _imagesRoot = Directory.Exists("/config") ? "/config/images" : Path.Combine(Path.GetDirectoryName(_dataDir)!, "images");
+        _imagesRoot = Directory.Exists("/config") ? "/config/images" : Path.Combine(_dataDir, "images");
         Directory.CreateDirectory(Path.Combine(_dataDir, "lineups"));
         Directory.CreateDirectory(_imagesRoot);
     }

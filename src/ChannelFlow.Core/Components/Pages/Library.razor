@@ -1,5 +1,6 @@
 @using Microsoft.AspNetCore.Components.Web
 @page "/library"
+@rendermode RenderMode.InteractiveServer
 @inject HttpClient Http
 <h2>Library</h2>
 <p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
@@ -49,7 +50,17 @@
         <button class="ghost" @onclick="TestConn" disabled="@testing">@(testing ? "Testing..." : "Test")</button>
         <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
     </div>
-    @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
+    @if (showTestPopup)
+    {
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;" @onclick="() => showTestPopup = false">
+            <div style="background:var(--card-bg,#1b1b1b);color:var(--text,#eee);border:1px solid var(--border,#2a2a2a);padding:1.5rem;border-radius:8px;max-width:400px;width:90%;" @onclick:stopPropagation="true">
+                <h3 style="margin-top:0;">Connection Test</h3>
+                <p style="color:@(testOk ? "var(--ok,#22c55e)" : "var(--danger,#ef4444)");">@testResult</p>
+                <div style="text-align:right;"><button @onclick="() => showTestPopup = false">Close</button></div>
+            </div>
+        </div>
+    }
+    @if (!string.IsNullOrEmpty(testResult) && !showTestPopup) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
     @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
 </div>
 
@@ -69,6 +80,8 @@
     private string syncLibraryId = "";
     private bool syncing, testing;
     private string? syncResult, testResult;
+    private bool showTestPopup;
+    private bool testOk;
     private int mediaCount;
 
     protected override async Task OnInitializedAsync() => await Load();
@@ -99,20 +112,21 @@
         }
         catch { }
     }
-
     private async Task TestConn()
     {
         testing = true;
         testResult = null;
+        showTestPopup = false;
         try
         {
             var res = await Http.PostAsJsonAsync("api/media/test-jellyfin", new { Url = syncUrl, ApiKey = syncApiKey });
             testResult = await res.Content.ReadAsStringAsync();
-            if (res.IsSuccessStatusCode) testResult = "OK: " + testResult;
-            else testResult = "Error: " + testResult;
+            if (res.IsSuccessStatusCode) { testResult = "OK: " + testResult; testOk = true; }
+            else { testResult = "Error: " + testResult; testOk = false; }
         }
-        catch (Exception e) { testResult = "Error: " + e.Message; }
+        catch (Exception e) { testResult = "Error: " + e.Message; testOk = false; }
         testing = false;
+        showTestPopup = true;
     }
 
     private async Task Sync()

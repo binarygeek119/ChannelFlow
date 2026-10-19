@@ -95,7 +95,7 @@ public class NoopTaskHost : IPluginTaskHost
 {
     private readonly TaskTracker? _tracker;
     public NoopTaskHost(TaskTracker? tracker = null) { _tracker = tracker; }
-    public void Report(string k, string t, string? l, long? c, long? tot) { _tracker?.Report(k, t, l, c ?? 0, tot ?? 0); }
+    public void Report(string k, string t, string? l, long? c, long? tot, string? detail = null) { _tracker?.Report(k, t, l, c ?? 0, tot ?? 0, detail); }
 }
 
 // Discovery extension (appended)

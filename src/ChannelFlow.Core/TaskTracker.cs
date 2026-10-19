@@ -8,6 +8,7 @@ public class RunningTask
     public long Current { get; set; }
     public long Total { get; set; }
     public string Status { get; set; } = "running"; // running, done, failed
+    public string? Detail { get; set; }
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? FinishedAt { get; set; }
 }
@@ -17,7 +18,7 @@ public class TaskTracker
     private readonly List<RunningTask> _tasks = new();
     private readonly object _lock = new();
 
-    public void Report(string key, string title, string? label, long current, long total, string status = "running")
+    public void Report(string key, string title, string? label, long current, long total, string status = "running", string? detail = null)
     {
         lock (_lock)
         {
@@ -29,11 +30,12 @@ public class TaskTracker
                 existing.Current = current;
                 existing.Total = total;
                 existing.Status = status;
+                existing.Detail = detail ?? existing.Detail;
                 if (status != "running") existing.FinishedAt = DateTime.UtcNow;
             }
             else
             {
-                _tasks.Add(new RunningTask { Key = key, Title = title, Label = label, Current = current, Total = total, Status = status });
+                _tasks.Add(new RunningTask { Key = key, Title = title, Label = label, Current = current, Total = total, Status = status, Detail = detail });
             }
         }
     }

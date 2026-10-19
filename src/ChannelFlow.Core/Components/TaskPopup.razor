@@ -4,10 +4,12 @@
     {
         <div class="task-popup @(t.Status == "done" ? "status-done fading" : t.Status == "failed" ? "status-fail fading" : "")">
             <div class="task-popup-head">@t.Title</div>
+            @if (!string.IsNullOrEmpty(t.Label)) { <div class="task-popup-status">@t.Label</div> }
             <div class="task-popup-track">
                 <div class="task-popup-bar @(t.Total == 0 ? "indeterminate" : t.Status == "done" ? "done" : t.Status == "failed" ? "fail" : "")" style="width:@(t.Total > 0 ? (t.Current * 100 / t.Total) : 45)%"></div>
             </div>
-            <div class="task-popup-status">@t.Label — @t.Current / @t.Total</div>
+            <div class="task-popup-status">@t.Current / @t.Total</div>
+            @if (!string.IsNullOrEmpty(t.Detail)) { <div class="task-popup-status" style="font-size:.85rem;">@t.Detail</div> }
         </div>
     }
 </div>
@@ -39,5 +41,6 @@
         public long Current { get; set; }
         public long Total { get; set; }
         public string Status { get; set; } = "running";
+        public string? Detail { get; set; }
     }
 }

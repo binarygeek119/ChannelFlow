@@ -21,8 +21,15 @@
                 <button class="inner-tab @(activeRole == r ? "active" : "")" @onclick="() => SwitchRole(r)">@r</button>
             }
         </div>
-        <div class="people-toolbar" style="margin-bottom:1rem;">
+        <div class="people-toolbar" style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
             <input type="search" @bind="filter" @bind:event="oninput" @bind:after="OnFilterChanged" placeholder="Filter people…" style="width:300px;" />
+            <label style="display:flex;align-items:center;gap:.3rem;">
+                Sort by
+                <select @bind="sortMode" @bind:after="StateHasChanged">
+                    <option value="first">First name</option>
+                    <option value="last">Last name</option>
+                </select>
+            </label>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:1rem;">
             <button class="ghost" style="min-width:32px;padding:.2rem .4rem;@(filterLetter == "" ? "background:var(--accent);color:#fff;" : "")" @onclick='() => SetLetter("")'>All</button>
@@ -111,6 +118,7 @@ else
     private string filter = "";
     private string filterLetter = "";
     private string activeRole = "All";
+    private string sortMode = "first";
     private readonly List<string> roles = new() { "All", "Actor", "Director", "Writer", "Producer", "Artist" };
     private bool loading;
     private int peopleTotal;
@@ -174,9 +182,24 @@ else
 
     private void SetLetter(string letter) { filterLetter = letter; }
 
-    private List<PersonDto> FilteredPeople => string.IsNullOrEmpty(filterLetter)
-        ? people
-        : people.Where(p => !string.IsNullOrEmpty(p.Name) && p.Name.StartsWith(filterLetter, StringComparison.OrdinalIgnoreCase)).ToList();
+    private List<PersonDto> FilteredPeople
+    {
+        get
+        {
+            var filtered = string.IsNullOrEmpty(filterLetter)
+                ? people
+                : people.Where(p => !string.IsNullOrEmpty(p.Name) && p.Name.StartsWith(filterLetter, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (sortMode == "last")
+                return filtered.OrderBy(p => LastName(p.Name)).ThenBy(p => p.Name).ToList();
+            return filtered.OrderBy(p => p.Name).ToList();
+        }
+    }
+
+    private static string LastName(string name)
+    {
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 1 ? parts[^1] : parts.Length > 0 ? parts[0] : "";
+    }
 
     private async Task SwitchRole(string role)
     {

@@ -54,22 +54,39 @@ else
             }
             @if (item.Kind == "series")
             {
-                <h3 style="margin-top:1.5rem;">Episodes</h3>
-                @if (episodes.Count == 0) { <p class="hint">No episodes synced yet.</p> }
+                <h3 style="margin-top:1.5rem;">Seasons</h3>
+                @if (seasons.Count == 0) { <p class="hint">No seasons synced yet.</p> }
                 else
                 {
-                    <table style="width:100%;border-collapse:collapse;">
-                        <thead><tr><th>Title</th><th>Year</th></tr></thead>
-                        <tbody>
-                        @foreach (var ep in episodes)
+                    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+                        @foreach (var season in seasons)
                         {
-                            <tr>
-                                <td><a href="/media/item/@Uri.EscapeDataString(ep.MatchKey)" class="link">@ep.Title</a></td>
-                                <td>@ep.Year</td>
-                            </tr>
+                            <button class="ghost @(selectedSeasonId == season.SeasonId ? "active" : "")" @onclick="() => SelectSeason(season)">
+                                @(season.SeasonName ?? $"Season {season.SeasonId}")
+                            </button>
                         }
-                        </tbody>
-                    </table>
+                    </div>
+                }
+
+                @if (selectedSeasonId is not null)
+                {
+                    <h4>Episodes</h4>
+                    @if (FilteredEpisodes.Count == 0) { <p class="hint">No episodes in this season.</p> }
+                    else
+                    {
+                        <table style="width:100%;border-collapse:collapse;">
+                            <thead><tr><th>Title</th><th>Year</th></tr></thead>
+                            <tbody>
+                            @foreach (var ep in FilteredEpisodes)
+                            {
+                                <tr>
+                                    <td><a href="/media/item/@Uri.EscapeDataString(ep.MatchKey)" class="link">@ep.Title</a></td>
+                                    <td>@ep.Year</td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    }
                 }
             }
 
@@ -104,6 +121,8 @@ else
     private MediaItemDto? item;
     private List<CreditDto> credits = new();
     private List<MediaItemDto> episodes = new();
+    private List<MediaItemDto> seasons = new();
+    private string? selectedSeasonId;
     private bool loading = true;
 
     protected override async Task OnInitializedAsync()
@@ -116,14 +135,22 @@ else
             {
                 item = res.Item;
                 credits = res.Credits ?? new();
-                // Load episodes for series
+                // Load episodes and seasons for series
                 if (item is not null && item.Kind == "series")
                 {
                     try
                     {
-                        var cat = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind=episode&limit=500", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        var cat = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind=episode&limit=5000", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                         if (cat is not null)
+                        {
                             episodes = cat.Items.Where(e => e.SeriesName == item.Title || e.SeriesId == item.MatchKey.Replace("jellyfin:", "")).ToList();
+                            // Build seasons list
+                            seasons = episodes
+                                .GroupBy(e => e.SeasonId ?? e.SeasonName ?? "1")
+                                .Select(g => new MediaItemDto { MatchKey = "", Kind = "season", Title = g.First().SeasonName ?? $"Season {g.Key}", SeasonId = g.Key, SeasonName = g.First().SeasonName })
+                                .ToList();
+                            if (seasons.Count > 0) selectedSeasonId = seasons[0].SeasonId;
+                        }
                     }
                     catch { }
                 }
@@ -134,6 +161,8 @@ else
     }
 
     private void Back() => Nav.NavigateTo("/media");
+    private void SelectSeason(MediaItemDto season) => selectedSeasonId = season.SeasonId;
+    private List<MediaItemDto> FilteredEpisodes => episodes.Where(e => (e.SeasonId ?? e.SeasonName ?? "1") == selectedSeasonId).ToList();
 
     private static string Initials(string name) =>
         string.Join("", (name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => w[0].ToString().ToUpper()));
@@ -158,6 +187,8 @@ else
         public string? Overview { get; set; }
         public string? SeriesName { get; set; }
         public string? SeriesId { get; set; }
+        public string? SeasonName { get; set; }
+        public string? SeasonId { get; set; }
         public List<string> Tags { get; set; } = new();
     }
     public class CatalogResponse { public List<MediaItemDto> Items { get; set; } = new(); public int Count { get; set; } }

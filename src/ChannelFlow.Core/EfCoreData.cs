@@ -101,6 +101,8 @@ public class EfCoreData : ICoreData
                     Overview = it.Overview,
                     SeriesName = it.SeriesName,
                     SeriesId = it.SeriesId,
+                    SeasonName = it.SeasonName,
+                    SeasonId = it.SeasonId,
                     ConnectionId = it.ConnectionId,
                     LibraryId = it.LibraryId
                 });
@@ -120,6 +122,8 @@ public class EfCoreData : ICoreData
                 existing.Overview = it.Overview;
                 existing.SeriesName = it.SeriesName;
                 existing.SeriesId = it.SeriesId;
+                existing.SeasonName = it.SeasonName;
+                existing.SeasonId = it.SeasonId;
                 existing.ConnectionId = it.ConnectionId;
                 existing.LibraryId = it.LibraryId;
             }

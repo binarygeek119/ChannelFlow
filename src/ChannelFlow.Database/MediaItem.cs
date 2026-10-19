@@ -8,6 +8,8 @@ public class MediaItem
     public string Title { get; set; } = "";
     public string? SeriesName { get; set; }
     public string? SeriesId { get; set; }
+    public string? SeasonName { get; set; }
+    public string? SeasonId { get; set; }
     public string? Overview { get; set; }
     public int? Year { get; set; }
     public long? RuntimeMs { get; set; }

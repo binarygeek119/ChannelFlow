@@ -230,12 +230,14 @@ else if (activeTab.StartsWith("conn-"))
             if (res.IsSuccessStatusCode)
             {
                 connMsg = "Connection added.";
+                StateHasChanged();
                 newName = ""; newUrl = ""; newApiKey = "";
                 await Load();
             }
             else connMsg = "Error: " + await res.Content.ReadAsStringAsync();
         }
         catch (Exception e) { connMsg = "Error: " + e.Message; }
+        StateHasChanged();
         creating = false;
     }
 

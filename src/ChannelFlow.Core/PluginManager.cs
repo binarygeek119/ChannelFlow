@@ -23,7 +23,7 @@ public class PluginManager
         var api = new PluginApi
         {
             Id = id,
-            Storage = new InMemoryPluginStorage(),
+            Storage = new DbPluginStorage(_services, id),
             Http = new HttpClient(),
             BaseVersion = "3.0.0",
             Dir = Path.GetDirectoryName(dllPath)!,
@@ -99,3 +99,43 @@ public class NoopTaskHost : IPluginTaskHost
 }
 
 // Discovery extension (appended)
+
+// Database-backed plugin storage
+public class DbPluginStorage : IPluginStorage
+{
+    private readonly IServiceProvider _sp;
+    private readonly string _pluginId;
+    public DbPluginStorage(IServiceProvider sp, string pluginId) { _sp = sp; _pluginId = pluginId; }
+
+    private string FullKey(string key) => $"{_pluginId}:{key}";
+
+    public async Task<JsonElement?> GetAsync(string key)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlow.Database.ChannelFlowDbContext>();
+        var s = await db.Settings.FindAsync(FullKey(key));
+        if (s is null || string.IsNullOrEmpty(s.Value)) return null;
+        try { return JsonSerializer.Deserialize<JsonElement>(s.Value); }
+        catch { return null; }
+    }
+
+    public async Task SetAsync(string key, JsonElement value)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlow.Database.ChannelFlowDbContext>();
+        var fk = FullKey(key);
+        var s = await db.Settings.FindAsync(fk);
+        var json = value.GetRawText();
+        if (s is null) db.Settings.Add(new ChannelFlow.Database.AppSetting { Key = fk, Value = json });
+        else s.Value = json;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeleteAsync(string key)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlow.Database.ChannelFlowDbContext>();
+        var s = await db.Settings.FindAsync(FullKey(key));
+        if (s is not null) { db.Settings.Remove(s); await db.SaveChangesAsync(); }
+    }
+}

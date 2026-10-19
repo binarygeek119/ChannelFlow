@@ -18,8 +18,13 @@ public class JellyfinMediaSource : IMediaSource
 
     private static HttpClient Client(string apiKey)
     {
-        var c = new HttpClient();
-        c.DefaultRequestHeaders.Add("X-Emby-Token", apiKey);
+        var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+        };
+        var c = new HttpClient(handler);
+        c.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("MediaBrowser", $"Token=\"{apiKey}\"");
+        c.Timeout = TimeSpan.FromSeconds(30);
         return c;
     }
 
@@ -29,7 +34,9 @@ public class JellyfinMediaSource : IMediaSource
         {
             var url = conn.Config["url"].TrimEnd('/');
             using var c = Client(apiKey);
+            Console.WriteLine($"[jellyfin] headers: {string.Join(", ", c.DefaultRequestHeaders.Select(h => h.Key + "=" + string.Join(" ", h.Value)))}");
             var res = await c.GetAsync(url + "/System/Info");
+            Console.WriteLine($"[jellyfin] response: {(int)res.StatusCode}");
             if (!res.IsSuccessStatusCode) return new TestResult(false, $"HTTP {(int)res.StatusCode}");
             var json = await res.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);

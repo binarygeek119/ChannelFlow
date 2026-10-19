@@ -30,11 +30,11 @@ else
                 <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
                     @if (!string.IsNullOrEmpty(it.PosterUrl))
                     {
-                        <img src="@it.PosterUrl" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" />
+                        <img src="@it.PosterUrl" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/images/poster-placeholder.svg'" />
                     }
                     else
                     {
-                        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">No poster</div>
+                        <img src="/images/poster-placeholder.svg" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" />
                     }
                 </div>
                 @if (!string.IsNullOrEmpty(it.WebUrl))

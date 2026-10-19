@@ -99,7 +99,7 @@ public class JellyfinMediaSource : IMediaSource
                 "movie" => "Movie",
                 _ => "Movie,Series,Episode"
             };
-            var fetchUrl = $"{url}/Items?ParentId={ctx.LibraryId}&Recursive=true&IncludeItemTypes={includeTypes}&Fields=Genres,OfficialRating,RunTimeTicks,ProductionYear,People&Limit=10000";
+            var fetchUrl = $"{url}/Items?ParentId={ctx.LibraryId}&Recursive=true&IncludeItemTypes={includeTypes}&Fields=Genres,OfficialRating,RunTimeTicks,ProductionYear,People,ImageTags&Limit=10000";
             var res = await c.GetAsync(fetchUrl);
             res.EnsureSuccessStatusCode();
             var json = await res.Content.ReadAsStringAsync();
@@ -138,7 +138,9 @@ public class JellyfinMediaSource : IMediaSource
                     string? seriesId = it.TryGetProperty("SeriesId", out var si) ? si.ToString() : null;
                     string? seasonName = it.TryGetProperty("SeasonName", out var sea) ? sea.GetString() : null;
                     string? seasonId = it.TryGetProperty("SeasonId", out var si2) ? si2.ToString() : null;
-                    var posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
+                    string? posterUrl = null;
+                    if (it.TryGetProperty("ImageTags", out var imgTags) && imgTags.ValueKind == JsonValueKind.Object && imgTags.TryGetProperty("Primary", out _))
+                        posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
                     var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
@@ -179,7 +181,14 @@ public class JellyfinMediaSource : IMediaSource
                         var role = person.TryGetProperty("Type", out var pt) ? pt.GetString() ?? "Actor" : "Actor";
                         var character = person.TryGetProperty("Role", out var pr) ? pr.GetString() : null;
                         var personId = person.TryGetProperty("Id", out var pid) ? pid.GetString() : null;
-                        var imagePath = !string.IsNullOrEmpty(personId) ? $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90" : null;
+                        string? imagePath = null;
+                        if (!string.IsNullOrEmpty(personId))
+                        {
+                            bool hasImage = false;
+                            if (person.TryGetProperty("ImageTags", out var pit) && pit.ValueKind == JsonValueKind.Object && pit.TryGetProperty("Primary", out _)) hasImage = true;
+                            else if (person.TryGetProperty("PrimaryImageTag", out var ptag) && ptag.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(ptag.GetString())) hasImage = true;
+                            if (hasImage) imagePath = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
+                        }
                         allPeople.Add(new PersonDto(Guid.Empty, personName, imagePath));
                         credits.Add((personName, role, character, imagePath));
                     }

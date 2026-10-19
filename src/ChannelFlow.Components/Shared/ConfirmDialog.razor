@@ -1,7 +1,7 @@
 @if (Visible)
 {
     <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;">
-        <div style="background:#fff;padding:1.5rem;border-radius:8px;max-width:400px;width:90%;">
+        <div style="background:var(--card-bg, #1b1b1b);color:var(--text, #eee);border:1px solid var(--border, #2a2a2a);padding:1.5rem;border-radius:8px;max-width:400px;width:90%;">
             <p>@Message</p>
             <div style="display:flex;gap:.5rem;justify-content:flex-end;">
                 <button @onclick="OnCancel">Cancel</button>

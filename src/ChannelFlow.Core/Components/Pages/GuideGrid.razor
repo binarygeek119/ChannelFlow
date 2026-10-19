@@ -21,7 +21,7 @@ else
         <table style="border-collapse:collapse;min-width:@(hours*120)px;">
             <thead>
                 <tr>
-                    <th style="position:sticky;left:0;background:#fff;z-index:2;min-width:120px;">Channel</th>
+                    <th style="position:sticky;left:0;background:var(--card-bg,#181818);z-index:2;min-width:120px;">Channel</th>
                     @foreach (var t in timeSlots)
                     {
                         var isNow = t <= DateTime.Now && t.AddMinutes(30) > DateTime.Now;
@@ -59,7 +59,7 @@ else
 
 @if (selectedProgram is not null)
 {
-    <div style="position:fixed;top:20%;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #ccc;border-radius:8px;padding:1.5rem;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:100;max-width:500px;width:90%;">
+    <div style="position:fixed;top:20%;left:50%;transform:translateX(-50%);background:var(--card-bg, #1b1b1b);color:var(--text, #eee);border:1px solid var(--border, #2a2a2a);border-radius:8px;padding:1.5rem;box-shadow:0 4px 20px rgba(0,0,0,.4);z-index:100;max-width:500px;width:90%;">
         <h3 style="margin-top:0;">@selectedProgram.Title</h3>
         <p><strong>Start:</strong> @selectedProgram.Start</p>
         <p><strong>Finish:</strong> @selectedProgram.Finish</p>

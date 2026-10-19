@@ -9,13 +9,13 @@
 @if (showStatusPopup)
 {
     <div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;" @onclick="() => showStatusPopup = false">
-        <div style="background:#fff;padding:1.5rem;border-radius:8px;max-width:500px;width:90%;" @onclick:stopPropagation="true">
+        <div style="background:var(--card-bg, #1b1b1b);color:var(--text, #eee);border:1px solid var(--border, #2a2a2a);padding:1.5rem;border-radius:8px;max-width:500px;width:90%;" @onclick:stopPropagation="true">
             <h3 style="margin-top:0;">Database Status</h3>
             <table style="width:100%;border-collapse:collapse;">
-                <tr><td style="padding:.4rem;font-weight:bold;">Provider</td><td style="padding:.4rem;">@currentProvider</td></tr>
-                <tr><td style="padding:.4rem;font-weight:bold;">Connection</td><td style="padding:.4rem;">@(string.IsNullOrEmpty(currentConnStr) ? "Not configured" : MaskPassword(currentConnStr))</td></tr>
-                <tr><td style="padding:.4rem;font-weight:bold;">Status</td><td style="padding:.4rem;color:@(dbConnected ? "green" : "red");">@(dbConnected ? "Connected" : "Not connected")</td></tr>
-                <tr><td style="padding:.4rem;font-weight:bold;">Tables</td><td style="padding:.4rem;">@tableCount</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Provider</td><td style="padding:.4rem;">@currentProvider</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Connection</td><td style="padding:.4rem;">@(string.IsNullOrEmpty(currentConnStr) ? "Not configured" : MaskPassword(currentConnStr))</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Status</td><td style="padding:.4rem;color:@(dbConnected ? "green" : "red");">@(dbConnected ? "Connected" : "Not connected")</td></tr>
+                <tr><td style="padding:.4rem;font-weight:bold;color:var(--text,#eee);">Tables</td><td style="padding:.4rem;">@tableCount</td></tr>
             </table>
             <div style="margin-top:1rem;text-align:right;">
                 <button @onclick="() => showStatusPopup = false">Close</button>

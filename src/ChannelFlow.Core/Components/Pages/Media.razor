@@ -26,28 +26,28 @@ else
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
         @foreach (var it in FilteredItems)
         {
-            <div class="card jf-card" style="cursor:pointer;position:relative;" title="@it.Title">
-                <div style="position:absolute;inset:0;z-index:1;" @onclick="() => OpenItem(it.MatchKey)"></div>
+            var _it = it;
+            <div class="card jf-card" style="cursor:pointer;position:relative;" title="@_it.Title" @onclick="() => OpenItem(_it.MatchKey)">
                 <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
-                    @if (!string.IsNullOrEmpty(it.PosterUrl))
+                    @if (!string.IsNullOrEmpty(_it.PosterUrl))
                     {
-                        <img src="@it.PosterUrl" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/images/poster-placeholder.svg'" />
+                        <img src="@_it.PosterUrl" alt="@_it.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/images/poster-placeholder.svg'" />
                     }
                     else
                     {
-                        <img src="/images/poster-placeholder.svg" alt="@it.Title" style="width:100%;height:100%;object-fit:cover;" />
+                        <img src="/images/poster-placeholder.svg" alt="@_it.Title" style="width:100%;height:100%;object-fit:cover;" />
                     }
                 </div>
-                @if (!string.IsNullOrEmpty(it.WebUrl))
+                @if (!string.IsNullOrEmpty(_it.WebUrl))
                 {
-                    <a href="@it.WebUrl" target="_blank" rel="noopener" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(225,29,72,.7);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;pointer-events:auto;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0" title="Play on @it.SourceKind">▶</a>
+                    <a href="@_it.WebUrl" target="_blank" rel="noopener" @onclick:stopPropagation="true" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(225,29,72,.7);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;pointer-events:auto;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0" title="Play on @_it.SourceKind">▶</a>
                 }
-                <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@it.Title</div>
-                <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(it.Year?.ToString() ?? it.Kind)</div>
-                @if (!string.IsNullOrEmpty(it.SourceKind))
+                <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@_it.Title</div>
+                <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(_it.Year?.ToString() ?? _it.Kind)</div>
+                @if (!string.IsNullOrEmpty(_it.SourceKind))
                 {
                     <div style="margin-top:.25rem;">
-                        <img src="/logos/@(it.SourceKind.ToLowerInvariant() switch { "jellyfin" => "Jellyfin", "plex" => "Plex", "emby" => "Emby", "local" => "LOCAL", _ => it.SourceKind } + ".png")" alt="@it.SourceKind" style="height:16px;opacity:.7;" onerror="this.style.display='none'" />
+                        <img src="/logos/@(_it.SourceKind.ToLowerInvariant() switch { "jellyfin" => "Jellyfin", "plex" => "Plex", "emby" => "Emby", "local" => "LOCAL", _ => _it.SourceKind } + ".png")" alt="@_it.SourceKind" style="height:16px;opacity:.7;" onerror="this.style.display='none'" />
                     </div>
                 }
             </div>

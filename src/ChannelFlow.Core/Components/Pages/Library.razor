@@ -103,7 +103,8 @@ else if (activeTab.StartsWith("conn-"))
                 </table>
                 <div style="margin-top:1rem;display:flex;gap:.5rem;">
                     <button class="ghost" @onclick="TestConn" disabled="@testing">@(testing ? "Testing..." : "Test Connection")</button>
-                    <button class="primary" @onclick="SyncSelected" disabled="@syncing">@(syncing ? "Syncing..." : "Sync Selected")</button>
+                    <button class="ghost" @onclick="SaveSelected" disabled="@saving">@(saving ? "Saving..." : "Save Selected")</button>
+                <button class="primary" @onclick="SyncSelected" disabled="@syncing">@(syncing ? "Syncing..." : "Sync Selected")</button>
                 </div>
                 @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
                 @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
@@ -117,7 +118,7 @@ else if (activeTab.StartsWith("conn-"))
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
     private List<LibraryDto> libraries = new();
-    private bool loadingLibs, syncing, testing;
+    private bool loadingLibs, syncing, testing, saving;
     private string? syncResult, testResult;
     private int mediaCount;
 
@@ -230,6 +231,27 @@ else if (activeTab.StartsWith("conn-"))
         }
         catch (Exception e) { testResult = "Error: " + e.Message; }
         testing = false;
+    }
+
+    private async Task SaveSelected()
+    {
+        if (selectedConn is null) return;
+        saving = true;
+        try
+        {
+            var selected = libraries.Where(l => l.Selected).Select(l => l.Id).ToList();
+            // Update connection config with selected libraries
+            Dictionary<string, string> config;
+            try { config = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(selectedConn.ConfigJson) ?? new(); }
+            catch { config = new(); }
+            config["selectedLibraries"] = System.Text.Json.JsonSerializer.Serialize(selected);
+            var updatedConfig = System.Text.Json.JsonSerializer.Serialize(config);
+            await Http.PutAsJsonAsync($"api/connections/{selectedConn.Id}", new { Id = selectedConn.Id, Name = selectedConn.Name, Kind = selectedConn.Kind, ConfigJson = updatedConfig });
+            syncResult = $"Saved {selected.Count} selected libraries.";
+            await Load();
+        }
+        catch (Exception e) { syncResult = "Error: " + e.Message; }
+        saving = false;
     }
 
     private async Task SyncSelected()

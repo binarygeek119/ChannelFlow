@@ -1,13 +1,17 @@
-@using Microsoft.AspNetCore.Components.Web
 @page "/library"
-@rendermode RenderMode.InteractiveServer
 @inject HttpClient Http
 <h2>Library</h2>
 <p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
 
 <div class="inner-tabs" style="margin-bottom:1rem;">
     <button class="inner-tab @(activeTab == "connections" ? "active" : "")" @onclick='() => activeTab = "connections"'>Connections</button>
-    <button class="inner-tab @(activeTab == "sync" ? "active" : "")" @onclick='() => activeTab = "sync"'>Sync</button>
+    @if (connections is not null)
+    {
+        @foreach (var c in connections)
+        {
+            <button class="inner-tab @(activeTab == $"conn-{c.Id}" ? "active" : "")" @onclick="() => SelectConnection(c)">@(!string.IsNullOrEmpty(c.Name) ? c.Name : $"Connection {c.Id}")</button>
+        }
+    }
     <button class="inner-tab @(activeTab == "catalog" ? "active" : "")" @onclick='() => activeTab = "catalog"'>Catalog</button>
 </div>
 
@@ -56,41 +60,44 @@
         }
     </div>
 }
-else if (activeTab == "sync")
+else if (activeTab.StartsWith("conn-"))
 {
-    <div class="panel" style="margin-bottom:1rem;">
-        <div class="panel-head">
-            <h2>Sync Libraries</h2>
+    @if (selectedConn is not null)
+    {
+        <div class="panel" style="margin-bottom:1rem;">
+            <div class="panel-head">
+                <h2>@(!string.IsNullOrEmpty(selectedConn.Name) ? selectedConn.Name : $"Connection {selectedConn.Id}")</h2>
+                <span class="count">@libraries.Count libraries</span>
+            </div>
+            <p class="hint">Kind: @selectedConn.Kind</p>
+
+            @if (loadingLibs) { <p>Loading libraries...</p> }
+            else if (libraries.Count == 0) { <p class="empty">No libraries found. Check the connection.</p> }
+            else
+            {
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr><th></th><th>Name</th><th>ID</th><th>Type</th></tr></thead>
+                    <tbody>
+                    @foreach (var lib in libraries)
+                    {
+                        <tr>
+                            <td><input type="checkbox" @bind="lib.Selected" /></td>
+                            <td>@lib.Name</td>
+                            <td><code>@lib.Id</code></td>
+                            <td>@lib.CollectionType</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                <div style="margin-top:1rem;display:flex;gap:.5rem;">
+                    <button class="ghost" @onclick="TestConn" disabled="@testing">@(testing ? "Testing..." : "Test Connection")</button>
+                    <button class="primary" @onclick="SyncSelected" disabled="@syncing">@(syncing ? "Syncing..." : "Sync Selected")</button>
+                </div>
+                @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
+                @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
+            }
         </div>
-        <p class="hint">Sync media from your connections into the catalog.</p>
-
-        @if (connections is not null && connections.Count > 0)
-        {
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">
-                <select @bind="selectedConnId" @bind:after="OnConnChanged">
-                    <option value="0">-- select connection --</option>
-                    @foreach (var c in connections) { <option value="@c.Id">@(!string.IsNullOrEmpty(c.Name) ? c.Name : $"Connection {c.Id}") (@c.Kind)</option> }
-                </select>
-            </div>
-        }
-
-        @if (selectedConn is not null)
-        {
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;">
-                <input @bind="syncUrl" placeholder="Server URL" style="width:250px;" />
-                <input @bind="syncApiKey" placeholder="API Key" style="width:180px;" />
-                <input @bind="syncLibraryId" placeholder="Library Id" style="width:120px;" />
-                <button class="ghost" @onclick="TestConn" disabled="@testing">@(testing ? "Testing..." : "Test")</button>
-                <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
-            </div>
-            @if (!string.IsNullOrEmpty(testResult)) { <p class="field-note" style="color:@(testResult.StartsWith("OK")?"var(--ok)":"var(--danger)")">@testResult</p> }
-        }
-        else
-        {
-            <p class="hint">Select a connection above, or add one in the Connections tab.</p>
-        }
-        @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
-    </div>
+    }
 }
 else if (activeTab == "catalog")
 {
@@ -107,20 +114,23 @@ else if (activeTab == "catalog")
     private string activeTab = "connections";
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
-    private int selectedConnId;
+    private List<LibraryDto> libraries = new();
+    private bool loadingLibs, syncing, testing;
+    private string? syncResult, testResult;
+    private int mediaCount;
+
+    // Connection form
     private string newName = "";
     private string newKind = "jellyfin";
     private string newUrl = "";
     private string newApiKey = "";
-    private string newConfig = "{}";
     private bool creating;
     private string? connMsg;
+
+    // Sync form
     private string syncUrl = "http://localhost:8096";
     private string syncApiKey = "";
     private string syncLibraryId = "";
-    private bool syncing, testing;
-    private string? syncResult, testResult;
-    private int mediaCount;
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -133,6 +143,30 @@ else if (activeTab == "catalog")
             mediaCount = catalog?.Count ?? 0;
         }
         catch { connections = new(); }
+    }
+
+    private async Task SelectConnection(ConnDto c)
+    {
+        selectedConn = c;
+        activeTab = $"conn-{c.Id}";
+        libraries = new();
+        loadingLibs = true;
+        try
+        {
+            var libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/media/libraries/{c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (libs is not null)
+                foreach (var l in libs) { l.Selected = false; libraries.Add(l); }
+            // Set sync URL from connection config
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(c.ConfigJson);
+                if (doc.RootElement.TryGetProperty("url", out var url)) syncUrl = url.GetString() ?? syncUrl;
+                if (doc.RootElement.TryGetProperty("apiKey", out var key)) syncApiKey = key.GetString() ?? syncApiKey;
+            }
+            catch { }
+        }
+        catch { libraries = new(); }
+        loadingLibs = false;
     }
 
     private async Task CreateConnection()
@@ -160,16 +194,8 @@ else if (activeTab == "catalog")
     private async Task DeleteConnection(int id)
     {
         await Http.DeleteAsync($"api/connections/{id}");
-        if (selectedConn?.Id == id) selectedConn = null;
+        if (selectedConn?.Id == id) { selectedConn = null; activeTab = "connections"; }
         await Load();
-    }
-
-    private void OnConnChanged()
-    {
-        if (selectedConnId == 0 || connections is null) { selectedConn = null; return; }
-        selectedConn = connections.FirstOrDefault(x => x.Id == selectedConnId);
-        if (selectedConn is null) return;
-        // Connections and Sync use their own URLs - no auto-population
     }
 
     private async Task TestConn()
@@ -186,14 +212,16 @@ else if (activeTab == "catalog")
         testing = false;
     }
 
-    private async Task Sync()
+    private async Task SyncSelected()
     {
+        if (selectedConn is null) return;
+        var selected = libraries.Where(l => l.Selected).Select(l => l.Id).ToList();
+        if (selected.Count == 0) { syncResult = "No libraries selected."; return; }
         syncing = true;
         syncResult = null;
         try
         {
-            var req = new { Url = syncUrl, ApiKey = syncApiKey, LibraryId = syncLibraryId };
-            var res = await Http.PostAsJsonAsync("api/media/sync-jellyfin", req);
+            var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected });
             syncResult = await res.Content.ReadAsStringAsync();
             await Load();
         }
@@ -202,5 +230,12 @@ else if (activeTab == "catalog")
     }
 
     public record ConnDto(int Id, string Name, string Kind, string ConfigJson);
+    public class LibraryDto
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string CollectionType { get; set; } = "";
+        public bool Selected { get; set; }
+    }
     public class CatalogResponse { public int Count { get; set; } }
 }

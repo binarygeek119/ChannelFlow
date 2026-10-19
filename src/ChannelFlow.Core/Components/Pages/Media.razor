@@ -2,16 +2,6 @@
 @inject HttpClient Http
 <h2>Media</h2>
 
-<div class="panel" style="margin-bottom:1rem;">
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
-        <input @bind="url" placeholder="Jellyfin URL" style="width:300px;" />
-        <input @bind="apiKey" placeholder="API Key" style="width:200px;" />
-        <input @bind="libraryId" placeholder="Library Id" style="width:150px;" />
-        <button class="primary" @onclick="Sync" disabled="@syncing">@(syncing ? "Syncing..." : "Sync")</button>
-    </div>
-    @if (!string.IsNullOrEmpty(syncResult)) { <p class="field-note">@syncResult</p> }
-</div>
-
 <div class="inner-tabs" style="margin-bottom:1rem;">
     @foreach (var tab in tabs)
     {
@@ -83,11 +73,7 @@ else
     }
 }
 @code {
-    private string url = "http://localhost:8096";
-    private string apiKey = "";
-    private string libraryId = "";
-    private bool syncing, loading;
-    private string? syncResult;
+    private bool loading;
     private string activeTab = "Movies";
     private readonly List<string> tabs = new() { "Movies", "TV Shows", "Music", "Music Videos", "News" };
     private List<MediaItem> items = new();
@@ -158,21 +144,6 @@ else
             }
         }
         catch { }
-    }
-
-    private async Task Sync()
-    {
-        syncing = true;
-        syncResult = null;
-        try
-        {
-            var req = new { Url = url, ApiKey = apiKey, LibraryId = libraryId };
-            var res = await Http.PostAsJsonAsync("api/media/sync-jellyfin", req);
-            syncResult = await res.Content.ReadAsStringAsync();
-            await LoadTab();
-        }
-        catch (Exception e) { syncResult = "Error: " + e.Message; }
-        syncing = false;
     }
 
     public class MediaItem

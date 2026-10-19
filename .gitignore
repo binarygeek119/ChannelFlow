@@ -9,3 +9,6 @@ obj/
 node_modules/
 artifacts/
 data/
+images/
+src/ChannelFlow.Core/images/
+data/images/

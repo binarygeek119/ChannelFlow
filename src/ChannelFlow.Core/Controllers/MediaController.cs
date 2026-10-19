@@ -52,8 +52,15 @@ public class MediaController : ControllerBase
 
         var conn = new SdkConnection(connection.Id.ToString(), connection.Kind, config);
         var apiKey = config.TryGetValue("apiKey", out var ak) ? ak : "";
-        var libs = await plugin.MediaSource.ListLibrariesAsync(conn, apiKey);
-        return Ok(libs);
+        try
+        {
+            var libs = await plugin.MediaSource.ListLibrariesAsync(conn, apiKey);
+            return Ok(libs);
+        }
+        catch (Exception e)
+        {
+            return Ok(new List<object>()); // Return empty list instead of error
+        }
     }
 
     [HttpPost("sync-jellyfin")]

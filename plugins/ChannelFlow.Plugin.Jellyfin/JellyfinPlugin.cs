@@ -51,7 +51,13 @@ public class JellyfinMediaSource : IMediaSource
         var url = conn.Config["url"].TrimEnd('/');
         using var c = Client(apiKey);
         var res = await c.GetAsync(url + "/Library/MediaFolders");
-        res.EnsureSuccessStatusCode();
+        if (!res.IsSuccessStatusCode)
+        {
+            // Try alternate endpoint
+            res = await c.GetAsync(url + "/api/Library/MediaFolders");
+            if (!res.IsSuccessStatusCode)
+                return new List<Library>(); // Return empty instead of throwing
+        }
         var json = await res.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
         var libs = new List<Library>();

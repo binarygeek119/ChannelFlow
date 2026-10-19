@@ -1,8 +1,11 @@
+@using Microsoft.JSInterop
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.Web
 @page "/people"
 @rendermode RenderMode.InteractiveServer
 @page "/people/{name}"
 @inject HttpClient Http
+@inject IJSRuntime JS
 @inject NavigationManager Nav
 
 @if (selectedPerson is null)
@@ -42,6 +45,7 @@
         else if (people.Count == 0) { <p class="empty">No people synced yet — run a library scan and the cast appears here.</p> }
         else
         {
+            <div id="people-sentinel" style="height:1px;"></div>
             <div class="people-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:1rem;">
                 @foreach (var p in FilteredPeople)
                 {
@@ -60,6 +64,7 @@
                     </div>
                 }
             </div>
+            <div id="people-sentinel" style="height:1px;"></div>
             @if (people.Count < peopleTotal)
             {
                 <div style="margin-top:1rem;text-align:center;">
@@ -125,7 +130,41 @@ else
     private int peopleOffset;
     private System.Threading.Timer? filterTimer;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    private DotNetObjectReference<People>? dotNetRef;
+
+    protected override async Task OnInitializedAsync() => await Load(true);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("eval", $@"
+                window._peopleObserver = new IntersectionObserver(async (entries) => {{
+                    if (entries[0].isIntersecting) {{
+                        await DotNet.invokeMethodAsync('ChannelFlow.Core', 'PeopleLoadMore');
+                    }}
+                }}, {{ rootMargin: '400px' }});
+                var sentinel = document.getElementById('people-sentinel');
+                if (sentinel) window._peopleObserver.observe(sentinel);
+            ");
+        }
+    }
+
+    [JSInvokable("PeopleLoadMore")]
+    public async Task TriggerLoadMore()
+    {
+        if (people.Count < peopleTotal && !loading)
+        {
+            await Load(false);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        dotNetRef?.Dispose();
+    }
 
     private async Task Load(bool reset = true)
     {

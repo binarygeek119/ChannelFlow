@@ -12,7 +12,6 @@
             <button class="inner-tab @(activeTab == $"conn-{c.Id}" ? "active" : "")" @onclick="() => SelectConnection(c)">@(!string.IsNullOrEmpty(c.Name) ? c.Name : $"Connection {c.Id}")</button>
         }
     }
-    <button class="inner-tab @(activeTab == "catalog" ? "active" : "")" @onclick='() => activeTab = "catalog"'>Catalog</button>
 </div>
 
 @if (activeTab == "connections")
@@ -98,17 +97,6 @@ else if (activeTab.StartsWith("conn-"))
             }
         </div>
     }
-}
-else if (activeTab == "catalog")
-{
-    <div class="panel">
-        <div class="panel-head">
-            <h2>Catalog</h2>
-            <span class="count">@mediaCount items</span>
-        </div>
-        <p class="hint">The items your media sources have synced.</p>
-        <a href="/media" class="link">Browse full catalog →</a>
-    </div>
 }
 @code {
     private string activeTab = "connections";

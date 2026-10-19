@@ -85,7 +85,15 @@ public class JellyfinMediaSource : IMediaSource
         var errors = new List<string>();
         try
         {
-            var fetchUrl = $"{url}/Items?ParentId={ctx.LibraryId}&Recursive=true&IncludeItemTypes=Movie,Series,Episode&Fields=Genres,OfficialRating,RunTimeTicks,ProductionYear&Limit=10000";
+            var includeTypes = ctx.MediaType switch
+            {
+                "album" or "artist" or "track" => "Audio,MusicAlbum,MusicArtist",
+                "musicvideo" => "MusicVideo",
+                "series" => "Series,Episode",
+                "movie" => "Movie",
+                _ => "Movie,Series,Episode"
+            };
+            var fetchUrl = $"{url}/Items?ParentId={ctx.LibraryId}&Recursive=true&IncludeItemTypes={includeTypes}&Fields=Genres,OfficialRating,RunTimeTicks,ProductionYear&Limit=10000";
             var res = await c.GetAsync(fetchUrl);
             res.EnsureSuccessStatusCode();
             var json = await res.Content.ReadAsStringAsync();
@@ -98,12 +106,19 @@ public class JellyfinMediaSource : IMediaSource
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
-                    var kind = ctx.MediaType != "movie" ? ctx.MediaType : (type?.ToLowerInvariant() switch
+                    var kind = ctx.MediaType switch
                     {
-                        "series" => "series",
-                        "episode" => "episode",
-                        _ => "movie"
-                    });
+                        "album" or "artist" or "track" or "musicvideo" or "news" => ctx.MediaType,
+                        _ => (type?.ToLowerInvariant() switch
+                        {
+                            "series" => "series",
+                            "episode" => "episode",
+                            "audio" or "musicalbum" => "album",
+                            "musicartist" => "artist",
+                            "musicvideo" => "musicvideo",
+                            _ => "movie"
+                        })
+                    };
                     int? year = it.TryGetProperty("ProductionYear", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : null;
                     long? runtime = null;
                     if (it.TryGetProperty("RunTimeTicks", out var rt) && rt.ValueKind == JsonValueKind.Number)
@@ -113,6 +128,7 @@ public class JellyfinMediaSource : IMediaSource
                         foreach (var gg in g.EnumerateArray()) if (gg.GetString() is string gs) genres.Add(gs);
                     string? rating = it.TryGetProperty("OfficialRating", out var r) ? r.GetString() : null;
                     var posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
+                    var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
                         Kind: kind,
@@ -124,7 +140,9 @@ public class JellyfinMediaSource : IMediaSource
                         Tags: new List<string>(),
                         ConnectionId: ctx.ConnectionId,
                         LibraryId: ctx.LibraryId,
-                        PosterUrl: posterUrl));
+                        PosterUrl: posterUrl,
+                        WebUrl: webUrl,
+                        SourceKind: "jellyfin"));
                 }
             }
             await ctx.Core.UpsertMediaItemsAsync(items);

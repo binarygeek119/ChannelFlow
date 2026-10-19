@@ -1,0 +1,114 @@
+@page "/media/item/{matchKey}"
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+@if (loading) { <p>Loading...</p> }
+else if (item is null) { <p class="empty">That item isn't in the catalog any more.</p> }
+else
+{
+    <button class="ghost" @onclick="Back">← Back to Media</button>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem;">
+        @if (!string.IsNullOrEmpty(item.PosterUrl))
+        {
+            <img src="@item.PosterUrl" alt="@item.Title" style="max-width:240px;border-radius:8px;align-self:flex-start;" />
+        }
+        else
+        {
+            <div style="width:240px;height:360px;background:var(--card-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);">No poster</div>
+        }
+        <div style="flex:1;min-width:300px;">
+            <h2 style="margin-top:0;">@item.Title</h2>
+            @if (item.Year.HasValue) { <p class="hint">@item.Year</p> }
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+                @if (!string.IsNullOrEmpty(item.OfficialRating)) { <span class="pill off">@item.OfficialRating</span> }
+                @if (item.RuntimeMs.HasValue) { <span class="pill off">@(item.RuntimeMs.Value / 60000) min</span> }
+                <span class="pill off">@item.Kind</span>
+            </div>
+            @if (item.Genres.Count > 0)
+            {
+                <p><strong>Genres:</strong> @string.Join(", ", item.Genres)</p>
+            }
+            @if (item.Tags.Count > 0)
+            {
+                <p><strong>Tags:</strong> @string.Join(", ", item.Tags)</p>
+            }
+            @if (credits.Count > 0)
+            {
+                <h3>Cast & Crew</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:.75rem;">
+                    @foreach (var c in credits)
+                    {
+                        <div style="text-align:center;">
+                            <div style="width:80px;height:80px;margin:0 auto;border-radius:50%;background:var(--card-bg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                                @if (!string.IsNullOrEmpty(c.ImagePath))
+                                {
+                                    <img src="@c.ImagePath" alt="@c.MediaMatchKey" style="width:100%;height:100%;object-fit:cover;" />
+                                }
+                                else
+                                {
+                                    <span style="font-size:1.2rem;font-weight:bold;">@Initials(c.Role)</span>
+                                }
+                            </div>
+                            <div style="margin-top:.25rem;font-size:.8rem;">@c.Role</div>
+                            @if (!string.IsNullOrEmpty(c.Character)) { <div style="font-size:.7rem;color:var(--muted);">@c.Character</div> }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+@code {
+    [Parameter] public string matchKey { get; set; } = "";
+    private MediaItemDto? item;
+    private List<CreditDto> credits = new();
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        loading = true;
+        try
+        {
+            var res = await Http.GetFromJsonAsync<MediaDetail>($"api/media/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (res is not null)
+            {
+                item = res.Item;
+                credits = res.Credits ?? new();
+            }
+        }
+        catch { item = null; }
+        loading = false;
+    }
+
+    private void Back() => Nav.NavigateTo("/media");
+
+    private static string Initials(string name) =>
+        string.Join("", (name ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => w[0].ToString().ToUpper()));
+
+    public class MediaDetail
+    {
+        public MediaItemDto? Item { get; set; }
+        public List<CreditDto> Credits { get; set; } = new();
+    }
+    public class MediaItemDto
+    {
+        public string MatchKey { get; set; } = "";
+        public string Kind { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public long? RuntimeMs { get; set; }
+        public List<string> Genres { get; set; } = new();
+        public string? OfficialRating { get; set; }
+        public string? PosterUrl { get; set; }
+        public List<string> Tags { get; set; } = new();
+    }
+    public class CreditDto
+    {
+        public Guid Id { get; set; }
+        public Guid PersonId { get; set; }
+        public string MediaMatchKey { get; set; } = "";
+        public string Role { get; set; } = "";
+        public string? Character { get; set; }
+        public string? ImagePath { get; set; }
+    }
+}

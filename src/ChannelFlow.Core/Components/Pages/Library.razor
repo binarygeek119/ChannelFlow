@@ -296,7 +296,7 @@ else if (activeTab.StartsWith("conn-"))
     {
         if (selectedConn is null) return;
         var selected = libraries.Where(l => l.Selected).Select(l => l.Id).ToList();
-        if (selected.Count == 0) { syncResult = "No libraries selected."; return; }
+        if (selected.Count == 0) { syncResult = "No libraries selected."; StateHasChanged(); return; }
         syncing = true;
         syncResult = null;
         try
@@ -304,7 +304,9 @@ else if (activeTab.StartsWith("conn-"))
             var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
             var res = await Http.PostAsJsonAsync("api/media/sync-libraries", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
             syncResult = await res.Content.ReadAsStringAsync();
+            StateHasChanged();
             await Load();
+            StateHasChanged();
         }
         catch (Exception e) { syncResult = "Error: " + e.Message; }
         syncing = false;

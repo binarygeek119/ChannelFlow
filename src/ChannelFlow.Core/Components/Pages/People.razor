@@ -45,7 +45,6 @@
         else if (people.Count == 0) { <p class="empty">No people synced yet — run a library scan and the cast appears here.</p> }
         else
         {
-            <div id="people-sentinel" style="height:1px;"></div>
             <div class="people-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:1rem;">
                 @foreach (var p in FilteredPeople)
                 {
@@ -152,7 +151,7 @@ else
         }
     }
 
-    [JSInvokable("PeopleLoadMore")]
+    [JSInvokable("TriggerLoadMore")]
     public async Task TriggerLoadMore()
     {
         if (people.Count < peopleTotal && !loading)

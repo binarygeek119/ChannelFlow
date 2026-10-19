@@ -30,7 +30,7 @@ else
                 </div>
                 @if (!string.IsNullOrEmpty(it.WebUrl))
                 {
-                    <a href="@it.WebUrl" target="_blank" rel="noopener" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.4);" title="Play on @it.SourceKind">▶</a>
+                    <a href="@it.WebUrl" target="_blank" rel="noopener" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(225,29,72,.7);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.2rem;box-shadow:0 2px 8px rgba(0,0,0,.4);opacity:0;transition:opacity .2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0" title="Play on @it.SourceKind">▶</a>
                 }
                 <div class="cardText cardText-first" style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@it.Title</div>
                 <div class="cardText cardText-secondary" style="font-size:.75rem;color:var(--muted);">@(it.Year?.ToString() ?? it.Kind)</div>

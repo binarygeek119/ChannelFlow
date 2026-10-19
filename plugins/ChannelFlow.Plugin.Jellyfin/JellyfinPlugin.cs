@@ -134,6 +134,8 @@ public class JellyfinMediaSource : IMediaSource
                         foreach (var gg in g.EnumerateArray()) if (gg.GetString() is string gs) genres.Add(gs);
                     string? rating = it.TryGetProperty("OfficialRating", out var r) ? r.GetString() : null;
                     string? overview = it.TryGetProperty("Overview", out var ov) ? ov.GetString() : null;
+                    string? seriesName = it.TryGetProperty("SeriesName", out var sn) ? sn.GetString() : null;
+                    string? seriesId = it.TryGetProperty("SeriesId", out var si) ? si.ToString() : null;
                     var posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
                     var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
@@ -150,7 +152,9 @@ public class JellyfinMediaSource : IMediaSource
                         PosterUrl: posterUrl,
                         WebUrl: webUrl,
                         SourceKind: "jellyfin",
-                        Overview: overview));
+                        Overview: overview,
+                        SeriesName: seriesName,
+                        SeriesId: seriesId));
                 }
             }
             await ctx.Core.UpsertMediaItemsAsync(items);

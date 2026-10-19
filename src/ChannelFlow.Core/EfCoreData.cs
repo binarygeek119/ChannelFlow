@@ -99,6 +99,8 @@ public class EfCoreData : ICoreData
                     WebUrl = it.WebUrl,
                     SourceKind = it.SourceKind,
                     Overview = it.Overview,
+                    SeriesName = it.SeriesName,
+                    SeriesId = it.SeriesId,
                     ConnectionId = it.ConnectionId,
                     LibraryId = it.LibraryId
                 });
@@ -116,6 +118,8 @@ public class EfCoreData : ICoreData
                 existing.WebUrl = it.WebUrl;
                 existing.SourceKind = it.SourceKind;
                 existing.Overview = it.Overview;
+                existing.SeriesName = it.SeriesName;
+                existing.SeriesId = it.SeriesId;
                 existing.ConnectionId = it.ConnectionId;
                 existing.LibraryId = it.LibraryId;
             }

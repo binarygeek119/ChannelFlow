@@ -52,6 +52,27 @@ else
             {
                 <p class="hint"><strong>Tags:</strong> @string.Join(", ", item.Tags)</p>
             }
+            @if (item.Kind == "series")
+            {
+                <h3 style="margin-top:1.5rem;">Episodes</h3>
+                @if (episodes.Count == 0) { <p class="hint">No episodes synced yet.</p> }
+                else
+                {
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr><th>Title</th><th>Year</th></tr></thead>
+                        <tbody>
+                        @foreach (var ep in episodes)
+                        {
+                            <tr>
+                                <td><a href="/media/item/@Uri.EscapeDataString(ep.MatchKey)" class="link">@ep.Title</a></td>
+                                <td>@ep.Year</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            }
+
             @if (credits.Count > 0)
             {
                 <h3 style="margin-top:1.5rem;">Cast & Crew</h3>
@@ -82,6 +103,7 @@ else
     [Parameter] public string matchKey { get; set; } = "";
     private MediaItemDto? item;
     private List<CreditDto> credits = new();
+    private List<MediaItemDto> episodes = new();
     private bool loading = true;
 
     protected override async Task OnInitializedAsync()
@@ -94,6 +116,17 @@ else
             {
                 item = res.Item;
                 credits = res.Credits ?? new();
+                // Load episodes for series
+                if (item is not null && item.Kind == "series")
+                {
+                    try
+                    {
+                        var cat = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind=episode&limit=500", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (cat is not null)
+                            episodes = cat.Items.Where(e => e.SeriesName == item.Title || e.SeriesId == item.MatchKey.Replace("jellyfin:", "")).ToList();
+                    }
+                    catch { }
+                }
             }
         }
         catch { item = null; }
@@ -123,8 +156,11 @@ else
         public string? WebUrl { get; set; }
         public string? SourceKind { get; set; }
         public string? Overview { get; set; }
+        public string? SeriesName { get; set; }
+        public string? SeriesId { get; set; }
         public List<string> Tags { get; set; } = new();
     }
+    public class CatalogResponse { public List<MediaItemDto> Items { get; set; } = new(); public int Count { get; set; } }
     public class CreditDto
     {
         public Guid Id { get; set; }

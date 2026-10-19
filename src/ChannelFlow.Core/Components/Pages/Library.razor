@@ -234,6 +234,7 @@ else if (activeTab.StartsWith("conn-"))
                 StateHasChanged();
                 newName = ""; newUrl = ""; newApiKey = "";
                 await Load();
+                StateHasChanged();
             }
             else connMsg = "Error: " + await res.Content.ReadAsStringAsync();
         }

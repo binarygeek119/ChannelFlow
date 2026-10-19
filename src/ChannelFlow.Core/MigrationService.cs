@@ -228,6 +228,9 @@ public class MigrationService
             cmds.Add("ALTER TABLE \"Channels\" ADD COLUMN IF NOT EXISTS \"TranscodeJson\" TEXT NOT NULL DEFAULT '{}'");
             cmds.Add("ALTER TABLE \"Channels\" ADD COLUMN IF NOT EXISTS \"WatermarkJson\" TEXT NOT NULL DEFAULT 'null'");
             cmds.Add("ALTER TABLE \"Connections\" ADD COLUMN IF NOT EXISTS \"Name\" TEXT NOT NULL DEFAULT ''");
+            cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"PosterUrl\" TEXT");
+            cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"WebUrl\" TEXT");
+            cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"SourceKind\" TEXT");
         }
         else if (isMariaDb)
         {

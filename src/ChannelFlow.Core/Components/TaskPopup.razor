@@ -1,3 +1,4 @@
+@implements IDisposable
 @inject HttpClient Http
 <div class="task-popup-wrap">
     @foreach (var t in tasks)
@@ -15,11 +16,23 @@
 </div>
 @code {
     private List<TaskDto> tasks = new();
-    private System.Threading.Timer? timer;
+    private CancellationTokenSource? cts;
 
     protected override void OnInitialized()
     {
-        timer = new System.Threading.Timer(async _ => await Poll(), null, 0, 2000);
+        cts = new CancellationTokenSource();
+        _ = PollLoop(cts.Token);
+    }
+
+    private async Task PollLoop(CancellationToken ct)
+    {
+        // Poll immediately on init
+        await Poll();
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(2000, ct); } catch (TaskCanceledException) { break; }
+            await Poll();
+        }
     }
 
     private async Task Poll()
@@ -31,6 +44,12 @@
             await InvokeAsync(StateHasChanged);
         }
         catch { }
+    }
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
     }
 
     public class TaskDto

@@ -20,7 +20,13 @@ else
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem;">
         @if (!string.IsNullOrEmpty(item.PosterUrl))
         {
-            <img src="@item.PosterUrl" alt="@item.Title" style="max-width:220px;border-radius:8px;align-self:flex-start;box-shadow:0 4px 16px rgba(0,0,0,.4);" />
+            <div style="position:relative;display:inline-block;">
+                <img src="@item.PosterUrl" alt="@item.Title" style="max-width:220px;border-radius:8px;align-self:flex-start;box-shadow:0 4px 16px rgba(0,0,0,.4);" />
+                @if (!string.IsNullOrEmpty(item.WebUrl))
+                {
+                    <a href="@item.WebUrl" target="_blank" rel="noopener" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--accent);color:#fff;border-radius:50%;width:56px;height:56px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:1.5rem;box-shadow:0 2px 8px rgba(0,0,0,.4);" title="Play on @item.SourceKind">▶</a>
+                }
+            </div>
         }
         else
         {

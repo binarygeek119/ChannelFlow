@@ -217,18 +217,39 @@ public class MigrationService
         var fixes = new List<string>();
         using var conn = _db.Database.GetDbConnection();
         await conn.OpenAsync();
-        var cmds = new[]
+        var isPostgres = _db.Database.ProviderName?.Contains("Npgsql") == true;
+        var isMariaDb = _db.Database.ProviderName?.Contains("MySql") == true;
+
+        var cmds = new List<string>();
+        if (isPostgres)
         {
-            "ALTER TABLE Channels ADD COLUMN AiPrompt TEXT NOT NULL DEFAULT ''",
-            "ALTER TABLE Channels ADD COLUMN TranscodeJson TEXT NOT NULL DEFAULT '{}'",
-            "ALTER TABLE Channels ADD COLUMN WatermarkJson TEXT NOT NULL DEFAULT 'null'",
-            "CREATE TABLE IF NOT EXISTS GeneralSettings (Key TEXT PRIMARY KEY, Timezone TEXT NOT NULL, Value TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS Connections (Id INTEGER PRIMARY KEY AUTOINCREMENT, Kind TEXT NOT NULL, ConfigJson TEXT NOT NULL, CreatedAt TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS People (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, ImagePath TEXT, CreatedAt TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS PersonCredits (Id TEXT PRIMARY KEY, PersonId TEXT NOT NULL, MediaMatchKey TEXT NOT NULL, Role TEXT NOT NULL, Character TEXT)",
-            "CREATE TABLE IF NOT EXISTS PluginRepos (Id INTEGER PRIMARY KEY AUTOINCREMENT, Url TEXT NOT NULL, Name TEXT NOT NULL, Enabled INTEGER NOT NULL DEFAULT 1, CreatedAt TEXT NOT NULL)",
-            "CREATE TABLE IF NOT EXISTS InstalledPlugins (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Version TEXT NOT NULL, RepoUrl TEXT NOT NULL, InstallPath TEXT NOT NULL, InstalledAt TEXT NOT NULL)",
-        };
+            // Postgres: tables already exist via EnsureCreated; only add missing columns
+            cmds.Add("ALTER TABLE \"Channels\" ADD COLUMN IF NOT EXISTS \"AiPrompt\" TEXT NOT NULL DEFAULT ''");
+            cmds.Add("ALTER TABLE \"Channels\" ADD COLUMN IF NOT EXISTS \"TranscodeJson\" TEXT NOT NULL DEFAULT '{}'");
+            cmds.Add("ALTER TABLE \"Channels\" ADD COLUMN IF NOT EXISTS \"WatermarkJson\" TEXT NOT NULL DEFAULT 'null'");
+            cmds.Add("ALTER TABLE \"Connections\" ADD COLUMN IF NOT EXISTS \"Name\" TEXT NOT NULL DEFAULT ''");
+        }
+        else if (isMariaDb)
+        {
+            cmds.Add("ALTER TABLE Channels ADD COLUMN IF NOT EXISTS AiPrompt TEXT NOT NULL DEFAULT ''");
+            cmds.Add("ALTER TABLE Channels ADD COLUMN IF NOT EXISTS TranscodeJson TEXT NOT NULL DEFAULT '{}'");
+            cmds.Add("ALTER TABLE Channels ADD COLUMN IF NOT EXISTS WatermarkJson TEXT NOT NULL DEFAULT 'null'");
+            cmds.Add("ALTER TABLE Connections ADD COLUMN IF NOT EXISTS Name TEXT NOT NULL DEFAULT ''");
+        }
+        else
+        {
+            // SQLite
+            cmds.Add("ALTER TABLE Channels ADD COLUMN AiPrompt TEXT NOT NULL DEFAULT ''");
+            cmds.Add("ALTER TABLE Channels ADD COLUMN TranscodeJson TEXT NOT NULL DEFAULT '{}'");
+            cmds.Add("ALTER TABLE Channels ADD COLUMN WatermarkJson TEXT NOT NULL DEFAULT 'null'");
+            cmds.Add("CREATE TABLE IF NOT EXISTS GeneralSettings (Key TEXT PRIMARY KEY, Timezone TEXT NOT NULL, Value TEXT NOT NULL)");
+            cmds.Add("CREATE TABLE IF NOT EXISTS Connections (Id INTEGER PRIMARY KEY AUTOINCREMENT, Name TEXT NOT NULL DEFAULT '', Kind TEXT NOT NULL, ConfigJson TEXT NOT NULL, CreatedAt TEXT NOT NULL)");
+            cmds.Add("ALTER TABLE Connections ADD COLUMN Name TEXT NOT NULL DEFAULT ''");
+            cmds.Add("CREATE TABLE IF NOT EXISTS People (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, ImagePath TEXT, CreatedAt TEXT NOT NULL)");
+            cmds.Add("CREATE TABLE IF NOT EXISTS PersonCredits (Id TEXT PRIMARY KEY, PersonId TEXT NOT NULL, MediaMatchKey TEXT NOT NULL, Role TEXT NOT NULL, Character TEXT)");
+            cmds.Add("CREATE TABLE IF NOT EXISTS PluginRepos (Id INTEGER PRIMARY KEY AUTOINCREMENT, Url TEXT NOT NULL, Name TEXT NOT NULL, Enabled INTEGER NOT NULL DEFAULT 1, CreatedAt TEXT NOT NULL)");
+            cmds.Add("CREATE TABLE IF NOT EXISTS InstalledPlugins (Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Version TEXT NOT NULL, RepoUrl TEXT NOT NULL, InstallPath TEXT NOT NULL, InstalledAt TEXT NOT NULL)");
+        }
         foreach (var cmd in cmds)
         {
             try

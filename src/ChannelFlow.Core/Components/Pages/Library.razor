@@ -1,5 +1,7 @@
 @page "/library"
+@page "/library/{connId:int}"
 @inject HttpClient Http
+@inject NavigationManager Nav
 <h2>Library</h2>
 <p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
 
@@ -99,6 +101,7 @@ else if (activeTab.StartsWith("conn-"))
     }
 }
 @code {
+    [Parameter] public int? connId { get; set; }
     private string activeTab = "connections";
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
@@ -120,7 +123,15 @@ else if (activeTab.StartsWith("conn-"))
     private string syncApiKey = "";
     private string syncLibraryId = "";
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        if (connId.HasValue && connections is not null)
+        {
+            var c = connections.FirstOrDefault(x => x.Id == connId.Value);
+            if (c is not null) await SelectConnection(c);
+        }
+    }
 
     private async Task Load()
     {
@@ -137,6 +148,7 @@ else if (activeTab.StartsWith("conn-"))
     {
         selectedConn = c;
         activeTab = $"conn-{c.Id}";
+        Nav.NavigateTo($"/library/{c.Id}", false);
         libraries = new();
         loadingLibs = true;
         try

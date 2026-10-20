@@ -110,11 +110,11 @@ else
             @if (collectionMovies.Count > 0)
             {
                 <h3 style="margin-top:1.5rem;">Movies in this Collection (@collectionMovies.Count)</h3>
-                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
                     @foreach (var cm in collectionMovies)
                     {
-                        <a href="/media/item/@Uri.EscapeDataString(cm.MatchKey)" style="text-align:center;text-decoration:none;color:inherit;display:block;">
-                            <div style="height:120px;background:var(--card-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem;overflow:hidden;">
+                        <a href="/media/item/@Uri.EscapeDataString(cm.MatchKey)" style="text-decoration:none;color:inherit;display:block;">
+                            <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
                                 @if (!string.IsNullOrEmpty(cm.PosterUrl))
                                 {
                                     <img src="@cm.PosterUrl" alt="@cm.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/images/poster-placeholder.svg'" />
@@ -124,7 +124,7 @@ else
                                     <img src="/images/poster-placeholder.svg" alt="@cm.Title" style="width:100%;height:100%;object-fit:cover;" />
                                 }
                             </div>
-                            <div style="font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@cm.Title</div>
+                            <div style="font-size:.9rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@cm.Title</div>
                             @if (cm.Year.HasValue) { <div style="font-size:.75rem;color:var(--muted);">@cm.Year</div> }
                         </a>
                     }

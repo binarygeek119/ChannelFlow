@@ -97,14 +97,21 @@ else if (activeTab.StartsWith("conn-"))
                             <td>@lib.Name</td>
                             <td><code>@lib.Id</code></td>
                             <td>
-                                <select @bind="lib.MediaTypeStr">
-                                    <option value="movie">Movie</option>
-                                    <option value="series">TV Show</option>
-                                    <option value="album">Music (Album)</option>
-                                    <option value="artist">Music (Artist)</option>
-                                    <option value="musicvideo">Music Video</option>
-                                    <option value="news">News</option>
-                                </select>
+                                @if (selectedConn?.Kind == "pasttense")
+                                {
+                                    <span class="pill off">News</span>
+                                }
+                                else
+                                {
+                                    <select @bind="lib.MediaTypeStr">
+                                        <option value="movie">Movie</option>
+                                        <option value="series">TV Show</option>
+                                        <option value="album">Music (Album)</option>
+                                        <option value="artist">Music (Artist)</option>
+                                        <option value="musicvideo">Music Video</option>
+                                        <option value="news">News</option>
+                                    </select>
+                                }
                             </td>
                         </tr>
                     }

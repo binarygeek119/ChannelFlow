@@ -110,6 +110,7 @@ public class JellyfinMediaSource : IMediaSource
                 "album" or "artist" or "track" => "Audio,MusicAlbum,MusicArtist",
                 "musicvideo" => "MusicVideo",
                 "series" => "Series,Episode",
+                "news" => "Series,Episode",
                 "movie" => "Movie",
                 _ => "Movie,Series,Episode"
             };
@@ -134,20 +135,27 @@ public class JellyfinMediaSource : IMediaSource
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
-                    var kind = type?.ToLowerInvariant() switch
-                    {
-                        "audio" => "track",
-                        "musicalbum" => "album",
-                        "musicartist" => "artist",
-                        "series" => "series",
-                        "episode" => "episode",
-                        "musicvideo" => "musicvideo",
-                        _ => ctx.MediaType switch
+                    var kind = ctx.MediaType == "news"
+                        ? (type?.ToLowerInvariant() switch
                         {
-                            "album" or "artist" or "track" or "musicvideo" or "news" => ctx.MediaType,
-                            _ => "movie"
-                        }
-                    };
+                            "series" => "news",
+                            "episode" => "episode",
+                            _ => "news"
+                        })
+                        : (type?.ToLowerInvariant() switch
+                        {
+                            "audio" => "track",
+                            "musicalbum" => "album",
+                            "musicartist" => "artist",
+                            "series" => "series",
+                            "episode" => "episode",
+                            "musicvideo" => "musicvideo",
+                            _ => ctx.MediaType switch
+                            {
+                                "album" or "artist" or "track" or "musicvideo" => ctx.MediaType,
+                                _ => "movie"
+                            }
+                        });
                         {
                             "series" => "series",
                             "episode" => "episode",

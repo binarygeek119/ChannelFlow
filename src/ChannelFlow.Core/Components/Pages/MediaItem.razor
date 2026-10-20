@@ -69,6 +69,37 @@ else
             {
                 <p class="hint"><strong>Tags:</strong> @string.Join(", ", item.Tags)</p>
             }
+            @if (item.Kind == "news")
+            {
+                <h3 style="margin-top:1.5rem;">Videos</h3>
+                @if (episodes.Count == 0) { <p class="hint">No videos.</p> }
+                else
+                {
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr><th style="width:120px;">Thumbnail</th><th>Title</th><th>Year</th></tr></thead>
+                        <tbody>
+                        @foreach (var v in episodes)
+                        {
+                            <tr>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(v.PosterUrl))
+                                    {
+                                        <img src="@v.PosterUrl" alt="@v.Title" style="width:120px;height:68px;object-fit:cover;border-radius:4px;" onerror="this.src='/images/poster-placeholder.svg'" />
+                                    }
+                                    else
+                                    {
+                                        <img src="/images/poster-placeholder.svg" alt="@v.Title" style="width:120px;height:68px;object-fit:cover;border-radius:4px;" />
+                                    }
+                                </td>
+                                <td><a href="/media/item/@Uri.EscapeDataString(v.MatchKey)" class="link">@v.Title</a></td>
+                                <td>@v.Year</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            }
+
             @if (item.Kind == "series")
             {
                 <h3 style="margin-top:1.5rem;">Seasons</h3>
@@ -256,8 +287,8 @@ else
                     }
                     catch { }
                 }
-                // Load episodes and seasons for series
-                if (item is not null && item.Kind == "series")
+                // Load episodes/videos for series or news
+                if (item is not null && (item.Kind == "series" || item.Kind == "news"))
                 {
                     try
                     {

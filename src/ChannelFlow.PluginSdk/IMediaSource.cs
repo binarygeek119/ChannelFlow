@@ -12,6 +12,7 @@ public interface IMediaSource
     Task<SyncReport> SyncLibraryAsync(SyncContext Context);
     Task<SyncReport> DownloadPostersAsync(SyncContext Context);
     Task<SyncReport> DownloadPeopleImagesAsync(SyncContext Context);
+    Task<SyncReport> ExtractThumbnailsAsync(SyncContext Context) => Task.FromResult(new SyncReport(0, 0, 0));
 }
 
 public record FieldSpec(string Kind, string Name, string Label, bool Required = false, string? Default = null)

@@ -110,6 +110,140 @@ public class PastTenseMediaSource : IMediaSource
     public Task<SyncReport> DownloadPostersAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
     public Task<SyncReport> DownloadPeopleImagesAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
 
+    public async Task<SyncReport> ExtractThumbnailsAsync(SyncContext ctx)
+    {
+        int done = 0;
+        var errors = new List<string>();
+        try
+        {
+            var all = await ctx.Core.GetAllMediaItemsAsync(ctx.ConnectionId);
+            var videos = all.Where(m => m.Kind == "episode" && m.SourceKind == "pasttense" && !string.IsNullOrEmpty(m.WebUrl)).ToList();
+            var imagesDir = GetImagesDir();
+            Directory.CreateDirectory(Path.Combine(imagesDir, "thumbnails"));
+            foreach (var v in videos)
+            {
+                try
+                {
+                    var videoPath = v.WebUrl!;
+                    if (!File.Exists(videoPath)) continue;
+                    // Get duration
+                    var dur = GetDuration(videoPath);
+                    if (dur <= 0) continue;
+                    // Try timestamps at 10%, 15%, 20%, 25%, 30%
+                    var timestamps = new[] { 0.10, 0.15, 0.20, 0.25, 0.30 }
+                        .Select(p => dur * p).ToList();
+                    string? chosenPath = null;
+                    foreach (var ts in timestamps)
+                    {
+                        var tmpPath = Path.Combine(Path.GetTempPath(), $"thumb_{Guid.NewGuid()}.jpg");
+                        var ok = await ExtractFrameAsync(videoPath, ts, tmpPath);
+                        if (!ok || !File.Exists(tmpPath)) continue;
+                        // Check not black or white
+                        if (IsBlackOrWhite(tmpPath)) { File.Delete(tmpPath); continue; }
+                        // Save as thumbnail
+                        var safeId = Sanitize(v.MatchKey);
+                        var destPath = Path.Combine(imagesDir, "thumbnails", $"{safeId}.jpg");
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                        File.Copy(tmpPath, destPath, true);
+                        File.Delete(tmpPath);
+                        chosenPath = $"/images/thumbnails/{safeId}.jpg";
+                        break;
+                    }
+                    if (chosenPath is not null)
+                    {
+                        // Update the media item's PosterUrl
+                        var updated = v with { PosterUrl = chosenPath };
+                        await ctx.Core.UpsertMediaItemsAsync(new List<MediaItemDto> { updated });
+                        done++;
+                    }
+                }
+                catch (Exception e) { errors.Add($"{v.Title}: {e.Message}"); }
+            }
+        }
+        catch (Exception e) { errors.Add(e.Message); }
+        return new SyncReport(done, 0, 0, errors);
+    }
+
+    private static double GetDuration(string videoPath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffprobe", $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return 0;
+            var output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(10000);
+            if (double.TryParse(output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dur))
+                return dur;
+        }
+        catch { }
+        return 0;
+    }
+
+    private static async Task<bool> ExtractFrameAsync(string videoPath, double timestamp, string outputPath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg", $"-ss {timestamp.ToString(System.Globalization.CultureInfo.InvariantCulture)} -i \"{videoPath}\" -vframes 1 -q:v 2 \"{outputPath}\" -y")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0 && File.Exists(outputPath);
+        }
+        catch { return false; }
+    }
+
+    private static bool IsBlackOrWhite(string imagePath)
+    {
+        try
+        {
+            // Use ImageMagick to get mean brightness (0-1)
+            var psi = new System.Diagnostics.ProcessStartInfo("magick", $"\"{imagePath}\" -format \"%[fx:mean]\" info:")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            if (p is null) return false;
+            var output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(5000);
+            if (double.TryParse(output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var mean))
+            {
+                // Pure black: mean < 0.05, pure white: mean > 0.95
+                return mean < 0.05 || mean > 0.95;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static string GetImagesDir()
+    {
+        if (Directory.Exists("/config")) return "/config/images";
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".config", "channelflow", "images");
+    }
+
+    private static string Sanitize(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+        return s.Replace(" ", "_");
+    }
+
     private static bool IsMediaFile(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();

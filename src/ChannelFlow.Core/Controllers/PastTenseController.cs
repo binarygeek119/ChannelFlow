@@ -71,6 +71,27 @@ public class PastTenseController : ControllerBase
         _tasks.Report(taskKey, "Past Tense Sync", "Done", report.ItemsAdded, Math.Max(1, report.ItemsAdded), report.Errors.Count > 0 ? "failed" : "done", string.Join("; ", report.Errors));
         return Ok(report);
     }
+
+    [HttpPost("thumbnails")]
+    public async Task<IActionResult> Thumbnails([FromBody] PastTenseSyncRequest req)
+    {
+        var connection = await _db.Connections.FindAsync(req.ConnectionId);
+        if (connection is null) return NotFound();
+        Dictionary<string, string> config;
+        try { config = JsonSerializer.Deserialize<Dictionary<string, string>>(connection.ConfigJson) ?? new(); }
+        catch { config = new(); }
+        var plugin = _pm.Get("com.channelflow.pasttense");
+        if (plugin?.MediaSource is null) return BadRequest("plugin not loaded");
+        var conn = new SdkConnection(connection.Id.ToString(), connection.Kind, config);
+        var apiKey = config.TryGetValue("apiKey", out var ak) ? ak : "";
+        var path = config.TryGetValue("path", out var p) ? p : "";
+        var taskKey = $"pasttense.thumbs.{connection.Id}";
+        _tasks.Report(taskKey, "Past Tense Thumbnails", "Starting", 0, 1, "running");
+        var ctx = new SyncContext(connection.Id.ToString(), path, _storage, _logger, _core, apiKey, conn, "news");
+        var report = await plugin.MediaSource.ExtractThumbnailsAsync(ctx);
+        _tasks.Report(taskKey, "Past Tense Thumbnails", "Done", report.ItemsAdded, Math.Max(1, report.ItemsAdded), report.Errors.Count > 0 ? "failed" : "done", string.Join("; ", report.Errors));
+        return Ok(report);
+    }
 }
 
 public record PastTenseSyncRequest(int ConnectionId, string? LibraryId = null);

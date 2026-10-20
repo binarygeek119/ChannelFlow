@@ -16,6 +16,15 @@
 </div>
 
 <div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head"><h2>Past Tense News Thumbnails</h2></div>
+    <p class="hint">Extract thumbnails from news videos (10-30% into video, skipping black/white frames). Runs daily or on demand.</p>
+    <div class="ms-form-actions">
+        <button type="button" class="primary" @onclick="RunPastTenseThumbs" disabled="@thumbsSyncing">@(thumbsSyncing ? "Extracting..." : "Run now")</button>
+    </div>
+    @if (!string.IsNullOrEmpty(thumbsMsg)) { <p class="hint">@thumbsMsg</p> }
+</div>
+
+<div class="panel" style="margin-bottom:1rem;">
     <div class="panel-head"><h2>Scheduler</h2></div>
     <p class="hint">Build the channel guide and lineups.</p>
     <div class="actions">
@@ -55,8 +64,8 @@
 @code {
     private List<TaskDto> tasks = new();
     private SchedStatus? schedStatus;
-    private string? maintMsg, jellyfinMsg;
-    private bool syncing;
+    private string? maintMsg, jellyfinMsg, thumbsMsg;
+    private bool syncing, thumbsSyncing;
 
     protected override async Task OnInitializedAsync() => await RefreshTasks();
 
@@ -123,6 +132,26 @@
         }
         catch (Exception e) { jellyfinMsg = "Error: " + e.Message; }
         syncing = false;
+        await RefreshTasks();
+    }
+
+    private async Task RunPastTenseThumbs()
+    {
+        thumbsSyncing = true;
+        thumbsMsg = "Starting...";
+        try
+        {
+            var conns = await Http.GetFromJsonAsync<List<ConnDto>>("api/connections", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            foreach (var conn in conns.Where(c => c.Kind == "pasttense"))
+            {
+                var res = await Http.PostAsJsonAsync("api/pasttense/thumbnails", new { ConnectionId = conn.Id });
+                var body = await res.Content.ReadAsStringAsync();
+                thumbsMsg = $"{conn.Name}: {body}";
+            }
+            if (conns.Count(c => c.Kind == "pasttense") == 0) thumbsMsg = "No Past Tense connections configured.";
+        }
+        catch (Exception e) { thumbsMsg = "Error: " + e.Message; }
+        thumbsSyncing = false;
         await RefreshTasks();
     }
 

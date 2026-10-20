@@ -18,13 +18,38 @@
     }
 </div>
 
-<!-- A-Z quick jump bar -->
-<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:1rem;">
+<!-- A-Z quick jump bar + filter hamburger -->
+<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:1rem;align-items:center;">
     <button class="ghost" style="min-width:32px;padding:.2rem .4rem;@(filterLetter == "" ? "background:var(--accent);color:#fff;" : "")" @onclick='() => SetFilter("")'>All</button>
     @foreach (var letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray())
     {
         <button class="ghost" style="min-width:32px;padding:.2rem .4rem;@(filterLetter == letter.ToString() ? "background:var(--accent);color:#fff;" : "")" @onclick="() => SetFilter(letter.ToString())">@letter</button>
     }
+    <div style="position:relative;margin-left:auto;">
+        <button class="ghost" style="padding:.2rem .6rem;font-size:1.1rem;" @onclick="() => ToggleFilterMenu()" title="Filters">≡</button>
+        @if (showFilterMenu)
+        {
+            <div style="position:absolute;right:0;top:100%;margin-top:.25rem;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;min-width:220px;z-index:100;box-shadow:0 4px 16px rgba(0,0,0,.4);">
+                <div style="margin-bottom:.5rem;font-weight:600;font-size:.85rem;">Sort by</div>
+                <select @bind="sortBy" @bind:after="StateHasChanged" style="width:100%;margin-bottom:.75rem;">
+                    <option value="name">Name (A-Z)</option>
+                    <option value="name-desc">Name (Z-A)</option>
+                    <option value="year">Year (newest)</option>
+                    <option value="year-asc">Year (oldest)</option>
+                </select>
+                <div style="margin-bottom:.5rem;font-weight:600;font-size:.85rem;">Filter by genre</div>
+                <div style="max-height:150px;overflow-y:auto;margin-bottom:.75rem;">
+                    @foreach (var g in AvailableGenres)
+                    {
+                        <label style="display:block;font-size:.85rem;margin:.15rem 0;">
+                            <input type="checkbox" checked="@selectedGenres.Contains(g)" @onchange="() => ToggleGenre(g)" /> @g
+                        </label>
+                    }
+                </div>
+                <button class="ghost" style="width:100%;" @onclick="ClearFilters">Clear filters</button>
+            </div>
+        }
+    </div>
 </div>
 
 @if (loading) { <p>Loading...</p> }
@@ -73,6 +98,10 @@ else
     private bool loading;
     private DotNetObjectReference<Media>? dotNetRef;
     private string activeTab = "Movies";
+    private bool showFilterMenu = false;
+    private string sortBy = "name";
+    private HashSet<string> selectedGenres = new();
+    private List<string> AvailableGenres => items.SelectMany(i => i.Genres ?? new()).Distinct().OrderBy(g => g).ToList();
     private readonly List<string> tabs = new() { "Movies", "TV Shows", "Music", "Music Videos", "News" };
     private List<MediaItem> items = new();
     private int totalCount;
@@ -170,9 +199,41 @@ else
         filterLetter = letter;
     }
 
-    private List<MediaItem> FilteredItems => string.IsNullOrEmpty(filterLetter)
-        ? items
-        : items.Where(i => !string.IsNullOrEmpty(i.Title) && i.Title.StartsWith(filterLetter, StringComparison.OrdinalIgnoreCase)).ToList();
+    private void ToggleFilterMenu() => showFilterMenu = !showFilterMenu;
+
+    private void ToggleGenre(string genre)
+    {
+        if (selectedGenres.Contains(genre)) selectedGenres.Remove(genre);
+        else selectedGenres.Add(genre);
+    }
+
+    private void ClearFilters()
+    {
+        selectedGenres.Clear();
+        sortBy = "name";
+        filterLetter = "";
+    }
+
+    private List<MediaItem> FilteredItems
+    {
+        get
+        {
+            var q = string.IsNullOrEmpty(filterLetter)
+                ? items.AsEnumerable()
+                : items.Where(i => !string.IsNullOrEmpty(i.Title) && i.Title.StartsWith(filterLetter, StringComparison.OrdinalIgnoreCase));
+            if (selectedGenres.Count > 0)
+                q = q.Where(i => (i.Genres ?? new()).Any(g => selectedGenres.Contains(g)));
+            q = sortBy switch
+            {
+                "name" => q.OrderBy(i => i.Title),
+                "name-desc" => q.OrderByDescending(i => i.Title),
+                "year" => q.OrderByDescending(i => i.Year ?? 0),
+                "year-asc" => q.OrderBy(i => i.Year ?? 0),
+                _ => q.OrderBy(i => i.Title)
+            };
+            return q.ToList();
+        }
+    }
 
     private async Task LoadMore()
     {

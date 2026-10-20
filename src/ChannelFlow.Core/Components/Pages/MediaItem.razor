@@ -201,7 +201,7 @@ else
                         var epRes = await Http.GetFromJsonAsync<EpisodesResponse>($"api/media/episodes/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                         if (epRes is not null && epRes.Items is not null)
                         {
-                            foreach (var e in epRes.Items)
+                            foreach (var e in epRes.Items.OrderBy(e => e.Title))
                             {
                                 episodes.Add(new MediaItemDto { MatchKey = e.MatchKey, Title = e.Title, Year = e.Year, PosterUrl = e.PosterUrl, SeasonId = e.SeasonId, SeasonName = e.SeasonName });
                             }

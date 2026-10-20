@@ -90,7 +90,7 @@ public class EfCoreData : ICoreData
             var kinds = filter.Kinds.Select(k => k.ToLowerInvariant()).ToList();
             q = q.Where(m => kinds.Contains(m.Kind.ToLower()));
         }
-        q = q.OrderBy(m => m.Title);
+        q = q.OrderBy(m => m.Title.ToLower());
         if (filter.Limit is > 0) q = q.Take(filter.Limit.Value);
         var rows = await q.ToListAsync();
         // in-memory genre/tag filtering (case-insensitive substring)

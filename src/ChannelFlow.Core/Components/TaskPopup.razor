@@ -1,4 +1,5 @@
 @implements IDisposable
+@rendermode RenderMode.InteractiveServer
 @inject HttpClient Http
 <div class="task-popup-wrap">
     @foreach (var t in tasks)
@@ -30,7 +31,7 @@
         await Poll();
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(2000, ct); } catch (TaskCanceledException) { break; }
+            try { await Task.Delay(1000, ct); } catch (TaskCanceledException) { break; }
             await Poll();
         }
     }
@@ -41,7 +42,7 @@
         {
             var running = await Http.GetFromJsonAsync<List<TaskDto>>("api/tasks/running", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             tasks = running ?? new();
-            await InvokeAsync(StateHasChanged);
+            try { await InvokeAsync(StateHasChanged); } catch { StateHasChanged(); }
         }
         catch { }
     }

@@ -309,6 +309,49 @@ public class JellyfinMediaSource : IMediaSource
                     catch { }
                 }
             }
+            // Fetch season posters for series
+            if (!string.IsNullOrEmpty(userId))
+            {
+                foreach (var it in items.Where(i => i.Kind == "series").ToList())
+                {
+                    var sid = it.MatchKey.StartsWith("jellyfin:") ? it.MatchKey.Substring("jellyfin:".Length) : null;
+                    if (string.IsNullOrEmpty(sid)) continue;
+                    var posters = new Dictionary<string, string>();
+                    try
+                    {
+                        var sres = await c.GetAsync($"{url}/Users/{userId}/Items?ParentId={sid}&IncludeItemTypes=Season&Fields=ImageTags");
+                        if (sres.IsSuccessStatusCode)
+                        {
+                            var sjson = await sres.Content.ReadAsStringAsync();
+                            using var sdoc = JsonDocument.Parse(sjson);
+                            if (sdoc.RootElement.TryGetProperty("Items", out var sitems))
+                            {
+                                foreach (var si in sitems.EnumerateArray())
+                                {
+                                    var seasonId = si.TryGetProperty("Id", out var sip) ? sip.GetString() : null;
+                                    if (string.IsNullOrEmpty(seasonId)) continue;
+                                    if (si.TryGetProperty("ImageTags", out var sit) && sit.ValueKind == JsonValueKind.Object && sit.TryGetProperty("Primary", out _))
+                                    {
+                                        var srcUrl = $"{url}/Items/{seasonId}/Images/Primary?maxHeight=300&quality=90";
+                                        var destPath = Path.Combine(GetImagesDir(), "seasons", $"{Sanitize(sid)}_{Sanitize(seasonId)}.jpg");
+                                        var local = await DownloadImageAsync(c, srcUrl, destPath, "/images/seasons");
+                                        if (local is not null) posters[seasonId] = local;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                    if (posters.Count > 0)
+                    {
+                        var idx = items.FindIndex(x => x.MatchKey == it.MatchKey);
+                        if (idx >= 0)
+                        {
+                            items[idx] = items[idx] with { SeasonPosters = posters };
+                        }
+                    }
+                }
+            }
             await ctx.Core.UpsertMediaItemsAsync(items);
             added = items.Count;
         }

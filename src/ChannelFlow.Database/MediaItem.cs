@@ -20,6 +20,7 @@ public class MediaItem
     public string? SourceKind { get; set; }
     public List<string> Tags { get; set; } = new();
     public List<string> CollectionItems { get; set; } = new();
+    public Dictionary<string, string> SeasonPosters { get; set; } = new();
     public string? ConnectionId { get; set; }
     public string? LibraryId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

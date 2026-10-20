@@ -51,7 +51,7 @@ public record CoreChannel(string Id, double Number, string Name, bool Enabled);
 
 public record CatalogRow(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? PosterUrl = null, string? WebUrl = null, string? SourceKind = null);
 
-public record MediaItemDto(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? ConnectionId, string? LibraryId, string? PosterUrl = null, string? WebUrl = null, string? SourceKind = null, string? Overview = null, string? SeriesName = null, string? SeriesId = null, string? SeasonName = null, string? SeasonId = null, List<string>? CollectionItems = null);
+public record MediaItemDto(string MatchKey, string Kind, string Title, int? Year, long? RuntimeMs, List<string> Genres, string? OfficialRating, List<string> Tags, string? ConnectionId, string? LibraryId, string? PosterUrl = null, string? WebUrl = null, string? SourceKind = null, string? Overview = null, string? SeriesName = null, string? SeriesId = null, string? SeasonName = null, string? SeasonId = null, List<string>? CollectionItems = null, Dictionary<string, string>? SeasonPosters = null);
 
 public record PersonCreditDto(Guid Id, Guid PersonId, string MediaMatchKey, string Role, string? Character, string? ImagePath);
 public record PersonDto(Guid Id, string Name, string? ImagePath = null);

@@ -60,7 +60,7 @@ public class EfCoreData : ICoreData
         var q = db.MediaItems.AsNoTracking().AsQueryable();
         if (!string.IsNullOrEmpty(connectionId)) q = q.Where(m => m.ConnectionId == connectionId);
         var rows = await q.ToListAsync();
-        return rows.Select(m => new MediaItemDto(m.MatchKey, m.Kind, m.Title, m.Year, m.RuntimeMs, m.Genres, m.OfficialRating, m.Tags, m.ConnectionId, m.LibraryId, m.PosterUrl, m.WebUrl, m.SourceKind, m.Overview, m.SeriesName, m.SeriesId, m.SeasonName, m.SeasonId, m.CollectionItems)).ToList();
+        return rows.Select(m => new MediaItemDto(m.MatchKey, m.Kind, m.Title, m.Year, m.RuntimeMs, m.Genres, m.OfficialRating, m.Tags, m.ConnectionId, m.LibraryId, m.PosterUrl, m.WebUrl, m.SourceKind, m.Overview, m.SeriesName, m.SeriesId, m.SeasonName, m.SeasonId, m.CollectionItems, m.SeasonPosters)).ToList();
     }
 
     public async Task<List<PersonDto>> GetAllPeopleAsync()
@@ -160,6 +160,7 @@ public class EfCoreData : ICoreData
                     SeasonName = it.SeasonName,
                     SeasonId = it.SeasonId,
                     CollectionItems = it.CollectionItems ?? new(),
+                    SeasonPosters = it.SeasonPosters ?? new(),
                     ConnectionId = it.ConnectionId,
                     LibraryId = it.LibraryId
                 });
@@ -182,6 +183,7 @@ public class EfCoreData : ICoreData
                 existing.SeasonName = it.SeasonName;
                 existing.SeasonId = it.SeasonId;
                 existing.CollectionItems = it.CollectionItems ?? new();
+                existing.SeasonPosters = it.SeasonPosters ?? new();
                 existing.ConnectionId = it.ConnectionId;
                 existing.LibraryId = it.LibraryId;
             }

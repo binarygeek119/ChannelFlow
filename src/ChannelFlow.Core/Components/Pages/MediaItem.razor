@@ -228,7 +228,7 @@ else
                             // Build seasons list
                             seasons = episodes
                                 .GroupBy(e => e.SeasonId ?? e.SeasonName ?? "1")
-                                .Select(g => new MediaItemDto { MatchKey = "", Kind = "season", Title = g.First().SeasonName ?? $"Season {g.Key}", SeasonId = g.Key, SeasonName = g.First().SeasonName, PosterUrl = g.First().PosterUrl })
+                                .Select(g => new MediaItemDto { MatchKey = "", Kind = "season", Title = g.First().SeasonName ?? $"Season {g.Key}", SeasonId = g.Key, SeasonName = g.First().SeasonName, PosterUrl = (item?.SeasonPosters != null && item.SeasonPosters.TryGetValue(g.Key, out var sp)) ? sp : g.First().PosterUrl })
                                 .ToList();
                             if (seasons.Count > 0) selectedSeasonId = seasons[0].SeasonId;
                         }
@@ -272,6 +272,7 @@ else
         public string? SeasonId { get; set; }
         public List<string> Tags { get; set; } = new();
         public List<string>? CollectionItems { get; set; }
+        public Dictionary<string, string>? SeasonPosters { get; set; }
     }
     public class CatalogResponse { public List<MediaItemDto> Items { get; set; } = new(); public int Count { get; set; } }
     public class CollectionChildDto

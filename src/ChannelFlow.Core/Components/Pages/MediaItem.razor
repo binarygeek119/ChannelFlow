@@ -113,7 +113,7 @@ else
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;">
                     @foreach (var cm in collectionMovies)
                     {
-                        <a href="/media/item/@Uri.EscapeDataString(cm.MatchKey)" style="text-decoration:none;color:inherit;display:block;">
+                        <a href="/media/item/@Uri.EscapeDataString(cm.MatchKey)" data-enhance-nav="false" style="text-decoration:none;color:inherit;display:block;">
                             <div style="aspect-ratio:2/3;background:var(--card-bg);border-radius:var(--radius);overflow:hidden;margin-bottom:.5rem;">
                                 @if (!string.IsNullOrEmpty(cm.PosterUrl))
                                 {

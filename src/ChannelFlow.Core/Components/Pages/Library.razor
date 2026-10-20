@@ -88,7 +88,7 @@ else if (activeTab.StartsWith("conn-"))
             else
             {
                 <table style="width:100%;border-collapse:collapse;">
-                    <thead><tr><th></th><th>Name</th><th>ID</th><th>Media Type</th></tr></thead>
+                    <thead><tr><th></th><th>Name</th><th>ID</th>@if (selectedConn?.Kind != "pasttense") { <th>Media Type</th> }</tr></thead>
                     <tbody>
                     @foreach (var lib in libraries)
                     {
@@ -96,13 +96,9 @@ else if (activeTab.StartsWith("conn-"))
                             <td><input type="checkbox" @bind="lib.Selected" /></td>
                             <td>@lib.Name</td>
                             <td><code>@lib.Id</code></td>
-                            <td>
-                                @if (selectedConn?.Kind == "pasttense")
-                                {
-                                    <span class="pill off">News</span>
-                                }
-                                else
-                                {
+                            @if (selectedConn?.Kind != "pasttense")
+                            {
+                                <td>
                                     <select @bind="lib.MediaTypeStr">
                                         <option value="movie">Movie</option>
                                         <option value="series">TV Show</option>
@@ -111,8 +107,8 @@ else if (activeTab.StartsWith("conn-"))
                                         <option value="musicvideo">Music Video</option>
                                         <option value="news">News</option>
                                     </select>
-                                }
-                            </td>
+                                </td>
+                            }
                         </tr>
                     }
                     </tbody>

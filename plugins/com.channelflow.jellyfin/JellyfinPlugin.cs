@@ -112,7 +112,8 @@ public class JellyfinMediaSource : IMediaSource
                 foreach (var it in arr.EnumerateArray())
                 {
                     if (ctx.Tasks is not null && !string.IsNullOrEmpty(ctx.TaskKey))
-                        ctx.Tasks.Report(ctx.TaskKey, $"Syncing {ctx.MediaType}", $"{processed} of {totalItems}", processed, totalItems, "running");
+                        var displayName = ctx.MediaType switch { "movie" => "Movies", "series" => "TV Shows", "album" => "Music", "musicvideo" => "Music Videos", _ => ctx.MediaType };
+                        ctx.Tasks.Report(ctx.TaskKey, $"Syncing {displayName}", $"{processed} of {totalItems}", processed, totalItems, "running");
                     processed++;
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);

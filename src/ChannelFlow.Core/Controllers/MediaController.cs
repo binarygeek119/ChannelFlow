@@ -223,4 +223,89 @@ public class MediaController : ControllerBase
         if (rows.Count > lim) rows = rows.Take(lim).ToList();
         return Ok(new { items = rows, count = total, offset = off, limit = lim });
     }
+
+    [HttpGet("collection/{*matchKey}")]
+    public async Task<IActionResult> CollectionChildren(string matchKey)
+    {
+        // Look up the item in DB
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == matchKey);
+        if (item is null) return NotFound();
+        // If we have stored collection items, fetch their details from DB
+        if (item.CollectionItems is { Count: > 0 })
+        {
+            string? jfUrl = null, jfKey = null, jfUserId = null;
+            if (!string.IsNullOrEmpty(item.ConnectionId) && int.TryParse(item.ConnectionId, out var connId))
+            {
+                var conn = await db.Connections.FindAsync(connId);
+                if (conn is not null)
+                {
+                    try
+                    {
+                        var cfg = JsonSerializer.Deserialize<Dictionary<string, string>>(conn.ConfigJson);
+                        if (cfg is not null) { cfg.TryGetValue("url", out jfUrl); cfg.TryGetValue("apiKey", out jfKey); }
+                    }
+                    catch { }
+                    // Resolve userId
+                    if (!string.IsNullOrEmpty(jfUrl) && !string.IsNullOrEmpty(jfKey))
+                    {
+                        try
+                        {
+                            using var http = new HttpClient();
+                            http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("MediaBrowser", $"Token=\"{jfKey}\"");
+                            var r = await http.GetAsync($"{jfUrl.TrimEnd('/')}/Users");
+                            if (r.IsSuccessStatusCode)
+                            {
+                                var json = await r.Content.ReadAsStringAsync();
+                                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                                    jfUserId = doc.RootElement[0].TryGetProperty("Id", out var uid) ? uid.GetString() : null;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            var children = new List<object>();
+            foreach (var cmk in item.CollectionItems)
+            {
+                var child = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == cmk);
+                if (child is not null)
+                {
+                    children.Add(new { matchKey = child.MatchKey, title = child.Title, year = child.Year, posterUrl = child.PosterUrl });
+                }
+                else if (!string.IsNullOrEmpty(jfUrl) && !string.IsNullOrEmpty(jfKey) && !string.IsNullOrEmpty(jfUserId) && cmk.StartsWith("jellyfin:"))
+                {
+                    var jid = cmk.Substring("jellyfin:".Length);
+                    string title = cmk;
+                    int? year = null;
+                    string? posterUrl = null;
+                    try
+                    {
+                        using var http = new HttpClient();
+                        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("MediaBrowser", $"Token=\"{jfKey}\"");
+                        var r = await http.GetAsync($"{jfUrl.TrimEnd('/')}/Users/{jfUserId}/Items/{jid}");
+                        if (r.IsSuccessStatusCode)
+                        {
+                            var json = await r.Content.ReadAsStringAsync();
+                            using var doc = System.Text.Json.JsonDocument.Parse(json);
+                            title = doc.RootElement.TryGetProperty("Name", out var n) ? n.GetString() ?? cmk : cmk;
+                            if (doc.RootElement.TryGetProperty("ProductionYear", out var py) && py.ValueKind == System.Text.Json.JsonValueKind.Number) year = py.GetInt32();
+                            if (doc.RootElement.TryGetProperty("ImageTags", out var it) && it.ValueKind == System.Text.Json.JsonValueKind.Object && it.TryGetProperty("Primary", out _))
+                                posterUrl = $"{jfUrl.TrimEnd('/')}/Items/{jid}/Images/Primary?maxHeight=300&quality=90";
+                        }
+                    }
+                    catch { }
+                    children.Add(new { matchKey = cmk, title, year, posterUrl });
+                }
+                else
+                {
+                    children.Add(new { matchKey = cmk, title = cmk, year = (int?)null, posterUrl = (string?)null });
+                }
+            }
+            return Ok(new { children });
+        }
+        return Ok(new { children = Array.Empty<object>() });
+    }
 }

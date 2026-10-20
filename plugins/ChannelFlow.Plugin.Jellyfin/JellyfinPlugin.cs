@@ -89,6 +89,20 @@ public class JellyfinMediaSource : IMediaSource
         using var c = Client(apiKey);
         int added = 0;
         var errors = new List<string>();
+        // Resolve a user id for collection child lookups
+        string? userId = null;
+        try
+        {
+            var usersRes = await c.GetAsync($"{url}/Users");
+            if (usersRes.IsSuccessStatusCode)
+            {
+                var usersJson = await usersRes.Content.ReadAsStringAsync();
+                using var udoc = JsonDocument.Parse(usersJson);
+                if (udoc.RootElement.ValueKind == JsonValueKind.Array && udoc.RootElement.GetArrayLength() > 0)
+                    userId = udoc.RootElement[0].TryGetProperty("Id", out var uid) ? uid.GetString() : null;
+            }
+        }
+        catch { }
         try
         {
             var includeTypes = ctx.MediaType switch
@@ -112,8 +126,10 @@ public class JellyfinMediaSource : IMediaSource
                 foreach (var it in arr.EnumerateArray())
                 {
                     if (ctx.Tasks is not null && !string.IsNullOrEmpty(ctx.TaskKey))
+                    {
                         var displayName = ctx.MediaType switch { "movie" => "Movies", "series" => "TV Shows", "album" => "Music", "musicvideo" => "Music Videos", _ => ctx.MediaType };
                         ctx.Tasks.Report(ctx.TaskKey, $"Syncing {displayName}", $"{processed} of {totalItems}", processed, totalItems, "running");
+                    }
                     processed++;
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
@@ -150,6 +166,28 @@ public class JellyfinMediaSource : IMediaSource
                         posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
                     }
                     var webUrl = $"{url}/web/index.html#!/details?id={id}";
+                    var collectionItems = new List<string>();
+                    if (type?.Equals("BoxSet", StringComparison.OrdinalIgnoreCase) == true && !string.IsNullOrEmpty(userId))
+                    {
+                        try
+                        {
+                            var childRes = await c.GetAsync($"{url}/Users/{userId}/Items?ParentId={id}&Recursive=false");
+                            if (childRes.IsSuccessStatusCode)
+                            {
+                                var childJson = await childRes.Content.ReadAsStringAsync();
+                                using var cdoc = JsonDocument.Parse(childJson);
+                                if (cdoc.RootElement.TryGetProperty("Items", out var citems))
+                                {
+                                    foreach (var ci in citems.EnumerateArray())
+                                    {
+                                        var cid = ci.TryGetProperty("Id", out var cip) ? cip.GetString() : null;
+                                        if (!string.IsNullOrEmpty(cid)) collectionItems.Add($"jellyfin:{cid}");
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
                     items.Add(new MediaItemDto(
                         MatchKey: $"jellyfin:{id}",
                         Kind: kind,
@@ -168,7 +206,8 @@ public class JellyfinMediaSource : IMediaSource
                         SeriesName: seriesName,
                         SeriesId: seriesId,
                         SeasonName: seasonName,
-                        SeasonId: seasonId));
+                        SeasonId: seasonId,
+                        CollectionItems: collectionItems));
                 }
             }
             // Sync people (cast/crew) for each item
@@ -217,6 +256,59 @@ public class JellyfinMediaSource : IMediaSource
                 await ctx.Core.LinkCreditsAsync(matchKey, linkedCredits);
             }
 
+            // Fetch children of BoxSets/collections and add them as items
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var boxSets = items.Where(i => i.Kind == "movie" && i.Title.Contains("Collection")).ToList();
+                // We don't have a flag; fetch children for items whose Jellyfin type is BoxSet.
+                // Re-iterate original arr to find BoxSets.
+            }
+            // Re-scan arr for BoxSet items and fetch their children
+            if (!string.IsNullOrEmpty(userId) && doc.RootElement.TryGetProperty("Items", out var arr2))
+            {
+                foreach (var it in arr2.EnumerateArray())
+                {
+                    var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "";
+                    if (!type?.Equals("BoxSet", StringComparison.OrdinalIgnoreCase) == true) continue;
+                    var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : "";
+                    if (string.IsNullOrEmpty(id)) continue;
+                    try
+                    {
+                        var childRes = await c.GetAsync($"{url}/Users/{userId}/Items?ParentId={id}&Recursive=false");
+                        if (!childRes.IsSuccessStatusCode) continue;
+                        var childJson = await childRes.Content.ReadAsStringAsync();
+                        using var cdoc = JsonDocument.Parse(childJson);
+                        if (!cdoc.RootElement.TryGetProperty("Items", out var citems)) continue;
+                        foreach (var ci in citems.EnumerateArray())
+                        {
+                            var cid = ci.TryGetProperty("Id", out var cip) ? cip.GetString() ?? "" : "";
+                            var cname = ci.TryGetProperty("Name", out var cnp) ? cnp.GetString() ?? cid : cid;
+                            if (string.IsNullOrEmpty(cid)) continue;
+                            if (items.Any(x => x.MatchKey == $"jellyfin:{cid}")) continue; // already present
+                            int? cyear = ci.TryGetProperty("ProductionYear", out var cy) && cy.ValueKind == JsonValueKind.Number ? cy.GetInt32() : null;
+                            string? cposter = null;
+                            if (ci.TryGetProperty("ImageTags", out var cit) && cit.ValueKind == JsonValueKind.Object && cit.TryGetProperty("Primary", out _))
+                                cposter = $"{url}/Items/{cid}/Images/Primary?maxHeight=300&quality=90";
+                            items.Add(new MediaItemDto(
+                                MatchKey: $"jellyfin:{cid}",
+                                Kind: "movie",
+                                Title: cname,
+                                Year: cyear,
+                                RuntimeMs: null,
+                                Genres: new List<string>(),
+                                OfficialRating: null,
+                                Tags: new List<string>(),
+                                ConnectionId: ctx.ConnectionId,
+                                LibraryId: ctx.LibraryId,
+                                PosterUrl: cposter,
+                                WebUrl: $"{url}/web/index.html#!/details?id={cid}",
+                                SourceKind: "jellyfin",
+                                Overview: null));
+                        }
+                    }
+                    catch { }
+                }
+            }
             await ctx.Core.UpsertMediaItemsAsync(items);
             added = items.Count;
         }

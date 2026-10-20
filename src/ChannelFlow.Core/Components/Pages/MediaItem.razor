@@ -107,6 +107,30 @@ else
                 }
             }
 
+            @if (collectionMovies.Count > 0)
+            {
+                <h3 style="margin-top:1.5rem;">Movies in this Collection (@collectionMovies.Count)</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1rem;">
+                    @foreach (var cm in collectionMovies)
+                    {
+                        <a href="/media/item/@Uri.EscapeDataString(cm.MatchKey)" style="text-align:center;text-decoration:none;color:inherit;display:block;">
+                            <div style="height:120px;background:var(--card-bg);border-radius:4px;display:flex;align-items:center;justify-content:center;margin-bottom:.5rem;overflow:hidden;">
+                                @if (!string.IsNullOrEmpty(cm.PosterUrl))
+                                {
+                                    <img src="@cm.PosterUrl" alt="@cm.Title" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/images/poster-placeholder.svg'" />
+                                }
+                                else
+                                {
+                                    <img src="/images/poster-placeholder.svg" alt="@cm.Title" style="width:100%;height:100%;object-fit:cover;" />
+                                }
+                            </div>
+                            <div style="font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@cm.Title</div>
+                            @if (cm.Year.HasValue) { <div style="font-size:.75rem;color:var(--muted);">@cm.Year</div> }
+                        </a>
+                    }
+                </div>
+            }
+
             @if (credits.Count > 0)
             {
                 <h3 style="margin-top:1.5rem;">Cast & Crew</h3>
@@ -138,6 +162,7 @@ else
     [Parameter] public string matchKey { get; set; } = "";
     private MediaItemDto? item;
     private List<CreditDto> credits = new();
+    private List<MediaItemDto> collectionMovies = new();
     private List<MediaItemDto> episodes = new();
     private List<MediaItemDto> seasons = new();
     private string? selectedSeasonId;
@@ -153,6 +178,21 @@ else
             {
                 item = res.Item;
                 credits = res.Credits ?? new();
+                if (item?.CollectionItems is { Count: > 0 })
+                {
+                    try
+                    {
+                        var collRes = await Http.GetFromJsonAsync<CollectionResponse>($"api/media/collection/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (collRes?.Children is not null)
+                        {
+                            foreach (var ch in collRes.Children)
+                            {
+                                collectionMovies.Add(new MediaItemDto { MatchKey = ch.MatchKey, Title = ch.Title, Year = ch.Year, PosterUrl = ch.PosterUrl });
+                            }
+                        }
+                    }
+                    catch { }
+                }
                 // Load episodes and seasons for series
                 if (item is not null && item.Kind == "series")
                 {
@@ -208,8 +248,20 @@ else
         public string? SeasonName { get; set; }
         public string? SeasonId { get; set; }
         public List<string> Tags { get; set; } = new();
+        public List<string>? CollectionItems { get; set; }
     }
     public class CatalogResponse { public List<MediaItemDto> Items { get; set; } = new(); public int Count { get; set; } }
+    public class CollectionChildDto
+    {
+        public string MatchKey { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public string? PosterUrl { get; set; }
+    }
+    public class CollectionResponse
+    {
+        public List<CollectionChildDto> Children { get; set; } = new();
+    }
     public class CreditDto
     {
         public Guid Id { get; set; }

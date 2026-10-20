@@ -207,13 +207,18 @@ public class MediaController : ControllerBase
     {
         var lim = limit ?? 100;
         var off = offset ?? 0;
+        // Total count of matching items
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var totalQ = db.MediaItems.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(kind)) totalQ = totalQ.Where(m => m.Kind.ToLower() == kind.ToLower());
+        var total = await totalQ.CountAsync();
         var filter = new CatalogFilter(
             Kinds: string.IsNullOrEmpty(kind) ? new List<string>() : new List<string> { kind },
             Genres: new List<string>(),
             Tags: new List<string>(),
             Limit: lim + off);
         var rows = await _core.CatalogAsync(filter);
-        var total = rows.Count;
         if (off > 0) rows = rows.Skip(off).ToList();
         if (rows.Count > lim) rows = rows.Take(lim).ToList();
         return Ok(new { items = rows, count = total, offset = off, limit = lim });

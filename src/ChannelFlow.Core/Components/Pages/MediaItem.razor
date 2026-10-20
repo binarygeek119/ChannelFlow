@@ -198,10 +198,13 @@ else
                 {
                     try
                     {
-                        var cat = await Http.GetFromJsonAsync<CatalogResponse>($"api/media/catalog?kind=episode&limit=5000", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        if (cat is not null)
+                        var epRes = await Http.GetFromJsonAsync<EpisodesResponse>($"api/media/episodes/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (epRes is not null && epRes.Items is not null)
                         {
-                            episodes = cat.Items.Where(e => e.SeriesName == item.Title || e.SeriesId == item.MatchKey.Replace("jellyfin:", "")).ToList();
+                            foreach (var e in epRes.Items)
+                            {
+                                episodes.Add(new MediaItemDto { MatchKey = e.MatchKey, Title = e.Title, Year = e.Year, PosterUrl = e.PosterUrl, SeasonId = e.SeasonId, SeasonName = e.SeasonName });
+                            }
                             // Build seasons list
                             seasons = episodes
                                 .GroupBy(e => e.SeasonId ?? e.SeasonName ?? "1")
@@ -257,6 +260,21 @@ else
         public string Title { get; set; } = "";
         public int? Year { get; set; }
         public string? PosterUrl { get; set; }
+    }
+    public class EpisodeDto
+    {
+        public string MatchKey { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public string? SeasonId { get; set; }
+        public string? SeasonName { get; set; }
+        public string? PosterUrl { get; set; }
+        public string? WebUrl { get; set; }
+    }
+    public class EpisodesResponse
+    {
+        public List<EpisodeDto> Items { get; set; } = new();
+        public int Count { get; set; }
     }
     public class CollectionResponse
     {

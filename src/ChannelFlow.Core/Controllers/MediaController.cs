@@ -400,4 +400,26 @@ public class MediaController : ControllerBase
         }
         return Ok(new { children = Array.Empty<object>() });
     }
+
+    [HttpGet("episodes/{*seriesMatchKey}")]
+    public async Task<IActionResult> EpisodesForSeries(string seriesMatchKey)
+    {
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var seriesId = seriesMatchKey.StartsWith("jellyfin:") ? seriesMatchKey.Substring("jellyfin:".Length) : seriesMatchKey;
+        var eps = await db.MediaItems.AsNoTracking()
+            .Where(m => m.Kind == "episode" && m.SeriesId == seriesId)
+            .ToListAsync();
+        var result = eps.Select(e => new
+        {
+            e.MatchKey,
+            e.Title,
+            e.Year,
+            e.SeasonId,
+            e.SeasonName,
+            e.PosterUrl,
+            e.WebUrl
+        });
+        return Ok(new { items = result, count = eps.Count });
+    }
 }

@@ -1,8 +1,11 @@
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
 @page "/media"
 @rendermode RenderMode.InteractiveServer
+@implements IDisposable
 @inject HttpClient Http
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 <div class="inner-tabs" style="margin-bottom:1rem;">
     @foreach (var tab in tabs)
     {
@@ -53,15 +56,17 @@ else
             </div>
         }
     </div>
+    <div id="media-sentinel" style="height:1px;"></div>
     @if (totalCount > items.Count)
     {
         <div style="margin-top:1rem;text-align:center;">
-            <button class="ghost" @onclick="LoadMore">Load more</button>
+            <button class="ghost" @onclick="() => LoadMore()">Load more</button>
         </div>
     }
 }
 @code {
     private bool loading;
+    private DotNetObjectReference<Media>? dotNetRef;
     private string activeTab = "Movies";
     private readonly List<string> tabs = new() { "Movies", "TV Shows", "Music", "Music Videos", "News" };
     private List<MediaItem> items = new();
@@ -81,6 +86,30 @@ else
     };
 
     protected override async Task OnInitializedAsync() => await LoadTab();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            dotNetRef = DotNetObjectReference.Create(this);
+        }
+        try { await JS.InvokeVoidAsync("setupMediaInfiniteScroll", dotNetRef); } catch { }
+    }
+
+    [JSInvokable("TriggerLoadMore")]
+    public async Task TriggerLoadMore()
+    {
+        if (items.Count < totalCount && !loading)
+        {
+            await LoadMore();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        dotNetRef?.Dispose();
+    }
 
     private async Task SwitchTab(string tab)
     {
@@ -131,8 +160,9 @@ else
                 items.AddRange(res.Items);
                 offset = items.Count;
             }
+            await InvokeAsync(StateHasChanged);
         }
-        catch { }
+        catch (Exception e) { Console.WriteLine("LoadMore error: " + e.Message); }
     }
 
     public class MediaItem

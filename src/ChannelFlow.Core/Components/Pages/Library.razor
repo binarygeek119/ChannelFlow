@@ -1,20 +1,19 @@
 @using ChannelFlow.Components.Shared
 @using Microsoft.AspNetCore.Components.Web
 @page "/library"
+@page "/library/{segment}"
 @rendermode RenderMode.InteractiveServer
-@page "/library/{connId}"
 @inject HttpClient Http
 @inject NavigationManager Nav
 <p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
 
 <div class="inner-tabs" style="margin-bottom:1rem;">
-    <button class="inner-tab @(activeTab == "connections" ? "active" : "")" @onclick='() => activeTab = "connections"'>Connections</button>
-    @if (connections is not null)
+    <button class="inner-tab @(activeTab == "connections" && string.IsNullOrEmpty(filterKind) ? "active" : "")" @onclick='() => { filterKind = ""; activeTab = "connections"; Nav.NavigateTo("/library/connections", forceLoad: true); }'>Connections</button>
+    @foreach (var kind in new[] { "jellyfin", "plex", "emby", "pasttense", "local", "other" })
     {
-        @foreach (var c in connections)
-        {
-            <button class="inner-tab @(activeTab == $"conn-{c.Id}" ? "active" : "")" @onclick="() => SelectConnection(c)">@(!string.IsNullOrEmpty(c.Name) ? c.Name : $"Connection {c.Id}")</button>
-        }
+        var k = kind;
+        var label = k switch { "pasttense" => "News", "local" => "Local", _ => char.ToUpperInvariant(k[0]) + k[1..] };
+        <button class="inner-tab @(filterKind == k ? "active" : "")" @onclick="() => SelectKind(k)">@label</button>
     }
 </div>
 
@@ -56,7 +55,7 @@
             <table>
                 <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Config</th><th></th></tr></thead>
                 <tbody>
-                @foreach (var c in connections)
+                @foreach (var c in (string.IsNullOrEmpty(filterKind) ? connections : connections.Where(x => x.Kind.Equals(filterKind, StringComparison.OrdinalIgnoreCase)).ToList()))
                 {
                     <tr>
                         <td>@c.Id</td>
@@ -148,10 +147,11 @@ else if (activeTab.StartsWith("conn-"))
 }
 <ConfirmDialog Visible="@showConfirm" Message="@confirmMsg" OnConfirm="ConfirmDelete" OnCancel="() => showConfirm = false" />
 @code {
-    [Parameter] public string? connId { get; set; }
+    [Parameter] public string? segment { get; set; }
     private string activeTab = "connections";
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
+    private string filterKind = "";
     private List<LibraryDto> libraries = new();
     private bool loadingLibs, syncing, testing, saving;
     private bool showConfirm;
@@ -186,11 +186,25 @@ else if (activeTab.StartsWith("conn-"))
     protected override async Task OnInitializedAsync()
     {
         await Load();
-        int? parsedConnId = int.TryParse(connId, out var ci) ? ci : null;
-        if (parsedConnId.HasValue && connections is not null)
+        if (string.IsNullOrEmpty(segment) || segment == "connections")
         {
-            var c = connections.FirstOrDefault(x => x.Id == parsedConnId.Value);
+            activeTab = "connections";
+            filterKind = "";
+        }
+        else if (int.TryParse(segment, out var ci) && connections is not null)
+        {
+            var c = connections.FirstOrDefault(x => x.Id == ci);
             if (c is not null) await SelectConnection(c);
+        }
+        else
+        {
+            activeTab = "connections";
+            filterKind = segment;
+            if (connections is not null)
+            {
+                var ofKind = connections.Where(c => c.Kind.Equals(segment, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (ofKind.Count == 1) await SelectConnection(ofKind[0]);
+            }
         }
     }
 
@@ -205,10 +219,18 @@ else if (activeTab.StartsWith("conn-"))
         catch { connections = new(); }
     }
 
+    private void SelectKind(string kind)
+    {
+        filterKind = kind;
+        activeTab = "connections";
+        Nav.NavigateTo("/library/" + kind, forceLoad: true);
+    }
+
     private async Task SelectConnection(ConnDto c)
     {
         selectedConn = c;
         activeTab = $"conn-{c.Id}";
+        filterKind = c.Kind;
         libraries = new();
         loadingLibs = true;
         try

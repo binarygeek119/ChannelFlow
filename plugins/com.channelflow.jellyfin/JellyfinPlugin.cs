@@ -414,14 +414,19 @@ public class JellyfinMediaSource : IMediaSource
     {
         try
         {
+            // Skip if already downloaded
+            if (File.Exists(destPath))
+            {
+                var fileName = Path.GetFileName(destPath);
+                return $"{urlPrefix}/{fileName}";
+            }
             var res = await c.GetAsync(imageUrl);
             if (!res.IsSuccessStatusCode) return null;
             var bytes = await res.Content.ReadAsByteArrayAsync();
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             await File.WriteAllBytesAsync(destPath, bytes);
-            var fileName = Path.GetFileName(destPath);
-            var subDir = Path.GetFileName(Path.GetDirectoryName(destPath)!);
-            return $"{urlPrefix}/{fileName}";
+            var fileName2 = Path.GetFileName(destPath);
+            return $"{urlPrefix}/{fileName2}";
         }
         catch { return null; }
     }

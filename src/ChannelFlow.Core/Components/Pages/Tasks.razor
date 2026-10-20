@@ -16,6 +16,15 @@
 </div>
 
 <div class="panel" style="margin-bottom:1rem;">
+    <div class="panel-head"><h2>Past Tense News Sync</h2></div>
+    <p class="hint">Scan the news folder for new videos and extract thumbnails. Runs daily or on demand.</p>
+    <div class="ms-form-actions">
+        <button type="button" class="primary" @onclick="RunPastTenseSync" disabled="@ptSyncing">@(ptSyncing ? "Syncing..." : "Run now")</button>
+    </div>
+    @if (!string.IsNullOrEmpty(ptSyncMsg)) { <p class="hint">@ptSyncMsg</p> }
+</div>
+
+<div class="panel" style="margin-bottom:1rem;">
     <div class="panel-head"><h2>Past Tense News Thumbnails</h2></div>
     <p class="hint">Extract thumbnails from news videos (10-30% into video, skipping black/white frames). Runs daily or on demand.</p>
     <div class="ms-form-actions">
@@ -64,8 +73,8 @@
 @code {
     private List<TaskDto> tasks = new();
     private SchedStatus? schedStatus;
-    private string? maintMsg, jellyfinMsg, thumbsMsg;
-    private bool syncing, thumbsSyncing;
+    private string? maintMsg, jellyfinMsg, thumbsMsg, ptSyncMsg;
+    private bool syncing, thumbsSyncing, ptSyncing;
 
     protected override async Task OnInitializedAsync() => await RefreshTasks();
 
@@ -152,6 +161,30 @@
         }
         catch (Exception e) { thumbsMsg = "Error: " + e.Message; }
         thumbsSyncing = false;
+        await RefreshTasks();
+    }
+
+    private async Task RunPastTenseSync()
+    {
+        ptSyncing = true;
+        ptSyncMsg = "Starting...";
+        try
+        {
+            var conns = await Http.GetFromJsonAsync<List<ConnDto>>("api/connections", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            foreach (var conn in conns.Where(c => c.Kind == "pasttense"))
+            {
+                var res = await Http.PostAsJsonAsync("api/pasttense/sync", new { ConnectionId = conn.Id });
+                var body = await res.Content.ReadAsStringAsync();
+                ptSyncMsg = $"{conn.Name}: {body}";
+                // Also extract thumbnails
+                var tres = await Http.PostAsJsonAsync("api/pasttense/thumbnails", new { ConnectionId = conn.Id });
+                var tbody = await tres.Content.ReadAsStringAsync();
+                ptSyncMsg += " | Thumbs: " + tbody;
+            }
+            if (conns.Count(c => c.Kind == "pasttense") == 0) ptSyncMsg = "No Past Tense connections configured.";
+        }
+        catch (Exception e) { ptSyncMsg = "Error: " + e.Message; }
+        ptSyncing = false;
         await RefreshTasks();
     }
 

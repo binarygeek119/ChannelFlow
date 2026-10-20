@@ -75,6 +75,7 @@ builder.Services.AddSingleton<ICoreData>(sp => sp.GetRequiredService<EfCoreData>
 builder.Services.AddScoped<MigrationService>();
 builder.Services.AddHostedService<BuildQueue>();
 builder.Services.AddHostedService<PastTenseThumbnailService>();
+builder.Services.AddHostedService<PastTenseSyncService>();
 builder.Services.AddSingleton<TaskTracker>();
 builder.Services.AddSingleton<PluginManager>(sp => new PluginManager(sp));
 

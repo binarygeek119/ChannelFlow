@@ -134,10 +134,20 @@ public class JellyfinMediaSource : IMediaSource
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
-                    var kind = ctx.MediaType switch
+                    var kind = type?.ToLowerInvariant() switch
                     {
-                        "album" or "artist" or "track" or "musicvideo" or "news" => ctx.MediaType,
-                        _ => (type?.ToLowerInvariant() switch
+                        "audio" => "track",
+                        "musicalbum" => "album",
+                        "musicartist" => "artist",
+                        "series" => "series",
+                        "episode" => "episode",
+                        "musicvideo" => "musicvideo",
+                        _ => ctx.MediaType switch
+                        {
+                            "album" or "artist" or "track" or "musicvideo" or "news" => ctx.MediaType,
+                            _ => "movie"
+                        }
+                    };
                         {
                             "series" => "series",
                             "episode" => "episode",
@@ -160,6 +170,12 @@ public class JellyfinMediaSource : IMediaSource
                     string? seriesId = it.TryGetProperty("SeriesId", out var si) ? si.ToString() : null;
                     string? seasonName = it.TryGetProperty("SeasonName", out var sea) ? sea.GetString() : null;
                     string? seasonId = it.TryGetProperty("SeasonId", out var si2) ? si2.ToString() : null;
+                    // For music tracks, link to album
+                    if (type?.Equals("Audio", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        if (it.TryGetProperty("AlbumId", out var aid)) seriesId = aid.ToString();
+                        if (it.TryGetProperty("Album", out var an)) seriesName = an.GetString();
+                    }
                     string? posterUrl = null;
                     if (it.TryGetProperty("ImageTags", out var imgTags) && imgTags.ValueKind == JsonValueKind.Object && imgTags.TryGetProperty("Primary", out _))
                     {

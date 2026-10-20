@@ -151,6 +151,33 @@ else
                 </div>
             }
 
+            @if (item.Kind == "album" && tracks.Count > 0)
+            {
+                <h3 style="margin-top:1.5rem;">Tracks (@tracks.Count)</h3>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr><th style="width:60px;">Thumb</th><th>Title</th><th>Duration</th></tr></thead>
+                    <tbody>
+                    @foreach (var tr in tracks)
+                    {
+                        <tr>
+                            <td>
+                                @if (!string.IsNullOrEmpty(tr.PosterUrl))
+                                {
+                                    <img src="@tr.PosterUrl" alt="@tr.Title" style="width:60px;height:60px;object-fit:cover;border-radius:4px;" onerror="this.src='/images/poster-placeholder.svg'" />
+                                }
+                                else
+                                {
+                                    <img src="/images/poster-placeholder.svg" alt="@tr.Title" style="width:60px;height:60px;object-fit:cover;border-radius:4px;" />
+                                }
+                            </td>
+                            <td><a href="/media/item/@Uri.EscapeDataString(tr.MatchKey)" class="link">@tr.Title</a></td>
+                            <td>@(tr.RuntimeMs.HasValue ? $"{tr.RuntimeMs.Value / 60000}:{(tr.RuntimeMs.Value / 1000 % 60):D2}" : "")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+
             @if (credits.Count > 0)
             {
                 <h3 style="margin-top:1.5rem;">Cast & Crew</h3>
@@ -183,6 +210,7 @@ else
     private MediaItemDto? item;
     private List<CreditDto> credits = new();
     private List<MediaItemDto> collectionMovies = new();
+    private List<TrackDto> tracks = new();
     private List<MediaItemDto> episodes = new();
     private List<MediaItemDto> seasons = new();
     private string? selectedSeasonId;
@@ -198,6 +226,21 @@ else
             {
                 item = res.Item;
                 credits = res.Credits ?? new();
+                if (item is not null && item.Kind == "album")
+                {
+                    try
+                    {
+                        var trRes = await Http.GetFromJsonAsync<TracksResponse>($"api/media/tracks/{Uri.EscapeDataString(matchKey)}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (trRes?.Items is not null)
+                        {
+                            foreach (var t in trRes.Items)
+                            {
+                                tracks.Add(new TrackDto { MatchKey = t.MatchKey, Title = t.Title, Year = t.Year, PosterUrl = t.PosterUrl, RuntimeMs = t.RuntimeMs });
+                            }
+                        }
+                    }
+                    catch { }
+                }
                 if (item?.CollectionItems is { Count: > 0 })
                 {
                     try
@@ -291,6 +334,19 @@ else
         public string? SeasonName { get; set; }
         public string? PosterUrl { get; set; }
         public string? WebUrl { get; set; }
+    }
+    public class TrackDto
+    {
+        public string MatchKey { get; set; } = "";
+        public string Title { get; set; } = "";
+        public int? Year { get; set; }
+        public string? PosterUrl { get; set; }
+        public long? RuntimeMs { get; set; }
+    }
+    public class TracksResponse
+    {
+        public List<TrackDto> Items { get; set; } = new();
+        public int Count { get; set; }
     }
     public class EpisodesResponse
     {

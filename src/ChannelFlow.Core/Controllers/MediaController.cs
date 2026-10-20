@@ -422,4 +422,26 @@ public class MediaController : ControllerBase
         });
         return Ok(new { items = result, count = eps.Count });
     }
+
+    [HttpGet("tracks/{*albumMatchKey}")]
+    public async Task<IActionResult> TracksForAlbum(string albumMatchKey)
+    {
+        using var scope = HttpContext.RequestServices.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var albumId = albumMatchKey.StartsWith("jellyfin:") ? albumMatchKey.Substring("jellyfin:".Length) : albumMatchKey;
+        var tracks = await db.MediaItems.AsNoTracking()
+            .Where(m => m.Kind == "track" && m.SeriesId == albumId)
+            .OrderBy(m => m.Title)
+            .ToListAsync();
+        var result = tracks.Select(t => new
+        {
+            t.MatchKey,
+            t.Title,
+            t.Year,
+            t.PosterUrl,
+            t.WebUrl,
+            RuntimeMs = t.RuntimeMs
+        });
+        return Ok(new { items = result, count = tracks.Count });
+    }
 }

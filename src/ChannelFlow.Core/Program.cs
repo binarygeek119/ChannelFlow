@@ -35,6 +35,8 @@ var provider = Environment.GetEnvironmentVariable("DATABASE_PROVIDER")
     ?? builder.Configuration["Database:Provider"]
     ?? "sqlite";
 
+// Enable dynamic JSON for Dictionary<string,string> columns (SeasonPosters)
+try { Npgsql.NpgsqlConnection.GlobalTypeMapper.EnableDynamicJson(); } catch { }
 builder.Services.AddDbContext<ChannelFlowDbContext>(options =>
 {
     switch (provider.ToLowerInvariant())

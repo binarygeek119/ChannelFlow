@@ -34,14 +34,10 @@ public class PastTenseMediaSource : IMediaSource
         return Task.FromResult(libs);
     }
 
-    public Task<SyncReport> DownloadPostersAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
-    public Task<SyncReport> DownloadPeopleImagesAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
     public Task<SyncReport> SyncLibraryAsync(SyncContext ctx)
     {
-        var path = ctx.Connection?.Config.TryGetValue("path", out var p) == true ? p : (ctx.ConnectionId);
-        // Actually use connection config
         if (ctx.Connection is null) return Task.FromResult(new SyncReport(0, 0, 0, new List<string> { "No connection" }));
-        path = ctx.Connection.Config.TryGetValue("path", out var pp) ? pp : "";
+        var path = ctx.Connection.Config.TryGetValue("path", out var pp) ? pp : "";
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
             return Task.FromResult(new SyncReport(0, 0, 0, new List<string> { "Path not found" }));
 
@@ -50,29 +46,25 @@ public class PastTenseMediaSource : IMediaSource
         var items = new List<MediaItemDto>();
         try
         {
-            // Each subdirectory is an event; files inside are videos
             var eventDirs = Directory.GetDirectories(path);
             if (eventDirs.Length == 0)
             {
-                // Flat: treat root as one event
                 eventDirs = new[] { path };
             }
             foreach (var eventDir in eventDirs)
             {
-                var eventName = Path.GetFileName(eventDir);
-                var matchKey = $"pasttense:{Sanitize(eventName)}";
-                var videoFiles = Directory.GetFiles(eventDir)
-                    .Where(f => IsMediaFile(f))
-                    .ToList();
-                // If no subdirs, eventDir == path, use path's files
-                if (eventDir == path)
-                    videoFiles = Directory.GetFiles(path).Where(IsMediaFile).ToList();
+                var eventName = eventDir == path ? "News" : Path.GetFileName(eventDir);
+                var eventKey = $"pasttense:{Sanitize(eventName)}";
+                var matchKey = eventKey;
+                var videoFiles = (eventDir == path)
+                    ? Directory.GetFiles(path).Where(IsMediaFile).ToList()
+                    : Directory.GetFiles(eventDir).Where(IsMediaFile).ToList();
 
                 var videos = new List<string>();
                 foreach (var vf in videoFiles)
                 {
                     var videoName = Path.GetFileNameWithoutExtension(vf);
-                    var videoKey = $"pasttense:{Sanitize(eventName)}:{Sanitize(videoName)}";
+                    var videoKey = $"{eventKey}:{Sanitize(videoName)}";
                     videos.Add(videoKey);
                     items.Add(new MediaItemDto(
                         MatchKey: videoKey,
@@ -90,9 +82,8 @@ public class PastTenseMediaSource : IMediaSource
                         SourceKind: "pasttense",
                         Overview: null,
                         SeriesName: eventName,
-                        SeriesId: Sanitize(eventName)));
+                        SeriesId: eventKey));
                 }
-                // Add the event as a news item
                 items.Add(new MediaItemDto(
                     MatchKey: matchKey,
                     Kind: "news",
@@ -107,8 +98,7 @@ public class PastTenseMediaSource : IMediaSource
                     PosterUrl: null,
                     WebUrl: null,
                     SourceKind: "pasttense",
-                    Overview: null,
-                    CollectionItems: videos));
+                    Overview: null));
             }
             ctx.Core.UpsertMediaItemsAsync(items).Wait();
             added = items.Count;
@@ -116,6 +106,9 @@ public class PastTenseMediaSource : IMediaSource
         catch (Exception e) { errors.Add(e.Message); }
         return Task.FromResult(new SyncReport(added, 0, 0, errors));
     }
+
+    public Task<SyncReport> DownloadPostersAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
+    public Task<SyncReport> DownloadPeopleImagesAsync(SyncContext ctx) => Task.FromResult(new SyncReport(0, 0, 0, new List<string>()));
 
     private static bool IsMediaFile(string path)
     {

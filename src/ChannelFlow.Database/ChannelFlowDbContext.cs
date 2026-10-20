@@ -27,6 +27,11 @@ public class ChannelFlowDbContext : DbContext
         modelBuilder.Entity<MediaItem>().Property(m => m.MatchKey).IsRequired();
         modelBuilder.Entity<MediaItem>().Property(m => m.Kind).IsRequired();
         modelBuilder.Entity<MediaItem>().Property(m => m.Title).IsRequired();
+        modelBuilder.Entity<MediaItem>().Property(m => m.SeasonPosters)
+            .HasConversion(
+                v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
+                v => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(v, (System.Text.Json.JsonSerializerOptions?)null) ?? new Dictionary<string, string>())
+            .HasColumnType("jsonb");
 
         modelBuilder.Entity<GuideProgramRow>().HasKey(g => g.Id);
         modelBuilder.Entity<GuideProgramRow>().Property(g => g.ChannelId).IsRequired();

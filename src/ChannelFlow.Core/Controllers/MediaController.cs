@@ -218,7 +218,7 @@ public class MediaController : ControllerBase
                             }
                             if (!string.IsNullOrEmpty(userId))
                             {
-                                var r = await http.GetAsync($"{url}/Users/{userId}/Items/{jid}");
+                                var r = await http.GetAsync($"{url}/Users/{userId}/Items/{jid}?Fields=People,Genres,Overview,OfficialRating,RunTimeTicks,ProductionYear,ImageTags");
                                 if (r.IsSuccessStatusCode)
                                 {
                                     var json = await r.Content.ReadAsStringAsync();
@@ -236,6 +236,23 @@ public class MediaController : ControllerBase
                                     if (doc.RootElement.TryGetProperty("ImageTags", out var it) && it.ValueKind == System.Text.Json.JsonValueKind.Object && it.TryGetProperty("Primary", out _))
                                         posterUrl = $"{url}/Items/{jid}/Images/Primary?maxHeight=300&quality=90";
                                     string? webUrl = $"{url}/web/index.html#!/details?id={jid}";
+                                    // Build credits from Jellyfin People
+                                    var fallbackCredits = new List<object>();
+                                    if (doc.RootElement.TryGetProperty("People", out var peopleArr) && peopleArr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                    {
+                                        foreach (var person in peopleArr.EnumerateArray())
+                                        {
+                                            var personName = person.TryGetProperty("Name", out var pn) ? pn.GetString() : null;
+                                            if (string.IsNullOrEmpty(personName)) continue;
+                                            var role = person.TryGetProperty("Type", out var pt) ? pt.GetString() ?? "Actor" : "Actor";
+                                            var character = person.TryGetProperty("Role", out var pr) ? pr.GetString() : null;
+                                            var personId = person.TryGetProperty("Id", out var pid) ? pid.GetString() : null;
+                                            string? imagePath = null;
+                                            if (!string.IsNullOrEmpty(personId) && person.TryGetProperty("PrimaryImageTag", out var pit) && pit.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrEmpty(pit.GetString()))
+                                                imagePath = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
+                                            fallbackCredits.Add(new { Id = Guid.Empty, PersonId = Guid.Empty, personName, imagePath, MediaMatchKey = matchKey, Role = role, Character = character });
+                                        }
+                                    }
                                     var fallbackItem = new MediaItem
                                     {
                                         MatchKey = matchKey,
@@ -251,7 +268,7 @@ public class MediaController : ControllerBase
                                         SourceKind = "jellyfin",
                                         Overview = overview
                                     };
-                                    return Ok(new { item = fallbackItem, credits = new List<object>() });
+                                    return Ok(new { item = fallbackItem, credits = fallbackCredits });
                                 }
                             }
                         }

@@ -1,6 +1,11 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
 @page "/media"
+@page "/media/movies"
+@page "/media/tvshows"
+@page "/media/music"
+@page "/media/musicvideos"
+@page "/media/news"
 @rendermode RenderMode.InteractiveServer
 @implements IDisposable
 @inject HttpClient Http
@@ -85,7 +90,20 @@ else
         _ => "movie"
     };
 
-    protected override async Task OnInitializedAsync() => await LoadTab();
+    protected override async Task OnInitializedAsync()
+    {
+        var path = new Uri(Nav.Uri).AbsolutePath.TrimEnd('/').ToLowerInvariant();
+        activeTab = path switch
+        {
+            "/media/movies" => "Movies",
+            "/media/tvshows" => "TV Shows",
+            "/media/music" => "Music",
+            "/media/musicvideos" => "Music Videos",
+            "/media/news" => "News",
+            _ => "Movies"
+        };
+        await LoadTab();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -113,9 +131,16 @@ else
 
     private async Task SwitchTab(string tab)
     {
-        activeTab = tab;
-        offset = 0;
-        await LoadTab();
+        var url = tab switch
+        {
+            "Movies" => "/media/movies",
+            "TV Shows" => "/media/tvshows",
+            "Music" => "/media/music",
+            "Music Videos" => "/media/musicvideos",
+            "News" => "/media/news",
+            _ => "/media/movies"
+        };
+        Nav.NavigateTo(url, forceLoad: true);
     }
 
     private async Task LoadTab()

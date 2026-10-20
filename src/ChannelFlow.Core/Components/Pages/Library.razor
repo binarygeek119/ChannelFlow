@@ -29,9 +29,17 @@
             <input @bind="newName" placeholder="Name" style="width:150px;" />
             <select @bind="newKind">
                 <option value="jellyfin">Jellyfin</option>
+                <option value="pasttense">Past Tense News</option>
             </select>
-            <input @bind="newUrl" placeholder="Server URL" style="width:250px;" />
-            <input @bind="newApiKey" placeholder="API Key" style="width:180px;" />
+            @if (newKind == "jellyfin")
+            {
+                <input @bind="newUrl" placeholder="Server URL" style="width:250px;" />
+                <input @bind="newApiKey" placeholder="API Key" style="width:180px;" />
+            }
+            else if (newKind == "pasttense")
+            {
+                <input @bind="newPath" placeholder="Path to news folder" style="width:350px;" />
+            }
             <button class="primary" @onclick="CreateConnection" disabled="@creating">@(creating ? "Adding..." : "Add Connection")</button>
         </div>
         @if (!string.IsNullOrEmpty(connMsg)) { <p class="field-note">@connMsg</p> }
@@ -164,6 +172,7 @@ else if (activeTab.StartsWith("conn-"))
     private string newKind = "jellyfin";
     private string newUrl = "";
     private string newApiKey = "";
+    private string newPath = "";
     private bool creating;
     private string? connMsg;
 
@@ -202,7 +211,11 @@ else if (activeTab.StartsWith("conn-"))
         loadingLibs = true;
         try
         {
-            var libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/media/libraries/{c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            List<LibraryDto> libs;
+            if (c.Kind == "pasttense")
+                libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/pasttense/libraries?connectionId={c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+            else
+                libs = await Http.GetFromJsonAsync<List<LibraryDto>>($"api/media/libraries/{c.Id}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
             // Restore saved selections
             var savedLibs = new List<string>();
             try
@@ -249,7 +262,9 @@ else if (activeTab.StartsWith("conn-"))
         connMsg = null;
         try
         {
-            var config = new { url = newUrl, apiKey = newApiKey };
+            object config;
+            if (newKind == "pasttense") config = new { path = newPath };
+            else config = new { url = newUrl, apiKey = newApiKey };
             var configJson = System.Text.Json.JsonSerializer.Serialize(config);
             var res = await Http.PostAsJsonAsync("api/connections", new { Name = newName, Kind = newKind, ConfigJson = configJson });
             if (res.IsSuccessStatusCode)
@@ -282,9 +297,19 @@ else if (activeTab.StartsWith("conn-"))
         testResult = null;
         try
         {
-            var res = await Http.PostAsJsonAsync("api/media/test-jellyfin", new { Url = syncUrl, ApiKey = syncApiKey });
-            var body = await res.Content.ReadAsStringAsync();
-            testResult = res.IsSuccessStatusCode ? "OK: " + body : "Error: " + body;
+            if (selectedConn?.Kind == "pasttense")
+            {
+                var path = selectedConn.ConfigJson.Contains("path") ? System.Text.Json.JsonDocument.Parse(selectedConn.ConfigJson).RootElement.GetProperty("path").GetString() : "";
+                var res = await Http.PostAsJsonAsync("api/pasttense/test", new Dictionary<string, string> { ["path"] = path ?? "" });
+                var body = await res.Content.ReadAsStringAsync();
+                testResult = res.IsSuccessStatusCode ? "OK: " + body : "Error: " + body;
+            }
+            else
+            {
+                var res = await Http.PostAsJsonAsync("api/media/test-jellyfin", new { Url = syncUrl, ApiKey = syncApiKey });
+                var body = await res.Content.ReadAsStringAsync();
+                testResult = res.IsSuccessStatusCode ? "OK: " + body : "Error: " + body;
+            }
         }
         catch (Exception e) { testResult = "Error: " + e.Message; }
         testing = false;
@@ -330,19 +355,38 @@ else if (activeTab.StartsWith("conn-"))
             StateHasChanged();
             await Task.Delay(300);
             var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
-            syncStage = "Starting staged sync...";
-            syncPopupMsg = "Syncing in stages: movies, TV, music, music videos, posters, people...";
-            StateHasChanged();
-            var res = await Http.PostAsJsonAsync("api/media/sync-staged", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
-            var body = await res.Content.ReadAsStringAsync();
-            syncPopupOk = res.IsSuccessStatusCode;
-            syncStage = "Finalizing...";
-            StateHasChanged();
-            syncResult = body;
-            syncPopupMsg = res.IsSuccessStatusCode ? "Sync complete." : "Sync failed: " + body;
-            StateHasChanged();
-            syncPopupMsg = syncResult;
-            syncPopupOk = res.IsSuccessStatusCode;
+            if (selectedConn.Kind == "pasttense")
+            {
+                syncStage = "Syncing Past Tense News...";
+                syncPopupMsg = "Scanning news folder...";
+                StateHasChanged();
+                var res = await Http.PostAsJsonAsync("api/pasttense/sync", new { ConnectionId = selectedConn.Id });
+                var body = await res.Content.ReadAsStringAsync();
+                syncPopupOk = res.IsSuccessStatusCode;
+                syncStage = "Finalizing...";
+                StateHasChanged();
+                syncResult = body;
+                syncPopupMsg = res.IsSuccessStatusCode ? "Sync complete." : "Sync failed: " + body;
+                StateHasChanged();
+                syncPopupMsg = syncResult;
+                syncPopupOk = res.IsSuccessStatusCode;
+            }
+            else
+            {
+                syncStage = "Starting staged sync...";
+                syncPopupMsg = "Syncing in stages: movies, TV, music, music videos, posters, people...";
+                StateHasChanged();
+                var res = await Http.PostAsJsonAsync("api/media/sync-staged", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
+                var body = await res.Content.ReadAsStringAsync();
+                syncPopupOk = res.IsSuccessStatusCode;
+                syncStage = "Finalizing...";
+                StateHasChanged();
+                syncResult = body;
+                syncPopupMsg = res.IsSuccessStatusCode ? "Sync complete." : "Sync failed: " + body;
+                StateHasChanged();
+                syncPopupMsg = syncResult;
+                syncPopupOk = res.IsSuccessStatusCode;
+            }
             syncDone = true;
             StateHasChanged();
             syncPopupTimer?.Dispose();

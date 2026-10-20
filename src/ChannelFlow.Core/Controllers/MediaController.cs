@@ -111,6 +111,74 @@ public class MediaController : ControllerBase
         return Ok(reports);
     }
 
+    [HttpPost("sync-staged")]
+    public async Task<IActionResult> SyncStaged([FromBody] SyncLibrariesRequest req)
+    {
+        var connection = await _db.Connections.FindAsync(req.ConnectionId);
+        if (connection is null) return NotFound("connection not found");
+        Dictionary<string, string> config;
+        try { config = JsonSerializer.Deserialize<Dictionary<string, string>>(connection.ConfigJson) ?? new(); }
+        catch { config = new(); }
+        var plugin = _pm.Get("com.channelflow.jellyfin");
+        if (plugin?.MediaSource is null) return BadRequest("jellyfin plugin not loaded");
+        var conn = new SdkConnection(connection.Id.ToString(), connection.Kind, config);
+        var apiKey = config.TryGetValue("apiKey", out var ak) ? ak : "";
+
+        var taskKey = $"jellyfin.staged.{connection.Id}";
+        _tasks.Report(taskKey, "Jellyfin Staged Sync", "Starting", 0, 6, "running");
+
+        var reports = new List<object>();
+        // Group libraries by media type order
+        var typeOrder = new[] { "movie", "series", "album", "musicvideo" };
+        var libsByType = new Dictionary<string, List<string>>();
+        foreach (var libId in req.LibraryIds)
+        {
+            var mt = req.MediaTypes?.TryGetValue(libId, out var m) == true ? m : "movie";
+            if (!libsByType.ContainsKey(mt)) libsByType[mt] = new();
+            libsByType[mt].Add(libId);
+        }
+
+        int stage = 0;
+        foreach (var mt in typeOrder)
+        {
+            if (!libsByType.ContainsKey(mt) || libsByType[mt].Count == 0) continue;
+            stage++;
+            var typeName = mt switch { "movie" => "Movies", "series" => "TV Shows", "album" => "Music", "musicvideo" => "Music Videos", _ => mt };
+            _tasks.Report(taskKey, "Jellyfin Staged Sync", $"Stage {stage}: {typeName}", stage, 6, "running");
+            foreach (var libId in libsByType[mt])
+            {
+                var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn, mt);
+                var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
+                reports.Add(new { libraryId = libId, mediaType = mt, report });
+            }
+        }
+
+        // Stage: download posters
+        stage++;
+        _tasks.Report(taskKey, "Jellyfin Staged Sync", "Stage 5: Downloading posters", stage, 6, "running");
+        try
+        {
+            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie");
+            var pr = await plugin.MediaSource.DownloadPostersAsync(ctx);
+            reports.Add(new { stage = "posters", report = pr });
+        }
+        catch (Exception e) { _tasks.Report(taskKey, "Jellyfin Staged Sync", "Poster download failed", stage, 6, "failed", e.Message); }
+
+        // Stage: download people images
+        stage++;
+        _tasks.Report(taskKey, "Jellyfin Staged Sync", "Stage 6: Downloading people images", stage, 6, "running");
+        try
+        {
+            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie");
+            var pr = await plugin.MediaSource.DownloadPeopleImagesAsync(ctx);
+            reports.Add(new { stage = "people", report = pr });
+        }
+        catch (Exception e) { _tasks.Report(taskKey, "Jellyfin Staged Sync", "People image download failed", stage, 6, "failed", e.Message); }
+
+        _tasks.Report(taskKey, "Jellyfin Staged Sync", "Complete", 6, 6, "done");
+        return Ok(reports);
+    }
+
     [HttpGet("{*matchKey}")]
     public async Task<IActionResult> Get(string matchKey)
     {

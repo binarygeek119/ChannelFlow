@@ -141,11 +141,7 @@ public class JellyfinMediaSource : IMediaSource
                     string? posterUrl = null;
                     if (it.TryGetProperty("ImageTags", out var imgTags) && imgTags.ValueKind == JsonValueKind.Object && imgTags.TryGetProperty("Primary", out _))
                     {
-                        var imageUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
-                        var destDir = Path.Combine(GetImagesDir(), "posters");
-                        var destPath = Path.Combine(destDir, $"{Sanitize(id)}.jpg");
-                        var local = await DownloadImageAsync(c, imageUrl, destPath, "/images/posters");
-                        posterUrl = local ?? imageUrl;
+                        posterUrl = $"{url}/Items/{id}/Images/Primary?maxHeight=300&quality=90";
                     }
                     var webUrl = $"{url}/web/index.html#!/details?id={id}";
                     items.Add(new MediaItemDto(
@@ -195,11 +191,7 @@ public class JellyfinMediaSource : IMediaSource
                             else if (person.TryGetProperty("PrimaryImageTag", out var ptag) && ptag.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(ptag.GetString())) hasImage = true;
                             if (hasImage)
                             {
-                                var imageUrl = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
-                                var destDir = Path.Combine(GetImagesDir(), "people");
-                                var destPath = Path.Combine(destDir, $"{Sanitize(personId)}.jpg");
-                                var local = await DownloadImageAsync(c, imageUrl, destPath, "/images/people");
-                                imagePath = local ?? imageUrl;
+                                imagePath = $"{url}/Items/{personId}/Images/Primary?maxHeight=200&quality=90";
                             }
                         }
                         allPeople.Add(new PersonDto(Guid.Empty, personName, imagePath));
@@ -224,6 +216,79 @@ public class JellyfinMediaSource : IMediaSource
         }
         catch (Exception e) { errors.Add(e.Message); }
         return new SyncReport(added, 0, 0, errors);
+    }
+
+    public async Task<SyncReport> DownloadPostersAsync(SyncContext ctx)
+    {
+        var conn = ctx.Connection;
+        if (conn is null) return new SyncReport(0, 0, 0, new List<string> { "No connection" });
+        var url = conn.Config.TryGetValue("url", out var u) ? u.TrimEnd('/') : "";
+        var apiKey = ctx.ApiKey;
+        using var c = Client(apiKey);
+        int done = 0;
+        var errors = new List<string>();
+        try
+        {
+            var all = await ctx.Core.GetAllMediaItemsAsync(ctx.ConnectionId);
+            var toUpdate = new List<MediaItemDto>();
+            foreach (var item in all)
+            {
+                if (string.IsNullOrEmpty(item.PosterUrl) || !item.PosterUrl.StartsWith("http")) continue;
+                var id = item.MatchKey.StartsWith("jellyfin:") ? item.MatchKey.Substring("jellyfin:".Length) : null;
+                if (string.IsNullOrEmpty(id)) continue;
+                var destPath = Path.Combine(GetImagesDir(), "posters", $"{Sanitize(id)}.jpg");
+                var local = await DownloadImageAsync(c, item.PosterUrl, destPath, "/images/posters");
+                if (local is not null)
+                {
+                    var updated = item with { PosterUrl = local };
+                    toUpdate.Add(updated);
+                    done++;
+                }
+            }
+            if (toUpdate.Count > 0) await ctx.Core.UpsertMediaItemsAsync(toUpdate);
+        }
+        catch (Exception e) { errors.Add(e.Message); }
+        return new SyncReport(done, 0, 0, errors);
+    }
+
+    public async Task<SyncReport> DownloadPeopleImagesAsync(SyncContext ctx)
+    {
+        var conn = ctx.Connection;
+        if (conn is null) return new SyncReport(0, 0, 0, new List<string> { "No connection" });
+        var url = conn.Config.TryGetValue("url", out var u) ? u.TrimEnd('/') : "";
+        var apiKey = ctx.ApiKey;
+        using var c = Client(apiKey);
+        int done = 0;
+        var errors = new List<string>();
+        try
+        {
+            var all = await ctx.Core.GetAllPeopleAsync();
+            var toUpdate = new List<PersonDto>();
+            foreach (var person in all)
+            {
+                if (string.IsNullOrEmpty(person.ImagePath) || !person.ImagePath.StartsWith("http")) continue;
+                // person name isn't an id; we need the jellyfin id. The ImagePath URL contains the id.
+                // Extract id from URL: .../Items/{id}/Images/Primary...
+                var imgPath = person.ImagePath;
+                var marker = "/Items/";
+                var idx = imgPath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) continue;
+                var rest = imgPath.Substring(idx + marker.Length);
+                var slash = rest.IndexOf('/');
+                var id = slash > 0 ? rest.Substring(0, slash) : rest;
+                if (string.IsNullOrEmpty(id)) continue;
+                var destPath = Path.Combine(GetImagesDir(), "people", $"{Sanitize(id)}.jpg");
+                var local = await DownloadImageAsync(c, imgPath, destPath, "/images/people");
+                if (local is not null)
+                {
+                    toUpdate.Add(person with { ImagePath = local });
+                    done++;
+                }
+            }
+            if (toUpdate.Count > 0) await ctx.Core.UpsertPeopleAsync(toUpdate);
+        }
+        catch (Exception e) { errors.Add(e.Message); }
+        return new SyncReport(done, 0, 0, errors);
     }
 
     static string GetImagesDir()

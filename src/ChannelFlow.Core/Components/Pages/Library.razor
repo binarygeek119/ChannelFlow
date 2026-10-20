@@ -330,27 +330,19 @@ else if (activeTab.StartsWith("conn-"))
             StateHasChanged();
             await Task.Delay(300);
             var selectedTypes = libraries.Where(l => l.Selected).ToDictionary(l => l.Id, l => l.MediaTypeStr);
-            var total = selected.Count;
-            var results = new List<string>();
-            for (int i = 0; i < selected.Count; i++)
-            {
-                var libId = selected[i];
-                var libName = libraries.FirstOrDefault(l => l.Id == libId)?.Name ?? libId;
-                syncStage = $"Syncing {i + 1} of {total}: {libName}";
-                syncPopupMsg = $"Syncing {i + 1} of {total}: {libName}";
-                StateHasChanged();
-                var res = await Http.PostAsJsonAsync("api/media/sync-jellyfin", new { Url = syncUrl, ApiKey = syncApiKey, LibraryId = libId });
-                var body = await res.Content.ReadAsStringAsync();
-                results.Add($"{libName}: {body}");
-                syncPopupOk = res.IsSuccessStatusCode;
-            }
+            syncStage = "Starting staged sync...";
+            syncPopupMsg = "Syncing in stages: movies, TV, music, music videos, posters, people...";
+            StateHasChanged();
+            var res = await Http.PostAsJsonAsync("api/media/sync-staged", new { ConnectionId = selectedConn.Id, LibraryIds = selected, MediaTypes = selectedTypes });
+            var body = await res.Content.ReadAsStringAsync();
+            syncPopupOk = res.IsSuccessStatusCode;
             syncStage = "Finalizing...";
             StateHasChanged();
-            syncResult = string.Join("\n", results);
-            syncPopupMsg = $"Synced {total} libraries.";
+            syncResult = body;
+            syncPopupMsg = res.IsSuccessStatusCode ? "Sync complete." : "Sync failed: " + body;
             StateHasChanged();
             syncPopupMsg = syncResult;
-            syncPopupOk = true;
+            syncPopupOk = res.IsSuccessStatusCode;
             syncDone = true;
             StateHasChanged();
             syncPopupTimer?.Dispose();

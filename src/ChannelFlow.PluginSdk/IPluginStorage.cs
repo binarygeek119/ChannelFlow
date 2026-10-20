@@ -33,6 +33,8 @@ public interface ICoreData
     Task UpsertMediaItemsAsync(List<MediaItemDto> Items);
     Task RemoveMediaItemsAsync(string ConnectionId, string LibraryId);
     Task<List<PersonCreditDto>> GetCreditsForMediaAsync(string MediaMatchKey);
+    Task<List<MediaItemDto>> GetAllMediaItemsAsync(string? ConnectionId = null);
+    Task<List<PersonDto>> GetAllPeopleAsync();
     Task<string?> SaveImageAsync(string Category, string Id, string SourceUrl, string? ApiKey = null);
     Task<PersonCreditDto> AddCreditAsync(PersonCreditDto Credit);
     Task RemoveCreditAsync(Guid CreditId);

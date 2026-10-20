@@ -53,6 +53,24 @@ public class EfCoreData : ICoreData
         }
     }
 
+    public async Task<List<MediaItemDto>> GetAllMediaItemsAsync(string? connectionId = null)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var q = db.MediaItems.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(connectionId)) q = q.Where(m => m.ConnectionId == connectionId);
+        var rows = await q.ToListAsync();
+        return rows.Select(m => new MediaItemDto(m.MatchKey, m.Kind, m.Title, m.Year, m.RuntimeMs, m.Genres, m.OfficialRating, m.Tags, m.ConnectionId, m.LibraryId, m.PosterUrl, m.WebUrl, m.SourceKind, m.Overview, m.SeriesName, m.SeriesId, m.SeasonName, m.SeasonId)).ToList();
+    }
+
+    public async Task<List<PersonDto>> GetAllPeopleAsync()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
+        var rows = await db.People.AsNoTracking().ToListAsync();
+        return rows.Select(p => new PersonDto(p.Id, p.Name, p.ImagePath)).ToList();
+    }
+
     public async Task<List<CoreChannel>> ChannelsAsync()
     {
         using var scope = _sp.CreateScope();

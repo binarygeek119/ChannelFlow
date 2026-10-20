@@ -10,6 +10,8 @@ public interface IMediaSource
     Task<TestResult> TestConnectionAsync(Connection Connection, string ApiKey);
     Task<List<Library>> ListLibrariesAsync(Connection Connection, string ApiKey);
     Task<SyncReport> SyncLibraryAsync(SyncContext Context);
+    Task<SyncReport> DownloadPostersAsync(SyncContext Context);
+    Task<SyncReport> DownloadPeopleImagesAsync(SyncContext Context);
 }
 
 public record FieldSpec(string Kind, string Name, string Label, bool Required = false, string? Default = null)

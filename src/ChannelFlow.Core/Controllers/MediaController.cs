@@ -185,7 +185,82 @@ public class MediaController : ControllerBase
         using var scope = HttpContext.RequestServices.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ChannelFlowDbContext>();
         var item = await db.MediaItems.AsNoTracking().FirstOrDefaultAsync(m => m.MatchKey == matchKey);
-        if (item is null) return NotFound();
+        if (item is null)
+        {
+            // Fallback: fetch from Jellyfin if not in catalog
+            if (matchKey.StartsWith("jellyfin:"))
+            {
+                var jid = matchKey.Substring("jellyfin:".Length);
+                // Find a jellyfin connection
+                var conn = await db.Connections.FirstOrDefaultAsync(c => c.Kind == "jellyfin");
+                if (conn is not null)
+                {
+                    Dictionary<string, string> config;
+                    try { config = JsonSerializer.Deserialize<Dictionary<string, string>>(conn.ConfigJson) ?? new(); }
+                    catch { config = new(); }
+                    var url = config.TryGetValue("url", out var u) ? u.TrimEnd('/') : "";
+                    var apiKey = config.TryGetValue("apiKey", out var ak) ? ak : "";
+                    if (!string.IsNullOrEmpty(url))
+                    {
+                        try
+                        {
+                            using var http = new HttpClient();
+                            http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("MediaBrowser", $"Token=\"{apiKey}\"");
+                            // Resolve userId
+                            string? userId = null;
+                            var usersRes = await http.GetAsync($"{url}/Users");
+                            if (usersRes.IsSuccessStatusCode)
+                            {
+                                var ujson = await usersRes.Content.ReadAsStringAsync();
+                                using var udoc = System.Text.Json.JsonDocument.Parse(ujson);
+                                if (udoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array && udoc.RootElement.GetArrayLength() > 0)
+                                    userId = udoc.RootElement[0].TryGetProperty("Id", out var uid) ? uid.GetString() : null;
+                            }
+                            if (!string.IsNullOrEmpty(userId))
+                            {
+                                var r = await http.GetAsync($"{url}/Users/{userId}/Items/{jid}");
+                                if (r.IsSuccessStatusCode)
+                                {
+                                    var json = await r.Content.ReadAsStringAsync();
+                                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                                    var name = doc.RootElement.TryGetProperty("Name", out var n) ? n.GetString() : jid;
+                                    int? year = doc.RootElement.TryGetProperty("ProductionYear", out var py) && py.ValueKind == System.Text.Json.JsonValueKind.Number ? py.GetInt32() : null;
+                                    string? overview = doc.RootElement.TryGetProperty("Overview", out var ov) ? ov.GetString() : null;
+                                    List<string> genres = new();
+                                    if (doc.RootElement.TryGetProperty("Genres", out var g) && g.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                        foreach (var gg in g.EnumerateArray()) if (gg.GetString() is string gs) genres.Add(gs);
+                                    string? rating = doc.RootElement.TryGetProperty("OfficialRating", out var rr) ? rr.GetString() : null;
+                                    long? runtime = null;
+                                    if (doc.RootElement.TryGetProperty("RunTimeTicks", out var rt) && rt.ValueKind == System.Text.Json.JsonValueKind.Number) runtime = rt.GetInt64() / 10000;
+                                    string? posterUrl = null;
+                                    if (doc.RootElement.TryGetProperty("ImageTags", out var it) && it.ValueKind == System.Text.Json.JsonValueKind.Object && it.TryGetProperty("Primary", out _))
+                                        posterUrl = $"{url}/Items/{jid}/Images/Primary?maxHeight=300&quality=90";
+                                    string? webUrl = $"{url}/web/index.html#!/details?id={jid}";
+                                    var fallbackItem = new MediaItem
+                                    {
+                                        MatchKey = matchKey,
+                                        Kind = "movie",
+                                        Title = name ?? jid,
+                                        Year = year,
+                                        RuntimeMs = runtime,
+                                        Genres = genres,
+                                        OfficialRating = rating,
+                                        Tags = new(),
+                                        PosterUrl = posterUrl,
+                                        WebUrl = webUrl,
+                                        SourceKind = "jellyfin",
+                                        Overview = overview
+                                    };
+                                    return Ok(new { item = fallbackItem, credits = new List<object>() });
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            return NotFound();
+        }
         var credits = await _core.GetCreditsForMediaAsync(matchKey);
         var personIds = credits.Select(c => c.PersonId).Distinct().ToList();
         var people = await db.People.Where(p => personIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id);

@@ -219,7 +219,8 @@ else if (activeTab.StartsWith("conn-"))
     {
         selectedConn = c;
         activeTab = $"conn-{c.Id}";
-        Nav.NavigateTo($"/library/{c.Id}", forceLoad: true);
+        if (!Nav.Uri.EndsWith($"/library/{c.Id}", StringComparison.OrdinalIgnoreCase))
+            Nav.NavigateTo($"/library/{c.Id}", forceLoad: true);
         libraries = new();
         loadingLibs = true;
         try

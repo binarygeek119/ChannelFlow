@@ -8,12 +8,14 @@
 <p class="hint">Media connections and synced libraries. Manage connections, sync libraries, and browse the catalog.</p>
 
 <div class="inner-tabs" style="margin-bottom:1rem;">
-    <button class="inner-tab @(activeTab == "connections" && string.IsNullOrEmpty(filterKind) ? "active" : "")" @onclick='() => { filterKind = ""; activeTab = "connections"; Nav.NavigateTo("/library/connections", forceLoad: true); }'>Connections</button>
-    @foreach (var kind in new[] { "jellyfin", "plex", "emby", "pasttense", "local", "other" })
+    <button class="inner-tab @(activeTab == "connections" ? "active" : "")" @onclick='() => { activeTab = "connections"; selectedConn = null; Nav.NavigateTo("/library/connections", forceLoad: true); }'>Connections</button>
+    @if (connections is not null)
     {
-        var k = kind;
-        var label = k switch { "pasttense" => "News", "local" => "Local", _ => char.ToUpperInvariant(k[0]) + k[1..] };
-        <button class="inner-tab @(filterKind == k ? "active" : "")" @onclick="() => SelectKind(k)">@label</button>
+        @foreach (var c in connections)
+        {
+            var conn = c;
+            <button class="inner-tab @(selectedConn?.Id == conn.Id ? "active" : "")" @onclick="() => SelectConnection(conn)">@(!string.IsNullOrEmpty(conn.Name) ? conn.Name : $"Connection {conn.Id}")</button>
+        }
     }
 </div>
 
@@ -55,7 +57,7 @@
             <table>
                 <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Config</th><th></th></tr></thead>
                 <tbody>
-                @foreach (var c in (string.IsNullOrEmpty(filterKind) ? connections : connections.Where(x => x.Kind.Equals(filterKind, StringComparison.OrdinalIgnoreCase)).ToList()))
+                @foreach (var c in connections)
                 {
                     <tr>
                         <td>@c.Id</td>
@@ -151,7 +153,6 @@ else if (activeTab.StartsWith("conn-"))
     private string activeTab = "connections";
     private List<ConnDto>? connections;
     private ConnDto? selectedConn;
-    private string filterKind = "";
     private List<LibraryDto> libraries = new();
     private bool loadingLibs, syncing, testing, saving;
     private bool showConfirm;
@@ -189,22 +190,17 @@ else if (activeTab.StartsWith("conn-"))
         if (string.IsNullOrEmpty(segment) || segment == "connections")
         {
             activeTab = "connections";
-            filterKind = "";
         }
         else if (int.TryParse(segment, out var ci) && connections is not null)
         {
             var c = connections.FirstOrDefault(x => x.Id == ci);
             if (c is not null) await SelectConnection(c);
         }
-        else
+        else if (connections is not null)
         {
-            activeTab = "connections";
-            filterKind = segment;
-            if (connections is not null)
-            {
-                var ofKind = connections.Where(c => c.Kind.Equals(segment, StringComparison.OrdinalIgnoreCase)).ToList();
-                if (ofKind.Count == 1) await SelectConnection(ofKind[0]);
-            }
+            // kind-based: filter/show connections of that kind
+            var ofKind = connections.Where(c => c.Kind.Equals(segment, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (ofKind.Count == 1) await SelectConnection(ofKind[0]);
         }
     }
 
@@ -219,18 +215,11 @@ else if (activeTab.StartsWith("conn-"))
         catch { connections = new(); }
     }
 
-    private void SelectKind(string kind)
-    {
-        filterKind = kind;
-        activeTab = "connections";
-        Nav.NavigateTo("/library/" + kind, forceLoad: true);
-    }
-
     private async Task SelectConnection(ConnDto c)
     {
         selectedConn = c;
         activeTab = $"conn-{c.Id}";
-        filterKind = c.Kind;
+        Nav.NavigateTo($"/library/{c.Id}", forceLoad: true);
         libraries = new();
         loadingLibs = true;
         try

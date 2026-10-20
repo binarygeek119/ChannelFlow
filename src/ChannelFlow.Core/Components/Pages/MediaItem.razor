@@ -102,11 +102,21 @@ else
                     else
                     {
                         <table style="width:100%;border-collapse:collapse;">
-                            <thead><tr><th>Title</th><th>Year</th></tr></thead>
+                            <thead><tr><th style="width:120px;">Thumbnail</th><th>Title</th><th>Year</th></tr></thead>
                             <tbody>
                             @foreach (var ep in FilteredEpisodes)
                             {
                                 <tr>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(ep.PosterUrl))
+                                        {
+                                            <img src="@ep.PosterUrl" alt="@ep.Title" style="width:120px;height:68px;object-fit:cover;border-radius:4px;" onerror="this.src='/images/poster-placeholder.svg'" />
+                                        }
+                                        else
+                                        {
+                                            <img src="/images/poster-placeholder.svg" alt="@ep.Title" style="width:120px;height:68px;object-fit:cover;border-radius:4px;" />
+                                        }
+                                    </td>
                                     <td><a href="/media/item/@Uri.EscapeDataString(ep.MatchKey)" class="link">@ep.Title</a></td>
                                     <td>@ep.Year</td>
                                 </tr>

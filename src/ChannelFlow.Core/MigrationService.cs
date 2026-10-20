@@ -232,6 +232,7 @@ public class MigrationService
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"WebUrl\" TEXT");
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"SourceKind\" TEXT");
             cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"Overview\" TEXT");
+            cmds.Add("ALTER TABLE \"MediaItems\" ADD COLUMN IF NOT EXISTS \"CollectionItems\" text[] NOT NULL DEFAULT '{}'");
         }
         else if (isMariaDb)
         {

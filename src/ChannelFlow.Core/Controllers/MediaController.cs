@@ -147,7 +147,7 @@ public class MediaController : ControllerBase
             _tasks.Report(taskKey, "Jellyfin Staged Sync", $"Stage {stage}: {typeName}", stage, 6, "running");
             foreach (var libId in libsByType[mt])
             {
-                var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn, mt);
+                var ctx = new SyncContext(connection.Id.ToString(), libId, _storage, _logger, _core, apiKey, conn, mt, _tasks, taskKey);
                 var report = await plugin.MediaSource.SyncLibraryAsync(ctx);
                 reports.Add(new { libraryId = libId, mediaType = mt, report });
             }
@@ -158,7 +158,7 @@ public class MediaController : ControllerBase
         _tasks.Report(taskKey, "Jellyfin Staged Sync", "Stage 5: Downloading posters", stage, 6, "running");
         try
         {
-            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie");
+            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie", _tasks, taskKey);
             var pr = await plugin.MediaSource.DownloadPostersAsync(ctx);
             reports.Add(new { stage = "posters", report = pr });
         }
@@ -169,7 +169,7 @@ public class MediaController : ControllerBase
         _tasks.Report(taskKey, "Jellyfin Staged Sync", "Stage 6: Downloading people images", stage, 6, "running");
         try
         {
-            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie");
+            var ctx = new SyncContext(connection.Id.ToString(), req.LibraryIds.FirstOrDefault() ?? "", _storage, _logger, _core, apiKey, conn, "movie", _tasks, taskKey);
             var pr = await plugin.MediaSource.DownloadPeopleImagesAsync(ctx);
             reports.Add(new { stage = "people", report = pr });
         }

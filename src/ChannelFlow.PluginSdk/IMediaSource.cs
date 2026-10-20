@@ -25,7 +25,7 @@ public record Connection(string Id, string Kind, Dictionary<string, string> Conf
 
 public record Library(string Id, string Name, MediaType MediaType);
 
-public record SyncContext(string ConnectionId, string LibraryId, IPluginStorage Storage, IPluginLogger Logger, ICoreData Core, string ApiKey, Connection? Connection = null, string MediaType = "movie");
+public record SyncContext(string ConnectionId, string LibraryId, IPluginStorage Storage, IPluginLogger Logger, ICoreData Core, string ApiKey, Connection? Connection = null, string MediaType = "movie", IPluginTaskHost? Tasks = null, string? TaskKey = null);
 
 public record SyncReport(int ItemsAdded, int ItemsUpdated, int ItemsRemoved, List<string> Errors = default!);
 

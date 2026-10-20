@@ -13,12 +13,12 @@ public class RunningTask
     public DateTime? FinishedAt { get; set; }
 }
 
-public class TaskTracker
+public class TaskTracker : ChannelFlow.PluginSdk.IPluginTaskHost
 {
     private readonly List<RunningTask> _tasks = new();
     private readonly object _lock = new();
 
-    public void Report(string key, string title, string? label, long current, long total, string status = "running", string? detail = null)
+    public void Report(string key, string title, string? label, long? current, long? total, string status = "running", string? detail = null)
     {
         lock (_lock)
         {
@@ -27,15 +27,15 @@ public class TaskTracker
             {
                 existing.Title = title;
                 existing.Label = label;
-                existing.Current = current;
-                existing.Total = total;
+                if (current.HasValue) existing.Current = current.Value;
+                if (total.HasValue) existing.Total = total.Value;
                 existing.Status = status;
                 existing.Detail = detail ?? existing.Detail;
                 if (status != "running") existing.FinishedAt = DateTime.UtcNow;
             }
             else
             {
-                _tasks.Add(new RunningTask { Key = key, Title = title, Label = label, Current = current, Total = total, Status = status, Detail = detail });
+                _tasks.Add(new RunningTask { Key = key, Title = title, Label = label, Current = current ?? 0, Total = total ?? 0, Status = status, Detail = detail });
             }
         }
     }

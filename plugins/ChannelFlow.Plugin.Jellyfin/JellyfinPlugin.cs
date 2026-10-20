@@ -105,10 +105,15 @@ public class JellyfinMediaSource : IMediaSource
             var json = await res.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
             var items = new List<MediaItemDto>();
+            int totalItems = 0, processed = 0;
             if (doc.RootElement.TryGetProperty("Items", out var arr))
             {
+                totalItems = arr.GetArrayLength();
                 foreach (var it in arr.EnumerateArray())
                 {
+                    if (ctx.Tasks is not null && !string.IsNullOrEmpty(ctx.TaskKey))
+                        ctx.Tasks.Report(ctx.TaskKey, $"Syncing {ctx.MediaType}", $"{processed} of {totalItems}", processed, totalItems, "running");
+                    processed++;
                     var id = it.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : (it.TryGetProperty("id", out var idProp2) ? idProp2.GetString() ?? "" : "");
                     var name = it.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? id : (it.TryGetProperty("name", out var nameProp2) ? nameProp2.GetString() ?? id : id);
                     var type = it.TryGetProperty("Type", out var t) ? t.GetString() : "Movie";
@@ -231,8 +236,12 @@ public class JellyfinMediaSource : IMediaSource
         {
             var all = await ctx.Core.GetAllMediaItemsAsync(ctx.ConnectionId);
             var toUpdate = new List<MediaItemDto>();
+            int pTotal = all.Count, pDone = 0;
             foreach (var item in all)
             {
+                pDone++;
+                if (ctx.Tasks is not null && !string.IsNullOrEmpty(ctx.TaskKey))
+                    ctx.Tasks.Report(ctx.TaskKey, "Downloading posters", $"{pDone} of {pTotal}", pDone, pTotal, "running");
                 if (string.IsNullOrEmpty(item.PosterUrl) || !item.PosterUrl.StartsWith("http")) continue;
                 var id = item.MatchKey.StartsWith("jellyfin:") ? item.MatchKey.Substring("jellyfin:".Length) : null;
                 if (string.IsNullOrEmpty(id)) continue;
@@ -264,8 +273,12 @@ public class JellyfinMediaSource : IMediaSource
         {
             var all = await ctx.Core.GetAllPeopleAsync();
             var toUpdate = new List<PersonDto>();
+            int pTotal = all.Count, pDone = 0;
             foreach (var person in all)
             {
+                pDone++;
+                if (ctx.Tasks is not null && !string.IsNullOrEmpty(ctx.TaskKey))
+                    ctx.Tasks.Report(ctx.TaskKey, "Downloading people images", $"{pDone} of {pTotal}", pDone, pTotal, "running");
                 if (string.IsNullOrEmpty(person.ImagePath) || !person.ImagePath.StartsWith("http")) continue;
                 // person name isn't an id; we need the jellyfin id. The ImagePath URL contains the id.
                 // Extract id from URL: .../Items/{id}/Images/Primary...
